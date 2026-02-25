@@ -9,6 +9,7 @@ import {
 } from "@/lib/assignments";
 import { getQuestions } from "@/lib/content";
 import { addAttempt } from "@/lib/progress";
+import { syncMasteryFromAttempts } from "@/lib/mastery";
 import { getAssignmentUploads } from "@/lib/assignment-uploads";
 import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
@@ -120,6 +121,8 @@ export const POST = withApi(async (request, context) => {
         explanation: question.explanation
       });
     }
+
+    await syncMasteryFromAttempts(user.id);
   }
 
   const total = isUpload || isEssay ? null : items.length;

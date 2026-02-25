@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { getCurrentUser } from "@/lib/auth";
 import { getKnowledgePoints, getQuestions } from "@/lib/content";
 import { addAttempt, generateStudyPlan } from "@/lib/progress";
+import { syncMasteryFromAttempts } from "@/lib/mastery";
 import { badRequest, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 export const dynamic = "force-dynamic";
@@ -74,6 +75,7 @@ export const POST = withApi(async (request) => {
     });
   }
 
+  await syncMasteryFromAttempts(user.id, body.subject);
   const plan = await generateStudyPlan(user.id, body.subject);
 
   return {

@@ -73,6 +73,22 @@ CREATE TABLE IF NOT EXISTS question_attempts (
   created_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS mastery_records (
+  id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+  subject TEXT NOT NULL,
+  knowledge_point_id TEXT NOT NULL,
+  correct_count INT NOT NULL DEFAULT 0,
+  total_count INT NOT NULL DEFAULT 0,
+  mastery_score INT NOT NULL DEFAULT 0,
+  last_attempt_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (user_id, knowledge_point_id)
+);
+
+CREATE INDEX IF NOT EXISTS mastery_records_user_idx ON mastery_records (user_id);
+CREATE INDEX IF NOT EXISTS mastery_records_subject_idx ON mastery_records (subject);
+
 CREATE TABLE IF NOT EXISTS study_plans (
   id TEXT PRIMARY KEY,
   user_id TEXT REFERENCES users(id) ON DELETE CASCADE,

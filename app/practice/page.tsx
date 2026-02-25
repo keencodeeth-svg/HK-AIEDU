@@ -44,7 +44,13 @@ export default function PracticePage() {
   const [mode, setMode] = useState<"normal" | "challenge" | "timed" | "wrong" | "adaptive" | "review">("normal");
   const [question, setQuestion] = useState<Question | null>(null);
   const [answer, setAnswer] = useState("");
-  const [result, setResult] = useState<{ correct: boolean; explanation: string; answer: string } | null>(null);
+  const [result, setResult] = useState<{
+    correct: boolean;
+    explanation: string;
+    answer: string;
+    masteryScore?: number;
+    masteryDelta?: number;
+  } | null>(null);
   const [challengeCount, setChallengeCount] = useState(0);
   const [challengeCorrect, setChallengeCorrect] = useState(0);
   const [timeLeft, setTimeLeft] = useState(0);
@@ -144,7 +150,13 @@ export default function PracticePage() {
       }
 
       setError(null);
-      setResult({ correct: data.correct, explanation: data.explanation, answer: data.answer });
+      setResult({
+        correct: data.correct,
+        explanation: data.explanation,
+        answer: data.answer,
+        masteryScore: data.masteryScore,
+        masteryDelta: data.masteryDelta
+      });
       trackEvent({
         eventName: "practice_submit_success",
         page: "/practice",
@@ -457,6 +469,14 @@ export default function PracticePage() {
               ? explainPack[explainMode]
               : result.explanation}
           </div>
+          {typeof result.masteryScore === "number" ? (
+            <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-1)" }}>
+              当前知识点掌握分：{result.masteryScore}
+              {typeof result.masteryDelta === "number"
+                ? `（${result.masteryDelta >= 0 ? "+" : ""}${result.masteryDelta}）`
+                : ""}
+            </div>
+          ) : null}
           {explainPack?.provider ? (
             <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-1)" }}>
               解析来源：{explainPack.provider}

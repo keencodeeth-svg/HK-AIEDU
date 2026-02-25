@@ -11,6 +11,8 @@ type PlanItem = {
   targetCount: number;
   dueDate: string;
   subject?: string;
+  masteryScore?: number;
+  masteryLevel?: "weak" | "developing" | "strong";
 };
 
 export default function StudentPage() {
@@ -86,6 +88,7 @@ export default function StudentPage() {
               <li key={item.knowledgePointId}>
                 {item.subject ? `【${SUBJECT_LABELS[item.subject] ?? item.subject}】` : ""}练习 {item.targetCount} 题，截止{" "}
                 {new Date(item.dueDate).toLocaleDateString("zh-CN")}
+                {typeof item.masteryScore === "number" ? `，当前掌握 ${item.masteryScore} 分` : ""}
               </li>
             ))}
           </ul>

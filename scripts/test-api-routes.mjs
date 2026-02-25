@@ -225,6 +225,51 @@ async function run() {
     assert.equal(studentFunnel.status, 401, "Student should not access /api/analytics/funnel");
     assert.equal(studentFunnel.body?.error, "unauthorized");
 
+    const practiceNext = await apiFetch("/api/practice/next", {
+      method: "POST",
+      json: { subject: "math", grade: "4" }
+    });
+    assert.equal(practiceNext.status, 200, `POST /api/practice/next failed: ${practiceNext.raw}`);
+    assert.ok(practiceNext.body?.question?.id, "Practice next should return question.id");
+
+    const practiceSubmit = await apiFetch("/api/practice/submit", {
+      method: "POST",
+      json: {
+        questionId: practiceNext.body.question.id,
+        answer: practiceNext.body.question.options?.[0] ?? "A"
+      }
+    });
+    assert.equal(practiceSubmit.status, 200, `POST /api/practice/submit failed: ${practiceSubmit.raw}`);
+    assert.equal(typeof practiceSubmit.body?.masteryScore, "number", "Practice submit should return masteryScore");
+    assert.equal(typeof practiceSubmit.body?.masteryDelta, "number", "Practice submit should return masteryDelta");
+    assert.equal(
+      practiceSubmit.body?.knowledgePointId,
+      practiceNext.body?.question?.knowledgePointId,
+      "Practice submit should return knowledgePointId"
+    );
+    assert.ok(practiceSubmit.body?.mastery && typeof practiceSubmit.body.mastery === "object");
+
+    const studentPlan = await apiFetch("/api/plan?subject=math");
+    assert.equal(studentPlan.status, 200, `GET /api/plan failed: ${studentPlan.raw}`);
+    const planItems = studentPlan.body?.data?.items ?? studentPlan.body?.items ?? [];
+    assert.ok(Array.isArray(planItems), "Plan response should include items");
+    if (planItems.length > 0) {
+      assert.equal(typeof planItems[0]?.masteryScore, "number", "Plan item should include masteryScore");
+    }
+
+    const studentRadar = await apiFetch("/api/student/radar");
+    assert.equal(studentRadar.status, 200, `GET /api/student/radar failed: ${studentRadar.raw}`);
+    assert.ok(Array.isArray(studentRadar.body?.data?.abilities), "Radar response should include abilities");
+    assert.equal(
+      typeof studentRadar.body?.data?.mastery?.averageMasteryScore,
+      "number",
+      "Radar response should include mastery.averageMasteryScore"
+    );
+    assert.ok(
+      Array.isArray(studentRadar.body?.data?.mastery?.weakKnowledgePoints),
+      "Radar response should include mastery.weakKnowledgePoints"
+    );
+
     const adminEmail = process.env.API_TEST_ADMIN_EMAIL || "admin@demo.com";
     const adminPassword = process.env.API_TEST_ADMIN_PASSWORD || "Admin123";
     const adminLogin = await apiFetch("/api/auth/login", {

@@ -1,6 +1,7 @@
 import Card from "@/components/Card";
 import { getCurrentUser } from "@/lib/auth";
 import { generateStudyPlans, getStudyPlans } from "@/lib/progress";
+import { getMasteryRecordsByUser, indexMasteryByKnowledgePoint } from "@/lib/mastery";
 import { getKnowledgePoints } from "@/lib/content";
 import { getStudentProfile } from "@/lib/profiles";
 
@@ -20,6 +21,8 @@ export default async function PlanPage() {
   const subjects = profile?.subjects?.length ? profile.subjects : ["math"];
   const plans = await getStudyPlans(user.id, subjects);
   const finalPlans = plans.length ? plans : await generateStudyPlans(user.id, subjects);
+  const masteryRecords = await getMasteryRecordsByUser(user.id);
+  const masteryMap = indexMasteryByKnowledgePoint(masteryRecords);
   const knowledgePoints = await getKnowledgePoints();
   const labelMap: Record<string, string> = {
     math: "数学",
@@ -52,10 +55,12 @@ export default async function PlanPage() {
               <div className="grid" style={{ gap: 8, marginTop: 8 }}>
                 {plan.items.map((item) => {
                   const kp = knowledgePoints.find((k) => k.id === item.knowledgePointId);
+                  const mastery = masteryMap.get(item.knowledgePointId);
                   return (
                     <div key={item.knowledgePointId}>
                       {kp?.title ?? "知识点"} · 目标 {item.targetCount} 题 · 截止{" "}
                       {new Date(item.dueDate).toLocaleDateString("zh-CN")}
+                      {mastery ? ` · 掌握 ${mastery.masteryScore} 分` : ""}
                     </div>
                   );
                 })}

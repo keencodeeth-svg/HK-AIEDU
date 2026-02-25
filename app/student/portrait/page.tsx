@@ -12,6 +12,21 @@ type AbilityStat = {
   score: number;
 };
 
+type MasterySummary = {
+  averageMasteryScore: number;
+  trackedKnowledgePoints: number;
+  weakKnowledgePoints: {
+    knowledgePointId: string;
+    title: string;
+    subject: string;
+    masteryScore: number;
+    masteryLevel: "weak" | "developing" | "strong";
+    correct: number;
+    total: number;
+    lastAttemptAt: string | null;
+  }[];
+};
+
 function buildPolygonPoints(stats: AbilityStat[], radius: number, center: number) {
   const count = stats.length;
   if (!count) return "";
@@ -39,11 +54,15 @@ function buildGridPoints(count: number, radius: number, center: number) {
 
 export default function PortraitPage() {
   const [abilities, setAbilities] = useState<AbilityStat[]>([]);
+  const [mastery, setMastery] = useState<MasterySummary | null>(null);
 
   useEffect(() => {
     fetch("/api/student/radar")
       .then((res) => res.json())
-      .then((data) => setAbilities(data?.data?.abilities ?? []));
+      .then((data) => {
+        setAbilities(data?.data?.abilities ?? []);
+        setMastery(data?.data?.mastery ?? null);
+      });
   }, []);
 
   const normalized = abilities;
@@ -113,6 +132,35 @@ export default function PortraitPage() {
           </div>
         ) : (
           <p>暂无学习数据，先完成练习或诊断测评。</p>
+        )}
+      </Card>
+
+      <Card title="知识点掌握度" tag="mastery">
+        <div className="grid grid-2">
+          <div className="card">
+            <div className="section-title">平均掌握分</div>
+            <div style={{ fontSize: 20, fontWeight: 600 }}>{mastery?.averageMasteryScore ?? 0} 分</div>
+          </div>
+          <div className="card">
+            <div className="section-title">已跟踪知识点</div>
+            <div style={{ fontSize: 20, fontWeight: 600 }}>{mastery?.trackedKnowledgePoints ?? 0}</div>
+          </div>
+        </div>
+
+        {mastery?.weakKnowledgePoints?.length ? (
+          <div className="grid" style={{ gap: 10, marginTop: 12 }}>
+            {mastery.weakKnowledgePoints.map((item) => (
+              <div className="card" key={item.knowledgePointId}>
+                <div className="section-title">{item.title}</div>
+                <div style={{ fontSize: 14, marginTop: 4 }}>掌握分 {item.masteryScore}</div>
+                <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                  正确 {item.correct} / 总计 {item.total}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p style={{ marginTop: 12 }}>暂无知识点掌握数据。</p>
         )}
       </Card>
     </div>
