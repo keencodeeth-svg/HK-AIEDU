@@ -347,7 +347,7 @@ CREATE TABLE IF NOT EXISTS assignment_submissions (
 );
 
 ALTER TABLE assignment_submissions ADD COLUMN IF NOT EXISTS submission_text TEXT;
-ALTER TABLE assignment_rubrics ADD COLUMN IF NOT EXISTS levels JSONB;
+ALTER TABLE IF EXISTS assignment_rubrics ADD COLUMN IF NOT EXISTS levels JSONB;
 
 CREATE TABLE IF NOT EXISTS assignment_uploads (
   id TEXT PRIMARY KEY,
