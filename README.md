@@ -139,10 +139,25 @@ node scripts/seed-bulk.mjs
 3. 进入 Render Shell 或本地执行：
 
 ```
-psql "$DATABASE_URL" -f db/schema.sql
-node scripts/seed-db.mjs
-node scripts/seed-stage3.mjs
+npm run db:init
+npm run seed:base
+npm run seed:stage3
 ```
+
+4. 如需批量演示数据（线上环境推荐）：
+
+```
+SEED_TEACHERS=36 \
+SEED_STUDENTS=432 \
+SEED_PARENTS=180 \
+SEED_CLASSES=36 \
+SEED_ASSIGNMENTS=72 \
+SEED_SUBJECTS="chinese,math,english" \
+SEED_GRADES="1,1,1,2,2,2,3,3,3,4,4,4,5,5,5,6,6,6,7,7,7,8,8,8,9,9,9,10,10,10,11,11,11,12,12,12" \
+npm run seed:bulk
+```
+
+以上参数可生成每个年级每个学科对应班级与教师，并保证每个班级有 12 名学生。
 
 启用数据库后，系统将不再读取 `data/*.json`。
 
