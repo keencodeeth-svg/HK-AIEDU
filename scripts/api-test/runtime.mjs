@@ -7,6 +7,8 @@ export function createRuntime(port) {
   const baseUrl = `http://127.0.0.1:${port}`;
   const cookieJar = new Map();
   let activeServer = null;
+  let activeMode = null;
+  let serverLog = "";
 
   function parseJsonSafely(text) {
     try {
@@ -80,9 +82,20 @@ export function createRuntime(port) {
 
   async function waitForServerReady(timeoutMs = 90000) {
     const start = Date.now();
+    let fallbackAttempted = false;
     while (Date.now() - start < timeoutMs) {
       if (activeServer && activeServer.exitCode !== null) {
-        throw new Error(`Server exited before ready with code ${activeServer.exitCode}`);
+        if (
+          !fallbackAttempted &&
+          activeMode === "start" &&
+          process.env.API_TEST_FALLBACK_TO_DEV !== "0"
+        ) {
+          fallbackAttempted = true;
+          activeMode = "dev";
+          activeServer = spawnServer(activeMode);
+          continue;
+        }
+        throw new Error(`Server exited before ready with code ${activeServer.exitCode} (${activeMode})`);
       }
       try {
         const response = await fetch(`${baseUrl}/api/health`);
@@ -96,38 +109,42 @@ export function createRuntime(port) {
   }
 
   async function stopServer(server) {
-    if (server.exitCode !== null) return;
-    server.kill("SIGTERM");
+    const target = activeServer ?? server;
+    if (!target || target.exitCode !== null) return;
+    target.kill("SIGTERM");
     try {
-      await Promise.race([once(server, "exit"), delay(5000)]);
+      await Promise.race([once(target, "exit"), delay(5000)]);
     } catch {
       // ignore
     }
-    if (server.exitCode === null) {
-      server.kill("SIGKILL");
-      await once(server, "exit");
+    if (target.exitCode === null) {
+      target.kill("SIGKILL");
+      await once(target, "exit");
     }
   }
 
-  function startServer() {
-    const mode = process.env.API_TEST_SERVER_MODE === "start" ? "start" : "dev";
+  function spawnServer(mode) {
     const server = spawn("npm", ["run", mode, "--", "-p", String(port), "-H", "127.0.0.1"], {
       cwd: process.cwd(),
       env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
       stdio: ["ignore", "pipe", "pipe"]
     });
-    activeServer = server;
-
-    let serverLog = "";
     server.stdout.on("data", (chunk) => {
-      serverLog += chunk.toString();
+      serverLog += `[${mode}] ${chunk.toString()}`;
     });
     server.stderr.on("data", (chunk) => {
-      serverLog += chunk.toString();
+      serverLog += `[${mode}] ${chunk.toString()}`;
     });
+    return server;
+  }
+
+  function startServer() {
+    const requestedMode = process.env.API_TEST_SERVER_MODE;
+    activeMode = requestedMode === "start" ? "start" : "dev";
+    activeServer = spawnServer(activeMode);
 
     return {
-      server,
+      server: activeServer,
       getServerLog: () => serverLog
     };
   }
