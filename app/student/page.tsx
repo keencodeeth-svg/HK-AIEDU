@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
+import { trackEvent } from "@/lib/analytics-client";
 
 type PlanItem = {
   knowledgePointId: string;
@@ -12,6 +13,8 @@ type PlanItem = {
   subject?: string;
   masteryScore?: number;
   masteryLevel?: "weak" | "developing" | "strong";
+  weaknessRank?: number | null;
+  recommendedReason?: string;
 };
 
 type TodayTaskStatus = "overdue" | "due_today" | "in_progress" | "pending" | "upcoming" | "optional";
@@ -25,6 +28,11 @@ type TodayTask = {
   href: string;
   status: TodayTaskStatus;
   priority: number;
+  impactScore: number;
+  urgencyScore: number;
+  effortMinutes: number;
+  expectedGain: number;
+  recommendedReason: string;
   dueAt: string | null;
   group: "must_do" | "continue_learning" | "growth";
   tags: string[];
@@ -40,6 +48,7 @@ type TodayTaskPayload = {
     overdue: number;
     dueToday: number;
     inProgress: number;
+    top3EstimatedMinutes: number;
     bySource: {
       assignment: number;
       exam: number;
@@ -53,6 +62,7 @@ type TodayTaskPayload = {
     continueLearning: TodayTask[];
     growth: TodayTask[];
   };
+  topTasks: TodayTask[];
   tasks: TodayTask[];
 };
 
@@ -291,6 +301,7 @@ function getTodayTaskStatusLabel(status: TodayTaskStatus) {
 }
 
 export default function StudentPage() {
+  const trackedTaskExposureRef = useRef<string | null>(null);
   const [plan, setPlan] = useState<PlanItem[]>([]);
   const [motivation, setMotivation] = useState<{ streak: number; badges: any[]; weekly: any } | null>(null);
   const [todayTasks, setTodayTasks] = useState<TodayTaskPayload | null>(null);
@@ -345,10 +356,52 @@ export default function StudentPage() {
 
   const weakPlanCount = useMemo(() => plan.filter((item) => item.masteryLevel === "weak").length, [plan]);
   const todayTaskPreview = useMemo(() => (todayTasks?.tasks ?? []).slice(0, 6), [todayTasks]);
+  const topTodayTasks = useMemo(() => {
+    if (!todayTasks) return [];
+    if (todayTasks.topTasks?.length) return todayTasks.topTasks.slice(0, 3);
+    return todayTasks.tasks.slice(0, 3);
+  }, [todayTasks]);
   const hiddenTodayTaskCount = useMemo(
     () => Math.max(0, (todayTasks?.tasks?.length ?? 0) - todayTaskPreview.length),
     [todayTasks, todayTaskPreview.length]
   );
+
+  useEffect(() => {
+    if (!todayTasks?.generatedAt || topTodayTasks.length === 0) return;
+    if (trackedTaskExposureRef.current === todayTasks.generatedAt) return;
+    trackedTaskExposureRef.current = todayTasks.generatedAt;
+    topTodayTasks.forEach((task, index) => {
+      trackEvent({
+        eventName: "task_exposed",
+        page: "/student",
+        props: {
+          taskId: task.id,
+          source: task.source,
+          rank: index + 1,
+          priority: task.priority,
+          impactScore: task.impactScore,
+          urgencyScore: task.urgencyScore,
+          effortMinutes: task.effortMinutes
+        }
+      });
+    });
+  }, [todayTasks?.generatedAt, topTodayTasks]);
+
+  const handleTaskEvent = useCallback((task: TodayTask, eventName: "task_started" | "task_completed" | "task_skipped") => {
+    trackEvent({
+      eventName,
+      page: "/student",
+      props: {
+        taskId: task.id,
+        source: task.source,
+        status: task.status,
+        priority: task.priority,
+        impactScore: task.impactScore,
+        urgencyScore: task.urgencyScore,
+        effortMinutes: task.effortMinutes
+      }
+    });
+  }, []);
 
   const categoryCounts = useMemo(() => {
     return ENTRY_ITEMS.reduce<Record<EntryCategory, number>>(
@@ -456,25 +509,30 @@ export default function StudentPage() {
       <div className="grid grid-2">
         <Card title="今日任务" tag="队列">
           {todayTaskError ? <p>{todayTaskError}</p> : null}
-          {todayTaskPreview.length === 0 ? (
+          {topTodayTasks.length === 0 ? (
             <p>当前暂无待处理任务，保持节奏即可。</p>
           ) : (
             <div className="grid" style={{ gap: 8 }}>
-              {todayTaskPreview.map((task) => (
+              {topTodayTasks.map((task, index) => (
                 <div className="card" key={task.id}>
                   <div className="card-header">
                     <div className="section-title" style={{ fontSize: 14 }}>
-                      {task.title}
+                      TOP {index + 1} · {task.title}
                     </div>
                     <span className="card-tag">{getTodayTaskStatusLabel(task.status)}</span>
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink-1)" }}>{task.description}</div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-1)" }}>
+                    推荐原因：{task.recommendedReason}
+                  </div>
                   <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {task.tags.slice(0, 2).map((tag) => (
                       <span className="badge" key={`${task.id}-${tag}`}>
                         {tag}
                       </span>
                     ))}
+                    <span className="badge">预计 {task.effortMinutes} 分钟</span>
+                    <span className="badge">预期收益 {task.expectedGain}</span>
                     {task.dueAt ? (
                       <span style={{ fontSize: 12, color: "var(--ink-1)" }}>
                         截止 {new Date(task.dueAt).toLocaleString("zh-CN")}
@@ -482,9 +540,23 @@ export default function StudentPage() {
                     ) : null}
                   </div>
                   <div className="cta-row" style={{ marginTop: 8 }}>
-                    <Link className="button ghost" href={task.href}>
+                    <Link className="button ghost" href={task.href} onClick={() => handleTaskEvent(task, "task_started")}>
                       去完成
                     </Link>
+                    <button
+                      className="button secondary"
+                      type="button"
+                      onClick={() => handleTaskEvent(task, "task_completed")}
+                    >
+                      标记完成
+                    </button>
+                    <button
+                      className="button ghost"
+                      type="button"
+                      onClick={() => handleTaskEvent(task, "task_skipped")}
+                    >
+                      暂后处理
+                    </button>
                   </div>
                 </div>
               ))}
@@ -497,6 +569,7 @@ export default function StudentPage() {
             <span className="badge">计划题量 {totalPlanCount}</span>
             <span className="badge">薄弱知识点 {weakPlanCount}</span>
             <span className="badge">复练任务 {todayTasks?.summary?.bySource?.wrongReview ?? 0}</span>
+            <span className="badge">Top3 预计 {todayTasks?.summary?.top3EstimatedMinutes ?? 0} 分钟</span>
           </div>
           {hiddenTodayTaskCount > 0 ? (
             <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-1)" }}>还有 {hiddenTodayTaskCount} 项任务待处理。</div>

@@ -2,6 +2,7 @@ import "./globals.css";
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import UserMenu from "@/components/UserMenu";
+import DensityToggle from "@/components/DensityToggle";
 
 export const metadata = {
   title: "航科AI教育",
@@ -85,6 +86,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         { href: "/teacher/register", label: "教师注册" },
         { href: "/admin/register", label: "管理员注册" }
       ];
+  const role = user?.role as "student" | "teacher" | "parent" | "admin" | undefined;
+  const primaryCount =
+    role === "student" ? 8 : role === "teacher" ? 7 : role === "parent" ? 6 : role === "admin" ? 5 : 5;
+  const primaryLinks = navLinks.slice(0, primaryCount);
+  const secondaryLinks = navLinks.slice(primaryCount);
 
   return (
     <html lang="zh-CN">
@@ -93,13 +99,28 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <header className="site-header">
             <div className="brand">航科AI教育</div>
             <nav className="nav-links">
-              {navLinks.map((item) => (
+              {primaryLinks.map((item) => (
                 <Link key={item.href} href={item.href}>
                   {item.label}
                 </Link>
               ))}
+              {secondaryLinks.length ? (
+                <details className="nav-more">
+                  <summary>更多</summary>
+                  <div className="nav-more-menu">
+                    {secondaryLinks.map((item) => (
+                      <Link key={item.href} href={item.href}>
+                        {item.label}
+                      </Link>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
             </nav>
-            <UserMenu user={user} />
+            <div className="header-actions">
+              {user ? <DensityToggle /> : null}
+              <UserMenu user={user} />
+            </div>
           </header>
           <main className="main">{children}</main>
           <footer className="site-footer">© 2026 航科AI教育 K12 学习辅导 MVP</footer>

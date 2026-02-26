@@ -12,6 +12,7 @@ import {
   upsertExamAnswerDraft,
   upsertExamSubmission
 } from "@/lib/exams";
+import { buildExamReviewPack, getExamReviewPack, upsertExamReviewPack } from "@/lib/exam-review-pack";
 import { enqueueWrongReview } from "@/lib/wrong-review";
 import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
@@ -149,6 +150,7 @@ export const POST = withApi(async (request, context) => {
 
   const questionMap = new Map((await getQuestions()).map((item) => [item.id, item]));
   if (existingSubmission) {
+    const existingReviewPack = await getExamReviewPack(paper.id, user.id);
     const rescored = scoreExamByItems({
       items,
       questionMap,
@@ -162,6 +164,13 @@ export const POST = withApi(async (request, context) => {
       details: rescored.details,
       wrongCount,
       queuedReviewCount: 0,
+      reviewPackSummary: existingReviewPack?.data
+        ? {
+            wrongCount: existingReviewPack.data.wrongCount,
+            estimatedMinutes: existingReviewPack.data.summary.estimatedMinutes,
+            topWeakKnowledgePoints: existingReviewPack.data.summary.topWeakKnowledgePoints
+          }
+        : null,
       alreadySubmitted: true
     };
   }
@@ -212,6 +221,28 @@ export const POST = withApi(async (request, context) => {
     )
   );
   const queuedReviewCount = queued.filter((item) => Boolean(item)).length;
+  const reviewPackData = await buildExamReviewPack({
+    wrongDetails: wrongDetails.map((item) => ({
+      questionId: item.questionId,
+      answer: item.answer,
+      correctAnswer: item.correctAnswer,
+      score: item.score,
+      correct: item.correct
+    })),
+    wrongQuestions: wrongQuestions.map((item) => ({
+      id: item.id,
+      stem: item.stem,
+      knowledgePointId: item.knowledgePointId,
+      difficulty: item.difficulty,
+      questionType: item.questionType
+    }))
+  });
+
+  const reviewPack = await upsertExamReviewPack({
+    paperId: paper.id,
+    studentId: user.id,
+    data: reviewPackData
+  });
 
   return {
     score: submission.score,
@@ -220,6 +251,13 @@ export const POST = withApi(async (request, context) => {
     details: rescored.details,
     wrongCount: wrongDetails.length,
     queuedReviewCount,
+    reviewPackSummary: reviewPack?.data
+      ? {
+          wrongCount: reviewPack.data.wrongCount,
+          estimatedMinutes: reviewPack.data.summary.estimatedMinutes,
+          topWeakKnowledgePoints: reviewPack.data.summary.topWeakKnowledgePoints
+        }
+      : null,
     alreadySubmitted: false
   };
 });

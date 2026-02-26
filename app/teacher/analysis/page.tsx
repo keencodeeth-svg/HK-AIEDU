@@ -62,6 +62,34 @@ type AlertSummary = {
   highRiskAlerts: number;
 };
 
+type AlertImpactWindow = {
+  hours: number;
+  ready: boolean;
+  dueAt: string | null;
+  remainingHours: number;
+  riskDelta: number | null;
+  riskDeltaRate: number | null;
+  improved: boolean | null;
+};
+
+type AlertImpactData = {
+  alertId: string;
+  impact: {
+    tracked: boolean;
+    actionId: string | null;
+    trackedAt: string | null;
+    elapsedHours: number;
+    deltas: {
+      riskScore: number | null;
+      metricDeltas: Record<string, number>;
+    };
+    windows: {
+      h24: AlertImpactWindow;
+      h72: AlertImpactWindow;
+    };
+  };
+};
+
 export default function TeacherAnalysisPage() {
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [classId, setClassId] = useState("");
@@ -76,6 +104,8 @@ export default function TeacherAnalysisPage() {
   const [acknowledgingAlertId, setAcknowledgingAlertId] = useState<string | null>(null);
   const [actingAlertKey, setActingAlertKey] = useState<string | null>(null);
   const [alertActionMessage, setAlertActionMessage] = useState<string | null>(null);
+  const [impactByAlertId, setImpactByAlertId] = useState<Record<string, AlertImpactData>>({});
+  const [loadingImpactId, setLoadingImpactId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/teacher/classes")
@@ -143,7 +173,19 @@ export default function TeacherAnalysisPage() {
     if (classId) {
       await loadAlerts(classId);
     }
+    await loadAlertImpact(alertId, true);
     setActingAlertKey(null);
+  }
+
+  async function loadAlertImpact(alertId: string, force = false) {
+    if (!force && impactByAlertId[alertId]) return;
+    setLoadingImpactId(alertId);
+    const res = await fetch(`/api/teacher/alerts/${alertId}/impact`);
+    const data = await res.json();
+    if (res.ok && data?.data) {
+      setImpactByAlertId((prev) => ({ ...prev, [alertId]: data.data }));
+    }
+    setLoadingImpactId(null);
   }
 
   useEffect(() => {
@@ -289,7 +331,64 @@ export default function TeacherAnalysisPage() {
                     {acknowledgingAlertId === item.id ? "确认中..." : "确认预警"}
                   </button>
                 )}
+                <button
+                  className="button ghost"
+                  onClick={() => loadAlertImpact(item.id)}
+                  disabled={loadingImpactId === item.id}
+                >
+                  {loadingImpactId === item.id ? "加载中..." : "查看24h/72h效果"}
+                </button>
               </div>
+              {impactByAlertId[item.id] ? (
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: 10,
+                    borderRadius: 10,
+                    border: "1px dashed var(--stroke)",
+                    background: "rgba(255,255,255,0.5)"
+                  }}
+                >
+                  {impactByAlertId[item.id].impact.tracked ? (
+                    <div style={{ display: "grid", gap: 6, fontSize: 12, color: "var(--ink-1)" }}>
+                      <div>
+                        基线时间：{" "}
+                        {impactByAlertId[item.id].impact.trackedAt
+                          ? new Date(impactByAlertId[item.id].impact.trackedAt as string).toLocaleString("zh-CN")
+                          : "-"}
+                        {" · "}
+                        已追踪 {impactByAlertId[item.id].impact.elapsedHours} 小时
+                      </div>
+                      <div>
+                        风险分变化：
+                        <strong style={{ marginLeft: 4 }}>
+                          {impactByAlertId[item.id].impact.deltas.riskScore ?? 0}
+                        </strong>
+                        {" · "}
+                        {(impactByAlertId[item.id].impact.deltas.riskScore ?? 0) < 0
+                          ? "风险下降"
+                          : "风险未下降"}
+                      </div>
+                      <div>
+                        24h 窗口：{impactByAlertId[item.id].impact.windows.h24.ready ? "已到期" : "观察中"} ·{" "}
+                        {impactByAlertId[item.id].impact.windows.h24.ready
+                          ? `Δ${impactByAlertId[item.id].impact.windows.h24.riskDelta ?? 0}`
+                          : `剩余 ${impactByAlertId[item.id].impact.windows.h24.remainingHours}h`}
+                      </div>
+                      <div>
+                        72h 窗口：{impactByAlertId[item.id].impact.windows.h72.ready ? "已到期" : "观察中"} ·{" "}
+                        {impactByAlertId[item.id].impact.windows.h72.ready
+                          ? `Δ${impactByAlertId[item.id].impact.windows.h72.riskDelta ?? 0}`
+                          : `剩余 ${impactByAlertId[item.id].impact.windows.h72.remainingHours}h`}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                      当前预警还没有可追踪的动作基线，请先执行“一键布置修复任务”或“提醒学生”。
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
           ))}
         </div>

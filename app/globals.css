@@ -92,6 +92,12 @@ a {
   z-index: 5;
 }
 
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .brand {
   font-size: 22px;
   font-weight: 700;
@@ -106,6 +112,7 @@ a {
   font-size: 14px;
   color: var(--ink-1);
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .nav-links a {
@@ -119,6 +126,57 @@ a {
 .nav-links a:hover {
   border-color: rgba(27, 108, 168, 0.35);
   background: rgba(27, 108, 168, 0.1);
+  color: var(--brand-0);
+}
+
+.nav-more {
+  position: relative;
+}
+
+.nav-more summary {
+  list-style: none;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  user-select: none;
+}
+
+.nav-more summary::-webkit-details-marker {
+  display: none;
+}
+
+.nav-more[open] summary {
+  border-color: rgba(27, 108, 168, 0.35);
+  background: rgba(27, 108, 168, 0.1);
+  color: var(--brand-0);
+}
+
+.nav-more-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 200px;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: var(--shadow-soft);
+  z-index: 20;
+}
+
+.nav-more-menu a {
+  display: block;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.nav-more-menu a:hover {
+  background: rgba(27, 108, 168, 0.08);
   color: var(--brand-0);
 }
 
@@ -644,6 +702,46 @@ textarea:focus {
 
 .full-span {
   grid-column: 1 / -1;
+}
+
+html[data-density="compact"] {
+  --layout-pad-y: 12px;
+  --grid-gap: 9px;
+  --card-pad-y: 10px;
+  --card-pad-x: 12px;
+  --title-gap-top: 6px;
+  --title-gap-bottom: 4px;
+}
+
+html[data-density="compact"] .site-header {
+  padding-top: 10px;
+  padding-bottom: 8px;
+}
+
+html[data-density="compact"] .nav-links {
+  gap: 8px;
+  font-size: 13px;
+}
+
+html[data-density="compact"] .nav-links a,
+html[data-density="compact"] .nav-more summary {
+  padding: 6px 10px;
+}
+
+html[data-density="compact"] .section-head {
+  margin: 2px 0 8px;
+}
+
+html[data-density="compact"] .section-head h2 {
+  font-size: 21px;
+}
+
+html[data-density="compact"] .button {
+  padding: 6px 12px;
+}
+
+html[data-density="compact"] .main {
+  padding-bottom: 28px;
 }
 
 @media (prefers-reduced-motion: no-preference) {

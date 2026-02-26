@@ -11,6 +11,10 @@ type Question = {
   stem: string;
   options: string[];
   knowledgePointId: string;
+  recommendation?: {
+    reason?: string;
+    weaknessRank?: number | null;
+  };
 };
 
 type KnowledgePoint = {
@@ -50,6 +54,10 @@ export default function PracticePage() {
     answer: string;
     masteryScore?: number;
     masteryDelta?: number;
+    confidenceScore?: number;
+    recencyWeight?: number;
+    masteryTrend7d?: number;
+    weaknessRank?: number | null;
   } | null>(null);
   const [challengeCount, setChallengeCount] = useState(0);
   const [challengeCorrect, setChallengeCorrect] = useState(0);
@@ -155,7 +163,11 @@ export default function PracticePage() {
         explanation: data.explanation,
         answer: data.answer,
         masteryScore: data.masteryScore,
-        masteryDelta: data.masteryDelta
+        masteryDelta: data.masteryDelta,
+        confidenceScore: data?.mastery?.confidenceScore,
+        recencyWeight: data?.mastery?.recencyWeight,
+        masteryTrend7d: data?.mastery?.masteryTrend7d,
+        weaknessRank: data?.weaknessRank ?? data?.mastery?.weaknessRank ?? null
       });
       trackEvent({
         eventName: "practice_submit_success",
@@ -411,6 +423,14 @@ export default function PracticePage() {
       {question ? (
         <Card title="题目" tag="作答">
           <p>{question.stem}</p>
+          {question.recommendation?.reason ? (
+            <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-1)" }}>
+              推荐原因：{question.recommendation.reason}
+              {typeof question.recommendation.weaknessRank === "number"
+                ? `（薄弱度第 ${question.recommendation.weaknessRank} 位）`
+                : ""}
+            </div>
+          ) : null}
           <div className="cta-row" style={{ marginTop: 8 }}>
             <button className="button secondary" onClick={toggleFavorite} disabled={favoriteLoading}>
               {favorite ? "已收藏" : "收藏"}
@@ -451,6 +471,22 @@ export default function PracticePage() {
         <Card title="解析" tag="讲解">
           <div className="badge">{result.correct ? "回答正确" : "回答错误"}</div>
           <p style={{ marginTop: 8 }}>正确答案：{result.answer}</p>
+          <div className="pill-list" style={{ marginTop: 8 }}>
+            <span className="pill">掌握度 {result.masteryScore ?? 0}</span>
+            <span className="pill">
+              变化 {result.masteryDelta && result.masteryDelta > 0 ? "+" : ""}
+              {result.masteryDelta ?? 0}
+            </span>
+            <span className="pill">置信度 {result.confidenceScore ?? 0}</span>
+            <span className="pill">近期权重 {result.recencyWeight ?? 0}</span>
+            <span className="pill">
+              趋势 {result.masteryTrend7d && result.masteryTrend7d > 0 ? "+" : ""}
+              {result.masteryTrend7d ?? 0}
+            </span>
+            {typeof result.weaknessRank === "number" ? (
+              <span className="pill">薄弱度第 {result.weaknessRank} 位</span>
+            ) : null}
+          </div>
           <div className="cta-row" style={{ marginTop: 8 }}>
             <button className="button secondary" onClick={() => setExplainMode("text")}>
               文字版

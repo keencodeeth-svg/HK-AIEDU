@@ -2,6 +2,7 @@ import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
 import AnalyticsFunnelCard from "@/components/AnalyticsFunnelCard";
+import ObservabilityMetricsCard from "@/components/ObservabilityMetricsCard";
 
 export default function AdminPage() {
   return (
@@ -64,6 +65,15 @@ export default function AdminPage() {
           <Link className="button secondary" href="/admin/experiments" style={{ marginTop: 12 }}>
             打开实验中心
           </Link>
+        </Card>
+        <Card title="接口可观测性" tag="运维">
+          <div className="feature-card">
+            <EduIcon name="chart" />
+            <p>请求量、错误率与慢接口趋势。</p>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <ObservabilityMetricsCard />
+          </div>
         </Card>
       </div>
     </div>

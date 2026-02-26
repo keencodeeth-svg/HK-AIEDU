@@ -4,6 +4,7 @@ import { getClassStudentIds } from "@/lib/classes";
 import { addCorrectionTasks } from "@/lib/corrections";
 import { getQuestions } from "@/lib/content";
 import { createNotification } from "@/lib/notifications";
+import { upsertTeacherAlertImpact } from "@/lib/teacher-alert-impacts";
 import { upsertTeacherAlertAction } from "@/lib/teacher-alert-actions";
 import { acknowledgeTeacherAlert, getTeacherAlerts } from "@/lib/teacher-alerts";
 import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
@@ -190,6 +191,22 @@ export const POST = withApi(async (request, context) => {
     actionType,
     detail: actionDetail
   });
+  const impact = action
+    ? await upsertTeacherAlertImpact({
+        actionId: action.id,
+        teacherId: user.id,
+        alertId: target.id,
+        classId: target.classId,
+        studentIds,
+        baseline: {
+          riskScore: target.riskScore,
+          status: target.status,
+          metrics: target.metrics ?? {},
+          recommendedAction: target.recommendedAction,
+          actionType
+        }
+      })
+    : null;
 
   await addAdminLog({
     adminId: user.id,
@@ -207,6 +224,17 @@ export const POST = withApi(async (request, context) => {
       lastActionType: action?.actionType ?? actionType,
       lastActionAt: action?.createdAt ?? new Date().toISOString(),
       lastActionBy: user.id,
+      impactTracking: impact
+        ? {
+            tracked: true,
+            actionId: impact.actionId,
+            trackedAt: impact.createdAt,
+            dueAt24h: new Date(new Date(impact.createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString(),
+            dueAt72h: new Date(new Date(impact.createdAt).getTime() + 72 * 60 * 60 * 1000).toISOString()
+          }
+        : {
+            tracked: false
+          },
       result: {
         affectedStudents: studentIds.length,
         createdTasks,

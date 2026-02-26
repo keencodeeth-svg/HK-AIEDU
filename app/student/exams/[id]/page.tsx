@@ -45,6 +45,15 @@ type ExamDetail = {
     submittedAt: string;
     answers: Record<string, string>;
   } | null;
+  reviewPackSummary?: {
+    wrongCount: number;
+    estimatedMinutes: number;
+    topWeakKnowledgePoints: Array<{
+      knowledgePointId: string;
+      title: string;
+      wrongCount: number;
+    }>;
+  } | null;
 };
 
 type SubmitResult = {
@@ -59,6 +68,50 @@ type SubmitResult = {
     answer: string;
     correctAnswer: string;
     score: number;
+  }>;
+  reviewPackSummary?: {
+    wrongCount: number;
+    estimatedMinutes: number;
+    topWeakKnowledgePoints: Array<{
+      knowledgePointId: string;
+      title: string;
+      wrongCount: number;
+    }>;
+  } | null;
+};
+
+type ReviewPack = {
+  wrongCount: number;
+  generatedAt: string;
+  summary: {
+    topWeakKnowledgePoints: Array<{
+      knowledgePointId: string;
+      title: string;
+      wrongCount: number;
+    }>;
+    wrongByDifficulty: Array<{ difficulty: string; count: number }>;
+    wrongByType: Array<{ questionType: string; count: number }>;
+    estimatedMinutes: number;
+  };
+  rootCauses: string[];
+  actionItems: Array<{
+    id: string;
+    title: string;
+    description: string;
+    estimatedMinutes: number;
+  }>;
+  sevenDayPlan: Array<{
+    day: number;
+    title: string;
+    focus: string;
+    estimatedMinutes: number;
+  }>;
+  wrongQuestions?: Array<{
+    questionId: string;
+    stem: string;
+    knowledgePointTitle: string;
+    yourAnswer: string;
+    correctAnswer: string;
   }>;
 };
 
@@ -96,6 +149,8 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [clientStartedAt, setClientStartedAt] = useState<string | null>(null);
   const [pendingLocalSync, setPendingLocalSync] = useState(false);
+  const [reviewPack, setReviewPack] = useState<ReviewPack | null>(null);
+  const [reviewPackLoading, setReviewPackLoading] = useState(false);
   const [clock, setClock] = useState(Date.now());
   const [timeupTriggered, setTimeupTriggered] = useState(false);
   const examEventRef = useRef({ blurCountDelta: 0, visibilityHiddenCountDelta: 0 });
@@ -172,6 +227,24 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
     if (typeof window === "undefined") return;
     window.localStorage.removeItem(localDraftKey);
   }, [localDraftKey]);
+
+  const loadReviewPack = useCallback(async () => {
+    setReviewPackLoading(true);
+    try {
+      const res = await fetch(`/api/student/exams/${params.id}/review-pack`);
+      const payload = await res.json();
+      if (!res.ok) {
+        setReviewPack(null);
+        setReviewPackLoading(false);
+        return;
+      }
+      setReviewPack(payload?.data ?? null);
+    } catch {
+      setReviewPack(null);
+    } finally {
+      setReviewPackLoading(false);
+    }
+  }, [params.id]);
 
   const startedAt = data?.assignment.startedAt ?? clientStartedAt ?? null;
 
@@ -289,13 +362,18 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
       setSavedAt(payload?.assignment?.autoSavedAt ?? null);
       setResult(null);
       setTimeupTriggered(false);
+      if (payload?.submission || payload?.reviewPackSummary) {
+        void loadReviewPack();
+      } else {
+        setReviewPack(null);
+      }
       if (payload?.assignment?.startedAt) {
         setClientStartedAt(payload.assignment.startedAt);
       }
     } catch {
       setError("加载失败");
     }
-  }, [clearLocalDraft, params.id, readLocalDraft]);
+  }, [clearLocalDraft, loadReviewPack, params.id, readLocalDraft]);
 
   useEffect(() => {
     load();
@@ -422,11 +500,19 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
           typeof payload.queuedReviewCount === "number" && payload.queuedReviewCount > 0
             ? `本次考试错题已加入今日复练清单（${payload.queuedReviewCount} 题）。`
             : "";
+        const reviewPackNotice =
+          payload?.reviewPackSummary?.estimatedMinutes
+            ? `系统已生成考试复盘包，预计 ${payload.reviewPackSummary.estimatedMinutes} 分钟完成。`
+            : "";
         if (trigger === "timeout") {
-          setSyncNotice(reviewNotice ? `考试时间结束，系统已自动提交。${reviewNotice}` : "考试时间结束，系统已自动提交。");
-        } else if (reviewNotice) {
-          setSyncNotice(reviewNotice);
+          const timeoutNotice = ["考试时间结束，系统已自动提交。", reviewNotice, reviewPackNotice]
+            .filter(Boolean)
+            .join("");
+          setSyncNotice(timeoutNotice);
+        } else if (reviewNotice || reviewPackNotice) {
+          setSyncNotice([reviewNotice, reviewPackNotice].filter(Boolean).join(" "));
         }
+        void loadReviewPack();
 
         setData((prev) => {
           if (!prev) return prev;
@@ -464,7 +550,8 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
       params.id,
       submitted,
       submitting,
-      writeLocalDraft
+      writeLocalDraft,
+      loadReviewPack
     ]
   );
 
@@ -662,6 +749,106 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
               </div>
             ))}
           </div>
+        </Card>
+      ) : null}
+
+      {(submitted || Boolean(reviewPack) || Boolean(data.reviewPackSummary)) ? (
+        <Card title="考试复盘包" tag="闭环">
+          {reviewPackLoading ? <p>复盘包加载中...</p> : null}
+          {!reviewPackLoading && !reviewPack ? (
+            <div className="grid" style={{ gap: 8 }}>
+              <p>
+                系统已生成复盘摘要：错题 {data.reviewPackSummary?.wrongCount ?? 0} 题，预计{" "}
+                {data.reviewPackSummary?.estimatedMinutes ?? 0} 分钟。
+              </p>
+              <div className="cta-row">
+                <button className="button secondary" type="button" onClick={() => void loadReviewPack()}>
+                  加载完整复盘包
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {reviewPack ? (
+            <div className="grid" style={{ gap: 10 }}>
+              <div className="grid grid-3">
+                <div className="card">
+                  <div className="section-title">错题总数</div>
+                  <p>{reviewPack.wrongCount}</p>
+                </div>
+                <div className="card">
+                  <div className="section-title">预计复盘时长</div>
+                  <p>{reviewPack.summary.estimatedMinutes} 分钟</p>
+                </div>
+                <div className="card">
+                  <div className="section-title">生成时间</div>
+                  <p style={{ fontSize: 13 }}>{new Date(reviewPack.generatedAt).toLocaleString("zh-CN")}</p>
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="section-title">核心错因</div>
+                <div className="grid" style={{ gap: 6 }}>
+                  {reviewPack.rootCauses.length ? (
+                    reviewPack.rootCauses.map((cause, index) => (
+                      <div key={`cause-${index}`} style={{ fontSize: 13, color: "var(--ink-1)" }}>
+                        {index + 1}. {cause}
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ fontSize: 13, color: "var(--ink-1)" }}>暂无错因分析。</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="section-title">薄弱知识点</div>
+                <div className="grid" style={{ gap: 6 }}>
+                  {reviewPack.summary.topWeakKnowledgePoints.length ? (
+                    reviewPack.summary.topWeakKnowledgePoints.map((item) => (
+                      <div key={item.knowledgePointId} style={{ fontSize: 13, color: "var(--ink-1)" }}>
+                        {item.title} · 错题 {item.wrongCount}
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ fontSize: 13, color: "var(--ink-1)" }}>暂无聚类薄弱点。</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="section-title">推荐动作</div>
+                <div className="grid" style={{ gap: 8 }}>
+                  {reviewPack.actionItems.map((item) => (
+                    <div key={item.id} style={{ fontSize: 13 }}>
+                      <strong>{item.title}</strong> · {item.estimatedMinutes} 分钟
+                      <div style={{ color: "var(--ink-1)" }}>{item.description}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="section-title">7 日修复计划</div>
+                <div className="grid" style={{ gap: 6 }}>
+                  {reviewPack.sevenDayPlan.map((item) => (
+                    <div key={`day-${item.day}`} style={{ fontSize: 13 }}>
+                      D{item.day} · {item.title} · {item.estimatedMinutes} 分钟
+                      <div style={{ color: "var(--ink-1)" }}>{item.focus}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="cta-row">
+                <Link className="button secondary" href="/wrong-book">
+                  打开今日复练清单
+                </Link>
+                <Link className="button ghost" href="/practice?mode=review">
+                  进入错题复练
+                </Link>
+              </div>
+            </div>
+          ) : null}
         </Card>
       ) : null}
     </div>

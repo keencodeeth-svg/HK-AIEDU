@@ -102,10 +102,17 @@ CREATE TABLE IF NOT EXISTS mastery_records (
   correct_count INT NOT NULL DEFAULT 0,
   total_count INT NOT NULL DEFAULT 0,
   mastery_score INT NOT NULL DEFAULT 0,
+  confidence_score INT NOT NULL DEFAULT 0,
+  recency_weight INT NOT NULL DEFAULT 0,
+  mastery_trend_7d INT NOT NULL DEFAULT 0,
   last_attempt_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL,
   UNIQUE (user_id, knowledge_point_id)
 );
+
+ALTER TABLE mastery_records ADD COLUMN IF NOT EXISTS confidence_score INT NOT NULL DEFAULT 0;
+ALTER TABLE mastery_records ADD COLUMN IF NOT EXISTS recency_weight INT NOT NULL DEFAULT 0;
+ALTER TABLE mastery_records ADD COLUMN IF NOT EXISTS mastery_trend_7d INT NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS mastery_records_user_idx ON mastery_records (user_id);
 CREATE INDEX IF NOT EXISTS mastery_records_subject_idx ON mastery_records (subject);
@@ -193,6 +200,21 @@ CREATE TABLE IF NOT EXISTS teacher_alert_actions (
 );
 
 CREATE INDEX IF NOT EXISTS teacher_alert_actions_teacher_idx ON teacher_alert_actions (teacher_id);
+
+CREATE TABLE IF NOT EXISTS teacher_alert_impacts (
+  id TEXT PRIMARY KEY,
+  action_id TEXT NOT NULL,
+  teacher_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+  alert_id TEXT NOT NULL,
+  class_id TEXT,
+  student_ids TEXT[] NOT NULL DEFAULT '{}',
+  baseline JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (action_id)
+);
+
+CREATE INDEX IF NOT EXISTS teacher_alert_impacts_teacher_idx ON teacher_alert_impacts (teacher_id);
+CREATE INDEX IF NOT EXISTS teacher_alert_impacts_alert_idx ON teacher_alert_impacts (alert_id);
 
 CREATE TABLE IF NOT EXISTS memory_reviews (
   id TEXT PRIMARY KEY,
@@ -518,6 +540,15 @@ CREATE TABLE IF NOT EXISTS exam_submissions (
   UNIQUE (paper_id, student_id)
 );
 
+CREATE TABLE IF NOT EXISTS exam_review_packages (
+  id TEXT PRIMARY KEY,
+  paper_id TEXT REFERENCES exam_papers(id) ON DELETE CASCADE,
+  student_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+  data JSONB NOT NULL,
+  generated_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (paper_id, student_id)
+);
+
 CREATE TABLE IF NOT EXISTS exam_events (
   id TEXT PRIMARY KEY,
   paper_id TEXT REFERENCES exam_papers(id) ON DELETE CASCADE,
@@ -620,6 +651,42 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TIMESTAMPTZ NOT NULL,
   read_at TIMESTAMPTZ
 );
+
+CREATE TABLE IF NOT EXISTS analytics_events (
+  id TEXT PRIMARY KEY,
+  event_name TEXT NOT NULL,
+  event_time TIMESTAMPTZ NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL,
+  user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  role TEXT,
+  subject TEXT,
+  grade TEXT,
+  page TEXT,
+  session_id TEXT,
+  trace_id TEXT,
+  entity_id TEXT,
+  props JSONB,
+  props_truncated BOOLEAN NOT NULL DEFAULT false,
+  user_agent TEXT,
+  ip TEXT
+);
+
+CREATE INDEX IF NOT EXISTS analytics_events_time_idx ON analytics_events (event_time);
+CREATE INDEX IF NOT EXISTS analytics_events_name_idx ON analytics_events (event_name);
+CREATE INDEX IF NOT EXISTS analytics_events_user_idx ON analytics_events (user_id);
+CREATE INDEX IF NOT EXISTS analytics_events_session_idx ON analytics_events (session_id);
+
+CREATE TABLE IF NOT EXISTS api_route_logs (
+  id TEXT PRIMARY KEY,
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  status INT NOT NULL,
+  duration_ms INT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS api_route_logs_created_idx ON api_route_logs (created_at);
+CREATE INDEX IF NOT EXISTS api_route_logs_method_path_idx ON api_route_logs (method, path);
 
 CREATE INDEX IF NOT EXISTS classes_teacher_idx ON classes (teacher_id);
 CREATE INDEX IF NOT EXISTS class_students_class_idx ON class_students (class_id);

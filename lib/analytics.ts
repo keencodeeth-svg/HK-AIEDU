@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import type { UserRole } from "./auth";
+import { isDbEnabled, query } from "./db";
 import { readJson, writeJson } from "./storage";
 
 const ANALYTICS_FILE = "analytics-events.json";
@@ -55,6 +56,25 @@ export type AnalyticsFunnelResult = {
   totalEvents: number;
   totalActors: number;
   stages: AnalyticsFunnelStage[];
+};
+
+type DbAnalyticsEvent = {
+  id: string;
+  event_name: string;
+  event_time: string;
+  received_at: string;
+  user_id: string | null;
+  role: string | null;
+  subject: string | null;
+  grade: string | null;
+  page: string | null;
+  session_id: string | null;
+  trace_id: string | null;
+  entity_id: string | null;
+  props: unknown;
+  props_truncated: boolean;
+  user_agent: string | null;
+  ip: string | null;
 };
 
 type BuildResult =
@@ -178,14 +198,132 @@ export function buildAnalyticsEvent(rawEvent: unknown, context: BuildAnalyticsCo
 export async function appendAnalyticsEvents(events: AnalyticsEventRecord[]) {
   if (!events.length) return;
 
+  if (isDbEnabled()) {
+    for (const event of events) {
+      await query(
+        `INSERT INTO analytics_events
+         (id, event_name, event_time, received_at, user_id, role, subject, grade, page, session_id, trace_id, entity_id, props, props_truncated, user_agent, ip)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16)`,
+        [
+          event.id,
+          event.eventName,
+          event.eventTime,
+          event.receivedAt,
+          event.userId,
+          event.role,
+          event.subject,
+          event.grade,
+          event.page,
+          event.sessionId,
+          event.traceId,
+          event.entityId,
+          JSON.stringify(event.props ?? null),
+          event.propsTruncated,
+          event.userAgent,
+          event.ip
+        ]
+      );
+    }
+    await query(
+      `DELETE FROM analytics_events
+       WHERE id IN (
+         SELECT id
+         FROM analytics_events
+         ORDER BY event_time DESC, received_at DESC
+         OFFSET $1
+       )`,
+      [MAX_EVENTS]
+    );
+    return;
+  }
+
   const list = readJson<AnalyticsEventRecord[]>(ANALYTICS_FILE, []);
   list.push(...events);
   const next = list.length > MAX_EVENTS ? list.slice(list.length - MAX_EVENTS) : list;
   writeJson(ANALYTICS_FILE, next);
 }
 
-export function getAnalyticsEvents() {
-  return readJson<AnalyticsEventRecord[]>(ANALYTICS_FILE, []);
+function mapDbAnalyticsEvent(row: DbAnalyticsEvent): AnalyticsEventRecord {
+  const parsedProps =
+    typeof row.props === "string"
+      ? (() => {
+          try {
+            return JSON.parse(row.props) as unknown;
+          } catch {
+            return row.props;
+          }
+        })()
+      : row.props;
+  return {
+    id: row.id,
+    eventName: row.event_name,
+    eventTime: row.event_time,
+    receivedAt: row.received_at,
+    userId: row.user_id,
+    role: row.role as UserRole | null,
+    subject: row.subject,
+    grade: row.grade,
+    page: row.page,
+    sessionId: row.session_id,
+    traceId: row.trace_id,
+    entityId: row.entity_id,
+    props: parsedProps,
+    propsTruncated: Boolean(row.props_truncated),
+    userAgent: row.user_agent,
+    ip: row.ip
+  };
+}
+
+export async function getAnalyticsEvents(options: {
+  from?: string;
+  to?: string;
+  subject?: string;
+  grade?: string;
+} = {}) {
+  const fromTs = options.from ? new Date(options.from).getTime() : null;
+  const toTs = options.to ? new Date(options.to).getTime() : null;
+  const subject = options.subject?.trim() || null;
+  const grade = options.grade?.trim() || null;
+
+  if (!isDbEnabled()) {
+    return readJson<AnalyticsEventRecord[]>(ANALYTICS_FILE, []).filter((event) => {
+      const eventTs = new Date(event.eventTime).getTime();
+      if (Number.isNaN(eventTs)) return false;
+      if (fromTs !== null && eventTs < fromTs) return false;
+      if (toTs !== null && eventTs > toTs) return false;
+      if (subject && event.subject !== subject) return false;
+      if (grade && event.grade !== grade) return false;
+      return true;
+    });
+  }
+
+  const where: string[] = [];
+  const params: Array<string> = [];
+  if (fromTs !== null) {
+    where.push(`event_time >= $${params.length + 1}`);
+    params.push(new Date(fromTs).toISOString());
+  }
+  if (toTs !== null) {
+    where.push(`event_time <= $${params.length + 1}`);
+    params.push(new Date(toTs).toISOString());
+  }
+  if (subject) {
+    where.push(`subject = $${params.length + 1}`);
+    params.push(subject);
+  }
+  if (grade) {
+    where.push(`grade = $${params.length + 1}`);
+    params.push(grade);
+  }
+
+  const sql = `
+    SELECT *
+    FROM analytics_events
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY event_time ASC
+  `;
+  const rows = await query<DbAnalyticsEvent>(sql, params);
+  return rows.map(mapDbAnalyticsEvent);
 }
 
 function getActorKey(event: AnalyticsEventRecord) {
@@ -199,26 +337,15 @@ function roundPercentage(value: number) {
   return Math.round(value * 100) / 100;
 }
 
-export function getAnalyticsFunnel(options: {
+export async function getAnalyticsFunnel(options: {
   from?: string;
   to?: string;
   subject?: string;
   grade?: string;
-}): AnalyticsFunnelResult {
-  const fromTs = options.from ? new Date(options.from).getTime() : null;
-  const toTs = options.to ? new Date(options.to).getTime() : null;
+}): Promise<AnalyticsFunnelResult> {
   const subject = options.subject?.trim() || null;
   const grade = options.grade?.trim() || null;
-
-  const filtered = getAnalyticsEvents().filter((event) => {
-    const eventTs = new Date(event.eventTime).getTime();
-    if (Number.isNaN(eventTs)) return false;
-    if (fromTs !== null && eventTs < fromTs) return false;
-    if (toTs !== null && eventTs > toTs) return false;
-    if (subject && event.subject !== subject) return false;
-    if (grade && event.grade !== grade) return false;
-    return true;
-  });
+  const filtered = await getAnalyticsEvents(options);
 
   const stagePresence = new Map<string, Set<string>>();
   for (const stage of FUNNEL_DEFINITION) {

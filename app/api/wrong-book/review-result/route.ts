@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { getCurrentUser } from "@/lib/auth";
 import { getQuestions } from "@/lib/content";
 import { addAttempt } from "@/lib/progress";
-import { getMasteryRecord, syncMasteryFromAttempts } from "@/lib/mastery";
+import { getMasteryRecord, getWeaknessRankMap, syncMasteryFromAttempts } from "@/lib/mastery";
 import { enqueueWrongReview, getIntervalLabel, submitWrongReviewResult } from "@/lib/wrong-review";
 import { notFound, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
@@ -66,6 +66,8 @@ export const POST = withApi(async (request) => {
 
   const masteryRecords = await syncMasteryFromAttempts(user.id, question.subject);
   const mastery = masteryRecords.find((item) => item.knowledgePointId === question.knowledgePointId);
+  const weaknessRankMap = getWeaknessRankMap(masteryRecords, question.subject);
+  const weaknessRank = weaknessRankMap.get(question.knowledgePointId) ?? null;
   const masteryScore = mastery?.masteryScore ?? previousScore;
   const masteryDelta = masteryScore - previousScore;
 
@@ -76,6 +78,7 @@ export const POST = withApi(async (request) => {
     knowledgePointId: question.knowledgePointId,
     masteryScore,
     masteryDelta,
+    weaknessRank,
     nextReviewAt: review?.nextReviewAt ?? null,
     intervalLevel: review?.intervalLevel ?? null,
     lastReviewResult: review?.lastReviewResult ?? null,
@@ -92,4 +95,3 @@ export const POST = withApi(async (request) => {
       : null
   };
 });
-

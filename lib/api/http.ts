@@ -161,12 +161,16 @@ export function withApi<TParams extends Record<string, string> = Record<string, 
         details: apiErr.details
       });
     } finally {
-      recordApiRequest({
-        method: request.method || "GET",
-        path,
-        status,
-        durationMs: Date.now() - startedAt
-      });
+      try {
+        await recordApiRequest({
+          method: request.method || "GET",
+          path,
+          status,
+          durationMs: Date.now() - startedAt
+        });
+      } catch {
+        // observability must never block business response
+      }
     }
   };
 }

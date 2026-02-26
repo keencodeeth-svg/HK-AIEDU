@@ -15,6 +15,6 @@ export const GET = withApi(async (request) => {
   const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, Math.floor(rawLimit))) : 20;
 
   return {
-    data: getApiMetricsSummary(limit)
+    data: await getApiMetricsSummary(limit)
   };
 });

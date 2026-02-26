@@ -37,6 +37,7 @@ export type StudyPlan = {
 
 const ATTEMPTS_FILE = "question-attempts.json";
 const PLANS_FILE = "study-plans.json";
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 type DbAttempt = {
   id: string;
@@ -64,6 +65,75 @@ type DbPlanItem = {
   target_count: number;
   due_date: string;
 };
+
+type KnowledgePointTrend = {
+  trend7d: number;
+  recentTotal: number;
+  previousTotal: number;
+};
+
+function buildKnowledgePointTrend(attempts: QuestionAttempt[]) {
+  const now = Date.now();
+  const recentStart = now - 7 * DAY_MS;
+  const previousStart = now - 14 * DAY_MS;
+  const trendMap = new Map<string, KnowledgePointTrend>();
+
+  const bucket = new Map<
+    string,
+    { recentCorrect: number; recentTotal: number; previousCorrect: number; previousTotal: number }
+  >();
+  attempts.forEach((attempt) => {
+    const ts = new Date(attempt.createdAt).getTime();
+    const current = bucket.get(attempt.knowledgePointId) ?? {
+      recentCorrect: 0,
+      recentTotal: 0,
+      previousCorrect: 0,
+      previousTotal: 0
+    };
+    if (ts >= recentStart) {
+      current.recentTotal += 1;
+      current.recentCorrect += attempt.correct ? 1 : 0;
+    } else if (ts >= previousStart) {
+      current.previousTotal += 1;
+      current.previousCorrect += attempt.correct ? 1 : 0;
+    }
+    bucket.set(attempt.knowledgePointId, current);
+  });
+
+  bucket.forEach((entry, knowledgePointId) => {
+    const recentRatio = entry.recentTotal ? entry.recentCorrect / entry.recentTotal : 0;
+    const previousRatio = entry.previousTotal ? entry.previousCorrect / entry.previousTotal : recentRatio;
+    trendMap.set(knowledgePointId, {
+      trend7d: Math.round((recentRatio - previousRatio) * 100),
+      recentTotal: entry.recentTotal,
+      previousTotal: entry.previousTotal
+    });
+  });
+
+  return trendMap;
+}
+
+function resolvePlanTargetCount(params: { ratio: number; total: number; trend7d: number }) {
+  const { ratio, total, trend7d } = params;
+  let target = 5;
+  if (ratio < 0.55) {
+    target = 7;
+  } else if (ratio < 0.7) {
+    target = 6;
+  } else if (ratio >= 0.85 && total >= 4) {
+    target = 3;
+  }
+
+  if (total < 3) {
+    target += 1;
+  }
+  if (trend7d < -8) {
+    target += 1;
+  } else if (trend7d > 8) {
+    target = Math.max(3, target - 1);
+  }
+  return Math.max(3, Math.min(8, target));
+}
 
 function mapAttempt(row: DbAttempt): QuestionAttempt {
   return {
@@ -199,18 +269,29 @@ export async function getMasteryByKnowledgePoint(userId: string, subject?: strin
 export async function generateStudyPlan(userId: string, subject: string): Promise<StudyPlan> {
   const knowledgePoints = (await getKnowledgePoints()).filter((kp) => kp.subject === subject);
   const mastery = await getMasteryByKnowledgePoint(userId, subject);
+  const trendMap = buildKnowledgePointTrend(
+    (await getAttemptsByUser(userId)).filter((attempt) => attempt.subject === subject)
+  );
   const ranked = knowledgePoints
     .map((kp) => {
       const stat = mastery.get(kp.id) ?? { correct: 0, total: 0 };
       const ratio = stat.total === 0 ? 0 : stat.correct / stat.total;
-      return { kp, ratio };
+      const trend = trendMap.get(kp.id);
+      return { kp, ratio, total: stat.total, trend7d: trend?.trend7d ?? 0 };
     })
-    .sort((a, b) => a.ratio - b.ratio)
+    .sort((a, b) => {
+      if (a.ratio === b.ratio) return a.trend7d - b.trend7d;
+      return a.ratio - b.ratio;
+    })
     .slice(0, 5);
 
   const items: StudyPlanItem[] = ranked.map((item, index) => ({
     knowledgePointId: item.kp.id,
-    targetCount: 5,
+    targetCount: resolvePlanTargetCount({
+      ratio: item.ratio,
+      total: item.total,
+      trend7d: item.trend7d
+    }),
     dueDate: new Date(Date.now() + index * 24 * 60 * 60 * 1000).toISOString()
   }));
 
@@ -260,21 +341,32 @@ export async function generateStudyPlan(userId: string, subject: string): Promis
 export async function refreshStudyPlan(userId: string, subject: string): Promise<StudyPlan> {
   const knowledgePoints = (await getKnowledgePoints()).filter((kp) => kp.subject === subject);
   const mastery = await getMasteryByKnowledgePoint(userId, subject);
+  const trendMap = buildKnowledgePointTrend(
+    (await getAttemptsByUser(userId)).filter((attempt) => attempt.subject === subject)
+  );
   const ranked = knowledgePoints
     .map((kp) => {
       const stat = mastery.get(kp.id) ?? { correct: 0, total: 0 };
       const ratio = stat.total === 0 ? 0 : stat.correct / stat.total;
-      return { kp, ratio, total: stat.total };
+      const trend = trendMap.get(kp.id);
+      return { kp, ratio, total: stat.total, trend7d: trend?.trend7d ?? 0 };
     })
     .sort((a, b) => {
-      if (a.ratio === b.ratio) return a.total - b.total;
+      if (a.ratio === b.ratio) {
+        if (a.trend7d === b.trend7d) return a.total - b.total;
+        return a.trend7d - b.trend7d;
+      }
       return a.ratio - b.ratio;
     })
     .slice(0, 5);
 
   const items: StudyPlanItem[] = ranked.map((item, index) => ({
     knowledgePointId: item.kp.id,
-    targetCount: item.ratio >= 0.85 && item.total >= 4 ? 3 : 5,
+    targetCount: resolvePlanTargetCount({
+      ratio: item.ratio,
+      total: item.total,
+      trend7d: item.trend7d
+    }),
     dueDate: new Date(Date.now() + index * 24 * 60 * 60 * 1000).toISOString()
   }));
 

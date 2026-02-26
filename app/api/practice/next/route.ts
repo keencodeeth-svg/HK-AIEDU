@@ -2,6 +2,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { getAdaptiveQuestions, getPracticeQuestions, getWrongQuestionIds } from "@/lib/progress";
 import { getDueReviewQuestions } from "@/lib/memory";
 import { getQuestions } from "@/lib/content";
+import { getMasteryRecordsByUser, getWeaknessRankMap } from "@/lib/mastery";
 import { getStudentProfile } from "@/lib/profiles";
 import { notFound, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
@@ -61,7 +62,33 @@ export const POST = withApi(async (request) => {
       limit: 10
     });
   }
-  const question = questions[Math.floor(Math.random() * questions.length)];
+  let question = questions[Math.floor(Math.random() * questions.length)];
+  let weaknessRank: number | null = null;
+  let recommendationReason = "随机练习巩固";
+
+  if (!body.knowledgePointId && questions.length > 0) {
+    const masteryRecords = await getMasteryRecordsByUser(user.id, subject);
+    const rankMap = getWeaknessRankMap(masteryRecords, subject);
+
+    if (body.mode === "adaptive") {
+      const ranked = questions
+        .slice()
+        .sort((a, b) => {
+          const rankA = rankMap.get(a.knowledgePointId) ?? Number.MAX_SAFE_INTEGER;
+          const rankB = rankMap.get(b.knowledgePointId) ?? Number.MAX_SAFE_INTEGER;
+          if (rankA !== rankB) return rankA - rankB;
+          return a.id.localeCompare(b.id);
+        })
+        .slice(0, 3);
+      question = ranked[Math.floor(Math.random() * ranked.length)] ?? question;
+      recommendationReason = "薄弱知识点优先推荐";
+    }
+
+    weaknessRank = rankMap.get(question.knowledgePointId) ?? null;
+    if (weaknessRank !== null && body.mode !== "adaptive") {
+      recommendationReason = `知识点薄弱度第 ${weaknessRank} 位`;
+    }
+  }
 
   if (!question) {
     notFound("no questions");
@@ -72,7 +99,11 @@ export const POST = withApi(async (request) => {
       id: question.id,
       stem: question.stem,
       options: question.options,
-      knowledgePointId: question.knowledgePointId
+      knowledgePointId: question.knowledgePointId,
+      recommendation: {
+        reason: recommendationReason,
+        weaknessRank
+      }
     }
   };
 });

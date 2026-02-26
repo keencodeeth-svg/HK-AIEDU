@@ -51,7 +51,7 @@ export const GET = withApi(async (request) => {
     badRequest("from must be <= to");
   }
 
-  const data = getAnalyticsFunnel({
+  const data = await getAnalyticsFunnel({
     from: fromIso ?? undefined,
     to: toIso ?? undefined,
     subject: query.subject?.trim() || undefined,

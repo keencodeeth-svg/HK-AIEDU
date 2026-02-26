@@ -1,6 +1,7 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getClassesByStudent } from "@/lib/classes";
 import { getQuestions } from "@/lib/content";
+import { getExamReviewPack } from "@/lib/exam-review-pack";
 import {
   ensureExamAssignment,
   getExamAssignment,
@@ -42,6 +43,7 @@ export const GET = withApi(async (_request, context) => {
   }
   const draft = await getExamAnswerDraft(paper.id, user.id);
   const submission = await getExamSubmission(paper.id, user.id);
+  const reviewPack = submission ? await getExamReviewPack(paper.id, user.id) : null;
   if (!submission && assignment.status !== "submitted" && paper.status !== "closed") {
     assignment = await markExamAssignmentInProgress({
       paperId: paper.id,
@@ -82,6 +84,13 @@ export const GET = withApi(async (_request, context) => {
           total: submission.total,
           submittedAt: submission.submittedAt,
           answers: submission.answers
+        }
+      : null,
+    reviewPackSummary: reviewPack?.data
+      ? {
+          wrongCount: reviewPack.data.wrongCount,
+          estimatedMinutes: reviewPack.data.summary.estimatedMinutes,
+          topWeakKnowledgePoints: reviewPack.data.summary.topWeakKnowledgePoints
         }
       : null
   };

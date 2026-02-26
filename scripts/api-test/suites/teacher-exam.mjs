@@ -416,4 +416,10 @@ export async function runTeacherExamSuite(context) {
     `POST /api/teacher/alerts/[id]/action mark_done failed: ${markDoneAction.raw}`
   );
   assert.equal(markDoneAction.body?.data?.status, "acknowledged");
+
+  const alertImpact = await apiFetch(`/api/teacher/alerts/${studentRiskAlert.id}/impact`);
+  assert.equal(alertImpact.status, 200, `GET /api/teacher/alerts/[id]/impact failed: ${alertImpact.raw}`);
+  assert.equal(alertImpact.body?.data?.alertId, studentRiskAlert.id);
+  assert.equal(typeof alertImpact.body?.data?.impact?.tracked, "boolean");
+  assert.equal(typeof alertImpact.body?.data?.impact?.elapsedHours, "number");
 }
