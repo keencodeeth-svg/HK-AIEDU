@@ -316,7 +316,7 @@ export default function KnowledgePointsAdminPage() {
   const pageEnd = meta.total === 0 ? 0 : Math.min(meta.total, meta.page * meta.pageSize);
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid">
       <div className="section-head">
         <div>
           <h2>知识点管理</h2>
@@ -325,11 +325,12 @@ export default function KnowledgePointsAdminPage() {
         <span className="chip">管理端</span>
       </div>
 
+      <div className="grid grid-2" style={{ alignItems: "start" }}>
       <Card title="批量生成全学科/全年级（预览后确认）" tag="批量">
         <p style={{ color: "var(--ink-1)", fontSize: 13 }}>
           先生成预览，再确认入库。支持控制单元/章节/知识点数量模板。
         </p>
-        <form onSubmit={handleBatchPreview} style={{ display: "grid", gap: 12, marginTop: 12 }}>
+        <form onSubmit={handleBatchPreview} className="compact-form" style={{ marginTop: 12 }}>
           <div className="grid grid-3">
             <label>
               <div className="section-title">学科</div>
@@ -494,7 +495,7 @@ export default function KnowledgePointsAdminPage() {
         <p style={{ color: "var(--ink-1)", fontSize: 13 }}>
           按“单元 → 章节 → 知识点”生成整本书结构（建议先执行该功能）。
         </p>
-        <form onSubmit={handleTreeGenerate} style={{ display: "grid", gap: 12, marginTop: 12 }}>
+        <form onSubmit={handleTreeGenerate} className="compact-form" style={{ marginTop: 12 }}>
           <label>
             <div className="section-title">学科</div>
             <select
@@ -571,7 +572,7 @@ export default function KnowledgePointsAdminPage() {
         <p style={{ color: "var(--ink-1)", fontSize: 13 }}>
           需要配置 LLM（如智谱），系统会按学科/年级生成知识点。
         </p>
-        <form onSubmit={handleAiGenerate} style={{ display: "grid", gap: 12, marginTop: 12 }}>
+        <form onSubmit={handleAiGenerate} className="compact-form" style={{ marginTop: 12 }}>
           <label>
             <div className="section-title">学科</div>
             <select
@@ -640,7 +641,7 @@ export default function KnowledgePointsAdminPage() {
         ) : null}
       </Card>
       <Card title="新增知识点" tag="新增">
-        <form onSubmit={handleCreate} style={{ display: "grid", gap: 12 }}>
+        <form onSubmit={handleCreate} className="compact-form">
           <label>
             <div className="section-title">学科</div>
             <select
@@ -699,6 +700,7 @@ export default function KnowledgePointsAdminPage() {
           </button>
         </form>
       </Card>
+      </div>
 
       <Card title="知识点列表（分类筛选）" tag="列表">
         <div className="grid grid-3" style={{ gap: 10, alignItems: "end" }}>
@@ -885,7 +887,7 @@ export default function KnowledgePointsAdminPage() {
             </div>
           </div>
 
-          <div className="grid" style={{ gap: 8 }}>
+          <div className="dense-list">
             {loading ? <p>加载中...</p> : null}
             {!loading && list.length === 0 ? (
               <div className="card">

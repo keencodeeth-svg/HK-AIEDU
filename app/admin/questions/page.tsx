@@ -484,7 +484,7 @@ export default function QuestionsAdminPage() {
   const pageEnd = meta.total === 0 ? 0 : Math.min(meta.total, meta.page * meta.pageSize);
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid">
       <div className="section-head">
         <div>
           <h2>题库管理</h2>
@@ -493,38 +493,39 @@ export default function QuestionsAdminPage() {
         <span className="chip">管理端</span>
       </div>
 
-      <Card title="批量导入题库（CSV）" tag="导入">
-        <p style={{ color: "var(--ink-1)", fontSize: 13 }}>
-          支持 CSV 导入。若是 Excel，请先另存为 CSV。
-        </p>
-        <div className="cta-row">
-          <button className="button secondary" type="button" onClick={downloadTemplate}>
-            下载模板
-          </button>
-          <label className="button primary" style={{ cursor: "pointer" }}>
-            选择 CSV 文件
-            <input
-              type="file"
-              accept=".csv"
-              style={{ display: "none" }}
-              onChange={(event) => handleImport(event.target.files?.[0])}
-            />
-          </label>
-        </div>
-        {importMessage ? <div style={{ marginTop: 8 }}>{importMessage}</div> : null}
-        {importErrors.length ? (
-          <div style={{ marginTop: 8, color: "#b42318", fontSize: 13 }}>
-            {importErrors.slice(0, 5).map((err) => (
-              <div key={err}>{err}</div>
-            ))}
+      <div className="grid grid-2" style={{ alignItems: "start" }}>
+        <Card title="批量导入题库（CSV）" tag="导入">
+          <p style={{ color: "var(--ink-1)", fontSize: 13 }}>
+            支持 CSV 导入。若是 Excel，请先另存为 CSV。
+          </p>
+          <div className="cta-row">
+            <button className="button secondary" type="button" onClick={downloadTemplate}>
+              下载模板
+            </button>
+            <label className="button primary" style={{ cursor: "pointer" }}>
+              选择 CSV 文件
+              <input
+                type="file"
+                accept=".csv"
+                style={{ display: "none" }}
+                onChange={(event) => handleImport(event.target.files?.[0])}
+              />
+            </label>
           </div>
-        ) : null}
-      </Card>
-      <Card title="AI 生成题目" tag="AI">
-        <p style={{ color: "var(--ink-1)", fontSize: 13 }}>
-          需要配置 LLM（如智谱），系统会按知识点自动生成选择题。
-        </p>
-        <form onSubmit={handleGenerate} style={{ display: "grid", gap: 12, marginTop: 12 }}>
+          {importMessage ? <div style={{ marginTop: 8 }}>{importMessage}</div> : null}
+          {importErrors.length ? (
+            <div style={{ marginTop: 8, color: "#b42318", fontSize: 13 }}>
+              {importErrors.slice(0, 5).map((err) => (
+                <div key={err}>{err}</div>
+              ))}
+            </div>
+          ) : null}
+        </Card>
+        <Card title="AI 生成题目" tag="AI">
+          <p style={{ color: "var(--ink-1)", fontSize: 13 }}>
+            需要配置 LLM（如智谱），系统会按知识点自动生成选择题。
+          </p>
+          <form onSubmit={handleGenerate} className="compact-form" style={{ marginTop: 12 }}>
           <label>
             <div className="section-title">生成模式</div>
             <select
@@ -621,21 +622,21 @@ export default function QuestionsAdminPage() {
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             />
           </label>
-          <button className="button primary" type="submit" disabled={aiLoading}>
-            {aiLoading ? "生成中..." : "开始生成"}
-          </button>
-        </form>
-        {aiMessage ? <div style={{ marginTop: 8 }}>{aiMessage}</div> : null}
-        {aiErrors.length ? (
-          <div style={{ marginTop: 8, color: "#b42318", fontSize: 13 }}>
-            {aiErrors.slice(0, 5).map((err) => (
-              <div key={err}>{err}</div>
-            ))}
-          </div>
-        ) : null}
-      </Card>
-      <Card title="新增题目" tag="新增">
-        <form onSubmit={handleCreate} style={{ display: "grid", gap: 12 }}>
+            <button className="button primary" type="submit" disabled={aiLoading}>
+              {aiLoading ? "生成中..." : "开始生成"}
+            </button>
+          </form>
+          {aiMessage ? <div style={{ marginTop: 8 }}>{aiMessage}</div> : null}
+          {aiErrors.length ? (
+            <div style={{ marginTop: 8, color: "#b42318", fontSize: 13 }}>
+              {aiErrors.slice(0, 5).map((err) => (
+                <div key={err}>{err}</div>
+              ))}
+            </div>
+          ) : null}
+        </Card>
+        <Card title="新增题目" tag="新增">
+          <form onSubmit={handleCreate} className="compact-form">
           <label>
             <div className="section-title">学科</div>
             <select
@@ -755,11 +756,12 @@ export default function QuestionsAdminPage() {
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             />
           </label>
-          <button className="button primary" type="submit">
-            保存
-          </button>
-        </form>
-      </Card>
+            <button className="button primary" type="submit">
+              保存
+            </button>
+          </form>
+        </Card>
+      </div>
 
       <Card title="题目列表（分类筛选）" tag="列表">
         <div className="grid grid-3" style={{ gap: 10, alignItems: "end" }}>
@@ -968,7 +970,7 @@ export default function QuestionsAdminPage() {
             </div>
           </div>
 
-          <div className="grid" style={{ gap: 8 }}>
+          <div className="dense-list">
             {loading ? <p>加载中...</p> : null}
             {!loading && list.length === 0 ? (
               <div className="card">
