@@ -68,6 +68,11 @@ CREATE TABLE IF NOT EXISTS question_quality_metrics (
   duplicate_risk TEXT NOT NULL DEFAULT 'low',
   ambiguity_risk TEXT NOT NULL DEFAULT 'low',
   answer_consistency INT NOT NULL DEFAULT 0,
+  duplicate_cluster_id TEXT,
+  answer_conflict BOOLEAN NOT NULL DEFAULT false,
+  risk_level TEXT NOT NULL DEFAULT 'low',
+  isolated BOOLEAN NOT NULL DEFAULT false,
+  isolation_reason TEXT[] NOT NULL DEFAULT '{}',
   issues TEXT[] NOT NULL DEFAULT '{}',
   checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -76,11 +81,17 @@ ALTER TABLE question_quality_metrics ADD COLUMN IF NOT EXISTS quality_score INT 
 ALTER TABLE question_quality_metrics ADD COLUMN IF NOT EXISTS duplicate_risk TEXT NOT NULL DEFAULT 'low';
 ALTER TABLE question_quality_metrics ADD COLUMN IF NOT EXISTS ambiguity_risk TEXT NOT NULL DEFAULT 'low';
 ALTER TABLE question_quality_metrics ADD COLUMN IF NOT EXISTS answer_consistency INT NOT NULL DEFAULT 0;
+ALTER TABLE question_quality_metrics ADD COLUMN IF NOT EXISTS duplicate_cluster_id TEXT;
+ALTER TABLE question_quality_metrics ADD COLUMN IF NOT EXISTS answer_conflict BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE question_quality_metrics ADD COLUMN IF NOT EXISTS risk_level TEXT NOT NULL DEFAULT 'low';
+ALTER TABLE question_quality_metrics ADD COLUMN IF NOT EXISTS isolated BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE question_quality_metrics ADD COLUMN IF NOT EXISTS isolation_reason TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE question_quality_metrics ADD COLUMN IF NOT EXISTS issues TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE question_quality_metrics ADD COLUMN IF NOT EXISTS checked_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 CREATE INDEX IF NOT EXISTS question_quality_metrics_question_idx ON question_quality_metrics (question_id);
 CREATE INDEX IF NOT EXISTS question_quality_metrics_score_idx ON question_quality_metrics (quality_score);
+CREATE INDEX IF NOT EXISTS question_quality_metrics_isolated_idx ON question_quality_metrics (isolated);
 
 CREATE TABLE IF NOT EXISTS question_attempts (
   id TEXT PRIMARY KEY,
@@ -215,6 +226,25 @@ CREATE TABLE IF NOT EXISTS teacher_alert_impacts (
 
 CREATE INDEX IF NOT EXISTS teacher_alert_impacts_teacher_idx ON teacher_alert_impacts (teacher_id);
 CREATE INDEX IF NOT EXISTS teacher_alert_impacts_alert_idx ON teacher_alert_impacts (alert_id);
+
+CREATE TABLE IF NOT EXISTS parent_action_receipts (
+  id TEXT PRIMARY KEY,
+  parent_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+  student_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+  source TEXT NOT NULL,
+  action_item_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'done',
+  note TEXT,
+  estimated_minutes INT NOT NULL DEFAULT 0,
+  effect_score INT NOT NULL DEFAULT 0,
+  completed_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (parent_id, student_id, source, action_item_id)
+);
+
+CREATE INDEX IF NOT EXISTS parent_action_receipts_parent_idx ON parent_action_receipts (parent_id, student_id);
+CREATE INDEX IF NOT EXISTS parent_action_receipts_source_idx ON parent_action_receipts (source, action_item_id);
 
 CREATE TABLE IF NOT EXISTS memory_reviews (
   id TEXT PRIMARY KEY,

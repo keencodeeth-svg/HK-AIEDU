@@ -17,6 +17,11 @@ type QualityItem = {
   duplicateRisk: "low" | "medium" | "high";
   ambiguityRisk: "low" | "medium" | "high";
   answerConsistency: number;
+  duplicateClusterId: string | null;
+  answerConflict: boolean;
+  riskLevel: "low" | "medium" | "high";
+  isolated: boolean;
+  isolationReason: string[];
   issues: string[];
   checkedAt: string | null;
 };
@@ -37,6 +42,8 @@ export const GET = withApi(async (request) => {
   const questionId = parsed.questionId?.trim();
   const subject = parsed.subject?.trim();
   const grade = parsed.grade?.trim();
+  const pool = parsed.pool?.trim();
+  const isolatedOnly = pool === "isolated";
   const limit = parsed.limit ? Math.min(parsed.limit, 300) : undefined;
 
   const allQuestions = await getQuestions();
@@ -56,7 +63,8 @@ export const GET = withApi(async (request) => {
   }
 
   const existingMetrics = await listQuestionQualityMetrics({
-    questionIds: filtered.map((item) => item.id)
+    questionIds: filtered.map((item) => item.id),
+    isolated: isolatedOnly ? true : undefined
   });
   const metricMap = new Map(existingMetrics.map((item) => [item.questionId, item]));
 
@@ -73,7 +81,7 @@ export const GET = withApi(async (request) => {
     }
   }
 
-  const data: QualityItem[] = filtered.map((question) => {
+  let data: QualityItem[] = filtered.map((question) => {
     const metric = metricMap.get(question.id);
     return {
       questionId: question.id,
@@ -85,16 +93,33 @@ export const GET = withApi(async (request) => {
       duplicateRisk: metric?.duplicateRisk ?? "low",
       ambiguityRisk: metric?.ambiguityRisk ?? "low",
       answerConsistency: metric?.answerConsistency ?? 0,
+      duplicateClusterId: metric?.duplicateClusterId ?? null,
+      answerConflict: metric?.answerConflict ?? false,
+      riskLevel: metric?.riskLevel ?? "low",
+      isolated: metric?.isolated ?? false,
+      isolationReason: metric?.isolationReason ?? [],
       issues: metric?.issues ?? [],
       checkedAt: metric?.checkedAt ?? null
     };
   });
+  if (isolatedOnly) {
+    data = data.filter((item) => item.isolated);
+  }
+
+  const duplicateClusterCount = new Set(
+    data.filter((item) => item.duplicateClusterId).map((item) => item.duplicateClusterId)
+  ).size;
+  const answerConflictCount = data.filter((item) => item.answerConflict).length;
+  const isolatedCount = data.filter((item) => item.isolated).length;
 
   const summary = {
     total: data.length,
     averageQualityScore: data.length
       ? Math.round(data.reduce((sum, item) => sum + item.qualityScore, 0) / data.length)
       : 0,
+    isolatedCount,
+    duplicateClusterCount,
+    answerConflictCount,
     highRiskCount: data.filter(
       (item) =>
         item.duplicateRisk === "high" || item.ambiguityRisk === "high" || toQualityLevel(item.qualityScore) === "bad"

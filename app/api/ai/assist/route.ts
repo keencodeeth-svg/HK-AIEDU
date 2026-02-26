@@ -1,4 +1,5 @@
 import { generateAssistAnswer } from "@/lib/ai";
+import { assessAiQuality } from "@/lib/ai-quality-control";
 import { badRequest, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 export const dynamic = "force-dynamic";
@@ -32,12 +33,19 @@ export const POST = withApi(async (request) => {
     subject: body.subject,
     grade: body.grade
   });
+  const quality = assessAiQuality({
+    kind: "assist",
+    provider: response.provider,
+    textBlocks: [response.answer, ...(response.steps ?? []), ...(response.hints ?? [])],
+    listCountHint: (response.steps?.length ?? 0) + (response.hints?.length ?? 0)
+  });
 
   return {
     answer: response.answer,
     steps: response.steps,
     hints: response.hints,
     source: response.sources,
-    provider: response.provider
+    provider: response.provider,
+    quality
   };
 });

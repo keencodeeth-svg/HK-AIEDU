@@ -319,15 +319,30 @@ export const questionQualityQuerySchema = v.object<{
   questionId?: string;
   subject?: string;
   grade?: string;
+  pool?: string;
   limit?: number;
 }>(
   {
     questionId: optionalRawString,
     subject: optionalRawString,
     grade: optionalRawString,
+    pool: optionalRawString,
     limit: v.optional(v.number({ integer: true, min: 1, max: 300, coerce: true }))
   },
   { allowUnknown: true }
+);
+
+export const questionIsolationBodySchema = v.object<{
+  questionId?: string;
+  isolated?: boolean;
+  reason?: string[];
+}>(
+  {
+    questionId: optionalRawString,
+    isolated: v.optional(v.boolean()),
+    reason: optionalRawStringArray
+  },
+  { allowUnknown: false }
 );
 
 export const adminLogsQuerySchema = v.object<{ limit?: string }>(

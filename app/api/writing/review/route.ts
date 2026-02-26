@@ -1,6 +1,7 @@
 import { getCurrentUser } from "@/lib/auth";
 import { generateWritingFeedback } from "@/lib/ai";
 import { addWritingSubmission } from "@/lib/writing";
+import { assessAiQuality } from "@/lib/ai-quality-control";
 import { badRequest, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 
@@ -53,13 +54,31 @@ export const POST = withApi(async (request) => {
     badRequest("missing fields");
   }
 
-  const feedback =
-    (await generateWritingFeedback({
-      subject,
-      grade,
-      title,
-      content
-    })) ?? fallbackFeedback(content);
+  const generated = await generateWritingFeedback({
+    subject,
+    grade,
+    title,
+    content
+  });
+  const feedback = generated ?? fallbackFeedback(content);
+  const provider = generated ? process.env.LLM_PROVIDER ?? "llm" : "rule";
+
+  const quality = assessAiQuality({
+    kind: "writing",
+    provider,
+    textBlocks: [
+      feedback.summary,
+      ...(feedback.strengths ?? []),
+      ...(feedback.improvements ?? []),
+      feedback.corrected ?? ""
+    ],
+    listCountHint: (feedback.strengths?.length ?? 0) + (feedback.improvements?.length ?? 0)
+  });
+
+  const feedbackWithQuality = {
+    ...feedback,
+    quality
+  };
 
   const submission = await addWritingSubmission({
     userId: user.id,
@@ -67,8 +86,14 @@ export const POST = withApi(async (request) => {
     grade,
     title,
     content,
-    feedback
+    feedback: feedbackWithQuality
   });
 
-  return { data: submission };
+  return {
+    data: {
+      ...submission,
+      quality,
+      manualReviewRule: quality.needsHumanReview ? "建议教师/家长抽检关键结论后再采用。" : ""
+    }
+  };
 });

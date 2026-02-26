@@ -1,5 +1,10 @@
 import { getStudentContext } from "@/lib/user-context";
+import { getCurrentUser } from "@/lib/auth";
 import { getStudentProfile } from "@/lib/profiles";
+import {
+  buildParentActionReceiptKey,
+  listParentActionReceipts
+} from "@/lib/parent-action-receipts";
 import { getDailyAccuracy, getStatsBetween, getWeakKnowledgePoints, getWeeklyStats } from "@/lib/progress";
 import { unauthorized, withApi } from "@/lib/api/http";
 export const dynamic = "force-dynamic";
@@ -70,6 +75,7 @@ function pickActionItems(params: {
 }
 
 export const GET = withApi(async () => {
+  const user = await getCurrentUser();
   const student = await getStudentContext();
   if (!student) {
     unauthorized();
@@ -122,6 +128,42 @@ export const GET = withApi(async () => {
   const actionItems = pickActionItems({ stats, previousStats, weakPoints });
   const estimatedMinutes = actionItems.reduce((sum, item) => sum + item.estimatedMinutes, 0);
   const parentTips = actionItems.map((item) => item.parentTip);
+  const receipts =
+    user?.role === "parent"
+      ? await listParentActionReceipts({
+          parentId: user.id,
+          studentId: student.id,
+          source: "weekly_report"
+        })
+      : [];
+  const receiptMap = new Map(
+    receipts.map((item) => [
+      buildParentActionReceiptKey({
+        source: item.source,
+        actionItemId: item.actionItemId
+      }),
+      item
+    ])
+  );
+
+  const actionItemsWithReceipt = actionItems.map((item) => {
+    const receipt = receiptMap.get(
+      buildParentActionReceiptKey({ source: "weekly_report", actionItemId: item.id })
+    );
+    return {
+      ...item,
+      receipt: receipt
+        ? {
+            status: receipt.status,
+            completedAt: receipt.completedAt,
+            note: receipt.note ?? null,
+            effectScore: receipt.effectScore
+          }
+        : null
+    };
+  });
+  const completedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "done").length;
+  const effectScore = receipts.reduce((sum, item) => sum + item.effectScore, 0);
 
   return {
     student: { id: student.id, name: student.name, grade: student.grade },
@@ -130,8 +172,22 @@ export const GET = withApi(async () => {
     trend,
     weakPoints,
     suggestions,
-    actionItems,
+    actionItems: actionItemsWithReceipt,
     estimatedMinutes,
-    parentTips
+    parentTips,
+    execution: {
+      suggestedCount: actionItemsWithReceipt.length,
+      completedCount,
+      completionRate: actionItemsWithReceipt.length
+        ? Math.round((completedCount / actionItemsWithReceipt.length) * 100)
+        : 0,
+      lastCompletedAt: receipts[0]?.completedAt ?? null
+    },
+    effect: {
+      accuracyDelta: stats.accuracy - previousStats.accuracy,
+      weeklyAccuracy: stats.accuracy,
+      previousAccuracy: previousStats.accuracy,
+      receiptEffectScore: effectScore
+    }
   };
 });

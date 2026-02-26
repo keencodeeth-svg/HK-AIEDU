@@ -49,6 +49,7 @@ export default function TeacherAiToolsPage() {
   const [outlineResult, setOutlineResult] = useState<any>(null);
   const [wrongForm, setWrongForm] = useState({ classId: "", rangeDays: 7 });
   const [wrongResult, setWrongResult] = useState<any>(null);
+  const [reviewPackResult, setReviewPackResult] = useState<any>(null);
   const [checkForm, setCheckForm] = useState({
     questionId: "",
     stem: "",
@@ -133,6 +134,20 @@ export default function TeacherAiToolsPage() {
     });
     const data = await res.json();
     setWrongResult(data?.data ?? null);
+    setLoading(false);
+  }
+
+  async function handleReviewPack(event: React.FormEvent) {
+    event.preventDefault();
+    if (!wrongForm.classId) return;
+    setLoading(true);
+    const res = await fetch("/api/teacher/lesson/review-pack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(wrongForm)
+    });
+    const data = await res.json();
+    setReviewPackResult(data?.data ?? null);
     setLoading(false);
   }
 
@@ -464,6 +479,84 @@ export default function TeacherAiToolsPage() {
               <ul style={{ margin: "8px 0 0 16px" }}>
                 {wrongResult.script.reminders?.map((item: string) => (
                   <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) : null}
+      </Card>
+
+      <Card title="班级共性错因讲评包" tag="讲评包">
+        <form onSubmit={handleReviewPack} style={{ display: "grid", gap: 12 }}>
+          <label>
+            <div className="section-title">选择班级</div>
+            <select
+              value={wrongForm.classId}
+              onChange={(event) => setWrongForm((prev) => ({ ...prev, classId: event.target.value }))}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              {classes.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} · {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <div className="section-title">统计范围（天）</div>
+            <input
+              type="number"
+              min={3}
+              max={60}
+              value={wrongForm.rangeDays}
+              onChange={(event) => setWrongForm((prev) => ({ ...prev, rangeDays: Number(event.target.value) }))}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            />
+          </label>
+          <button className="button primary" type="submit" disabled={loading}>
+            {loading ? "生成中..." : "生成讲评包"}
+          </button>
+        </form>
+
+        {reviewPackResult ? (
+          <div className="grid" style={{ gap: 12, marginTop: 12 }}>
+            <div className="card">
+              <div className="section-title">讲评顺序</div>
+              <ol style={{ margin: "8px 0 0 16px" }}>
+                {(reviewPackResult.reviewOrder ?? []).map((item: any) => (
+                  <li key={`${item.order}-${item.knowledgePointId}`}>
+                    {item.title} · 错题占比 {item.wrongRatio}% · {item.teachFocus}
+                  </li>
+                ))}
+              </ol>
+            </div>
+            <div className="card">
+              <div className="section-title">例题清单</div>
+              <ul style={{ margin: "8px 0 0 16px" }}>
+                {(reviewPackResult.exemplarQuestions ?? []).map((item: any) => (
+                  <li key={`${item.knowledgePointId}-${item.questionId ?? "fallback"}`}>
+                    {item.title}：{item.stem}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="card">
+              <div className="section-title">课堂任务</div>
+              <ul style={{ margin: "8px 0 0 16px" }}>
+                {(reviewPackResult.classTasks ?? []).map((item: any) => (
+                  <li key={item.id}>
+                    {item.title}：{item.instruction}（目标：{item.target}）
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="card">
+              <div className="section-title">课后复练单</div>
+              <ul style={{ margin: "8px 0 0 16px" }}>
+                {(reviewPackResult.afterClassReviewSheet ?? []).map((item: any) => (
+                  <li key={item.id}>
+                    {item.title}：建议 {item.suggestedCount} 题，{item.dueInDays} 天内完成
+                  </li>
                 ))}
               </ul>
             </div>

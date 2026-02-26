@@ -1,6 +1,7 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getKnowledgePoints, getQuestions } from "@/lib/content";
 import { generateExplainVariants } from "@/lib/ai";
+import { assessAiQuality } from "@/lib/ai-quality-control";
 import { notFound, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 
@@ -38,6 +39,12 @@ export const POST = withApi(async (request) => {
     explanation: question.explanation,
     knowledgePointTitle: kp?.title
   });
+  const quality = assessAiQuality({
+    kind: "explanation",
+    provider: variants.provider,
+    textBlocks: [variants.text, variants.visual, variants.analogy],
+    listCountHint: 3
+  });
 
-  return { data: variants };
+  return { data: { ...variants, quality } };
 });

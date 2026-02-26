@@ -12,6 +12,11 @@ export type QuestionQualitySnapshot = {
   duplicateRisk: QualityRiskLevel;
   ambiguityRisk: QualityRiskLevel;
   answerConsistency: number;
+  duplicateClusterId: string | null;
+  answerConflict: boolean;
+  riskLevel: QualityRiskLevel;
+  isolated: boolean;
+  isolationReason: string[];
   issues: string[];
 };
 
@@ -34,7 +39,7 @@ export type QuestionQualityInput = {
 
 export type QuestionQualityCandidate = Pick<
   Question,
-  "id" | "subject" | "grade" | "knowledgePointId" | "stem"
+  "id" | "subject" | "grade" | "knowledgePointId" | "stem" | "answer"
 >;
 
 type DbQuestionQualityMetric = {
@@ -44,6 +49,11 @@ type DbQuestionQualityMetric = {
   duplicate_risk: string;
   ambiguity_risk: string;
   answer_consistency: number;
+  duplicate_cluster_id: string | null;
+  answer_conflict: boolean | null;
+  risk_level: string | null;
+  isolated: boolean | null;
+  isolation_reason: string[] | null;
   issues: string[] | null;
   checked_at: string;
 };
@@ -67,17 +77,9 @@ function normalizeRisk(value: string | null | undefined): QualityRiskLevel {
   return "low";
 }
 
-function mapDbMetric(row: DbQuestionQualityMetric): QuestionQualityMetric {
-  return {
-    id: row.id,
-    questionId: row.question_id,
-    qualityScore: clampInt(row.quality_score),
-    duplicateRisk: normalizeRisk(row.duplicate_risk),
-    ambiguityRisk: normalizeRisk(row.ambiguity_risk),
-    answerConsistency: clampInt(row.answer_consistency),
-    issues: row.issues ?? [],
-    checkedAt: row.checked_at
-  };
+function buildClusterId(seed: string) {
+  const hash = crypto.createHash("md5").update(seed).digest("hex").slice(0, 10);
+  return `dup-${hash}`;
 }
 
 function buildCharSet(text: string) {
@@ -103,21 +105,94 @@ function calcSimilarity(a: string, b: string) {
   return common / Math.max(setA.size, setB.size);
 }
 
+function deriveRiskLevel(input: {
+  qualityScore: number;
+  duplicateRisk: QualityRiskLevel;
+  ambiguityRisk: QualityRiskLevel;
+  answerConsistency: number;
+  answerConflict: boolean;
+}) {
+  if (
+    input.answerConflict ||
+    input.duplicateRisk === "high" ||
+    input.ambiguityRisk === "high" ||
+    input.answerConsistency < 60 ||
+    input.qualityScore < 55
+  ) {
+    return "high" as QualityRiskLevel;
+  }
+  if (
+    input.duplicateRisk === "medium" ||
+    input.ambiguityRisk === "medium" ||
+    input.answerConsistency < 75 ||
+    input.qualityScore < 80
+  ) {
+    return "medium" as QualityRiskLevel;
+  }
+  return "low" as QualityRiskLevel;
+}
+
+function buildIsolationReason(input: {
+  riskLevel: QualityRiskLevel;
+  issues: string[];
+  answerConflict: boolean;
+  duplicateRisk: QualityRiskLevel;
+  ambiguityRisk: QualityRiskLevel;
+}) {
+  if (input.riskLevel !== "high") return [];
+  const reasons = [...input.issues];
+  if (input.answerConflict) {
+    reasons.unshift("疑似答案冲突：高相似题存在不同答案。");
+  }
+  if (input.duplicateRisk === "high") {
+    reasons.unshift("重复风险高：题干与已有题高度相似。");
+  }
+  if (input.ambiguityRisk === "high") {
+    reasons.unshift("歧义风险高：题干/选项存在歧义。");
+  }
+  return Array.from(new Set(reasons)).slice(0, 6);
+}
+
+function mapDbMetric(row: DbQuestionQualityMetric): QuestionQualityMetric {
+  const riskLevel = normalizeRisk(row.risk_level);
+  const isolated = Boolean(row.isolated);
+  return {
+    id: row.id,
+    questionId: row.question_id,
+    qualityScore: clampInt(row.quality_score),
+    duplicateRisk: normalizeRisk(row.duplicate_risk),
+    ambiguityRisk: normalizeRisk(row.ambiguity_risk),
+    answerConsistency: clampInt(row.answer_consistency),
+    duplicateClusterId: row.duplicate_cluster_id ?? null,
+    answerConflict: Boolean(row.answer_conflict),
+    riskLevel,
+    isolated,
+    isolationReason: row.isolation_reason ?? [],
+    issues: row.issues ?? [],
+    checkedAt: row.checked_at
+  };
+}
+
 function evaluateDuplicateRisk(
-  input: Pick<QuestionQualityInput, "questionId" | "knowledgePointId" | "stem">,
+  input: Pick<QuestionQualityInput, "questionId" | "knowledgePointId" | "stem" | "answer">,
   candidates: QuestionQualityCandidate[]
 ) {
-  const normalized = normalizeText(input.stem);
-  if (!normalized) {
+  const normalizedStem = normalizeText(input.stem);
+  const normalizedAnswer = normalizeText(input.answer);
+  if (!normalizedStem) {
     return {
       risk: "high" as QualityRiskLevel,
-      issues: ["题干为空，无法进行有效去重。"]
+      issues: ["题干为空，无法进行有效去重。"],
+      clusterId: null as string | null,
+      answerConflict: false
     };
   }
 
   let exactMatches = 0;
   let maxSimilarity = 0;
   let sameKnowledgePointSimilarity = 0;
+  let answerConflict = false;
+  const clusterCandidates: Array<{ id: string; similarity: number }> = [];
 
   candidates.forEach((candidate) => {
     if (input.questionId && candidate.id === input.questionId) {
@@ -127,34 +202,58 @@ function evaluateDuplicateRisk(
     if (!candidateNormalized) {
       return;
     }
-    if (candidateNormalized === normalized) {
+
+    let similarity = 0;
+    if (candidateNormalized === normalizedStem) {
       exactMatches += 1;
-      return;
+      similarity = 1;
+    } else {
+      similarity = calcSimilarity(normalizedStem, candidateNormalized);
+      if (similarity > maxSimilarity) {
+        maxSimilarity = similarity;
+      }
+      if (input.knowledgePointId && candidate.knowledgePointId === input.knowledgePointId) {
+        sameKnowledgePointSimilarity = Math.max(sameKnowledgePointSimilarity, similarity);
+      }
     }
-    const similarity = calcSimilarity(normalized, candidateNormalized);
-    if (similarity > maxSimilarity) {
-      maxSimilarity = similarity;
+
+    if (similarity >= 0.82) {
+      clusterCandidates.push({ id: candidate.id, similarity });
     }
-    if (input.knowledgePointId && candidate.knowledgePointId === input.knowledgePointId) {
-      sameKnowledgePointSimilarity = Math.max(sameKnowledgePointSimilarity, similarity);
+
+    if (similarity >= 0.92) {
+      const candidateAnswer = normalizeText(candidate.answer ?? "");
+      if (normalizedAnswer && candidateAnswer && candidateAnswer !== normalizedAnswer) {
+        answerConflict = true;
+      }
     }
   });
 
+  const sortedIds = clusterCandidates.map((item) => item.id).sort();
+  const clusterSeed = [normalizedStem.slice(0, 32), ...sortedIds].join("|");
+  const clusterId = sortedIds.length ? buildClusterId(clusterSeed) : null;
+  const issues: string[] = [];
+
+  let risk: QualityRiskLevel = "low";
   if (exactMatches > 0 || maxSimilarity >= 0.92) {
-    return {
-      risk: "high" as QualityRiskLevel,
-      issues: ["题干与题库已有题目重复或高度相似。"]
-    };
+    risk = "high";
+    issues.push("题干与题库已有题目重复或高度相似。");
+  } else if (maxSimilarity >= 0.78 || sameKnowledgePointSimilarity >= 0.72) {
+    risk = "medium";
+    issues.push("题干与已有题目相似度较高，建议改写。");
   }
 
-  if (maxSimilarity >= 0.78 || sameKnowledgePointSimilarity >= 0.72) {
-    return {
-      risk: "medium" as QualityRiskLevel,
-      issues: ["题干与已有题目相似度较高，建议改写。"]
-    };
+  if (answerConflict) {
+    risk = "high";
+    issues.push("高相似题出现答案冲突，请人工复核。");
   }
 
-  return { risk: "low" as QualityRiskLevel, issues: [] };
+  return {
+    risk,
+    issues: Array.from(new Set(issues)),
+    clusterId,
+    answerConflict
+  };
 }
 
 function toAmbiguityRisk(score: number): QualityRiskLevel {
@@ -227,7 +326,8 @@ export function evaluateQuestionQuality(
     {
       questionId: input.questionId,
       knowledgePointId: input.knowledgePointId,
-      stem
+      stem,
+      answer
     },
     comparableCandidates
   );
@@ -238,15 +338,36 @@ export function evaluateQuestionQuality(
   let penalty = 0;
   penalty += duplicate.risk === "high" ? 30 : duplicate.risk === "medium" ? 15 : 0;
   penalty += ambiguityRisk === "high" ? 30 : ambiguityRisk === "medium" ? 15 : 0;
+  penalty += duplicate.answerConflict ? 25 : 0;
   penalty += Math.round((100 - answerConsistency) * 0.4);
 
   const qualityScore = clampInt(100 - penalty);
+  const riskLevel = deriveRiskLevel({
+    qualityScore,
+    duplicateRisk: duplicate.risk,
+    ambiguityRisk,
+    answerConsistency,
+    answerConflict: duplicate.answerConflict
+  });
+  const isolated = riskLevel === "high";
+  const isolationReason = buildIsolationReason({
+    riskLevel,
+    issues,
+    answerConflict: duplicate.answerConflict,
+    duplicateRisk: duplicate.risk,
+    ambiguityRisk
+  });
 
   return {
     qualityScore,
     duplicateRisk: duplicate.risk,
     ambiguityRisk,
     answerConsistency,
+    duplicateClusterId: duplicate.clusterId,
+    answerConflict: duplicate.answerConflict,
+    riskLevel,
+    isolated,
+    isolationReason,
     issues: Array.from(new Set(issues))
   };
 }
@@ -264,7 +385,10 @@ export async function getQuestionQualityMetric(questionId: string) {
   return row ? mapDbMetric(row) : null;
 }
 
-export async function listQuestionQualityMetrics(params: { questionIds?: string[] } = {}) {
+export async function listQuestionQualityMetrics(params: {
+  questionIds?: string[];
+  isolated?: boolean;
+} = {}) {
   const ids = params.questionIds;
   if (ids && ids.length === 0) {
     return [] as QuestionQualityMetric[];
@@ -272,18 +396,32 @@ export async function listQuestionQualityMetrics(params: { questionIds?: string[
 
   if (!isDbEnabled()) {
     const list = readJson<QuestionQualityMetric[]>(QUALITY_FILE, []);
-    const filtered = ids ? list.filter((item) => ids.includes(item.questionId)) : list;
+    const filtered = list.filter((item) => {
+      if (ids && !ids.includes(item.questionId)) return false;
+      if (params.isolated !== undefined && Boolean(item.isolated) !== params.isolated) return false;
+      return true;
+    });
     return filtered.sort((a, b) => b.checkedAt.localeCompare(a.checkedAt));
   }
 
-  const rows = ids
-    ? await query<DbQuestionQualityMetric>(
-        "SELECT * FROM question_quality_metrics WHERE question_id = ANY($1::text[]) ORDER BY checked_at DESC",
-        [ids]
-      )
-    : await query<DbQuestionQualityMetric>(
-        "SELECT * FROM question_quality_metrics ORDER BY checked_at DESC"
-      );
+  const where: string[] = [];
+  const values: Array<string[] | boolean> = [];
+  if (ids) {
+    values.push(ids);
+    where.push(`question_id = ANY($${values.length}::text[])`);
+  }
+  if (params.isolated !== undefined) {
+    values.push(params.isolated);
+    where.push(`isolated = $${values.length}`);
+  }
+
+  const sql = `
+    SELECT *
+    FROM question_quality_metrics
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY checked_at DESC
+  `;
+  const rows = await query<DbQuestionQualityMetric>(sql, values);
   return rows.map(mapDbMetric);
 }
 
@@ -291,6 +429,8 @@ export async function upsertQuestionQualityMetric(
   input: { questionId: string } & QuestionQualitySnapshot & { checkedAt?: string }
 ) {
   const checkedAt = input.checkedAt ?? new Date().toISOString();
+  const normalizedRiskLevel = normalizeRisk(input.riskLevel);
+  const isolated = Boolean(input.isolated);
 
   if (!isDbEnabled()) {
     const list = readJson<QuestionQualityMetric[]>(QUALITY_FILE, []);
@@ -302,6 +442,11 @@ export async function upsertQuestionQualityMetric(
       duplicateRisk: normalizeRisk(input.duplicateRisk),
       ambiguityRisk: normalizeRisk(input.ambiguityRisk),
       answerConsistency: clampInt(input.answerConsistency),
+      duplicateClusterId: input.duplicateClusterId ?? null,
+      answerConflict: Boolean(input.answerConflict),
+      riskLevel: normalizedRiskLevel,
+      isolated,
+      isolationReason: Array.from(new Set(input.isolationReason ?? [])),
       issues: Array.from(new Set(input.issues)),
       checkedAt
     };
@@ -322,13 +467,18 @@ export async function upsertQuestionQualityMetric(
 
   const row = await queryOne<DbQuestionQualityMetric>(
     `INSERT INTO question_quality_metrics
-      (id, question_id, quality_score, duplicate_risk, ambiguity_risk, answer_consistency, issues, checked_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      (id, question_id, quality_score, duplicate_risk, ambiguity_risk, answer_consistency, duplicate_cluster_id, answer_conflict, risk_level, isolated, isolation_reason, issues, checked_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      ON CONFLICT (question_id) DO UPDATE SET
        quality_score = EXCLUDED.quality_score,
        duplicate_risk = EXCLUDED.duplicate_risk,
        ambiguity_risk = EXCLUDED.ambiguity_risk,
        answer_consistency = EXCLUDED.answer_consistency,
+       duplicate_cluster_id = EXCLUDED.duplicate_cluster_id,
+       answer_conflict = EXCLUDED.answer_conflict,
+       risk_level = EXCLUDED.risk_level,
+       isolated = EXCLUDED.isolated,
+       isolation_reason = EXCLUDED.isolation_reason,
        issues = EXCLUDED.issues,
        checked_at = EXCLUDED.checked_at
      RETURNING *`,
@@ -339,6 +489,11 @@ export async function upsertQuestionQualityMetric(
       normalizeRisk(input.duplicateRisk),
       normalizeRisk(input.ambiguityRisk),
       clampInt(input.answerConsistency),
+      input.duplicateClusterId ?? null,
+      Boolean(input.answerConflict),
+      normalizedRiskLevel,
+      isolated,
+      Array.from(new Set(input.isolationReason ?? [])),
       Array.from(new Set(input.issues)),
       checkedAt
     ]
@@ -369,6 +524,38 @@ export async function evaluateAndUpsertQuestionQuality(params: {
   });
 }
 
+export async function setQuestionIsolation(input: {
+  questionId: string;
+  isolated: boolean;
+  isolationReason?: string[];
+}) {
+  const existing = await getQuestionQualityMetric(input.questionId);
+  const reasons = Array.from(new Set(input.isolationReason ?? existing?.isolationReason ?? []));
+  if (!existing) {
+    return upsertQuestionQualityMetric({
+      questionId: input.questionId,
+      qualityScore: 0,
+      duplicateRisk: "low",
+      ambiguityRisk: "low",
+      answerConsistency: 0,
+      duplicateClusterId: null,
+      answerConflict: false,
+      riskLevel: input.isolated ? "high" : "low",
+      isolated: input.isolated,
+      isolationReason: reasons,
+      issues: []
+    });
+  }
+
+  return upsertQuestionQualityMetric({
+    ...existing,
+    isolated: input.isolated,
+    riskLevel: input.isolated ? existing.riskLevel || "high" : existing.riskLevel,
+    isolationReason: reasons.length ? reasons : existing.isolationReason,
+    checkedAt: new Date().toISOString()
+  });
+}
+
 export async function deleteQuestionQualityMetric(questionId: string) {
   if (!isDbEnabled()) {
     const list = readJson<QuestionQualityMetric[]>(QUALITY_FILE, []);
@@ -394,6 +581,11 @@ export function attachQualityFields<T extends { id: string }>(
     duplicateRisk: metric?.duplicateRisk ?? null,
     ambiguityRisk: metric?.ambiguityRisk ?? null,
     answerConsistency: metric?.answerConsistency ?? null,
+    duplicateClusterId: metric?.duplicateClusterId ?? null,
+    answerConflict: metric?.answerConflict ?? false,
+    riskLevel: metric?.riskLevel ?? null,
+    isolated: metric?.isolated ?? false,
+    isolationReason: metric?.isolationReason ?? [],
     qualityIssues: metric?.issues ?? [],
     qualityCheckedAt: metric?.checkedAt ?? null
   };

@@ -3,6 +3,7 @@ import { getClassById, getClassStudentIds } from "@/lib/classes";
 import { getAssignmentById, getAssignmentSubmission } from "@/lib/assignments";
 import { getAssignmentUploads } from "@/lib/assignment-uploads";
 import { generateHomeworkReview } from "@/lib/ai";
+import { assessAiQuality } from "@/lib/ai-quality-control";
 import { upsertAssignmentAIReview } from "@/lib/assignment-ai";
 import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
@@ -68,12 +69,37 @@ export const POST = withApi(async (request, context) => {
     }))
   });
 
+  const quality = assessAiQuality({
+    kind: "assignment_review",
+    provider: review.provider,
+    textBlocks: [
+      review.summary,
+      ...(review.strengths ?? []),
+      ...(review.issues ?? []),
+      ...(review.suggestions ?? []),
+      review.writing?.summary ?? ""
+    ],
+    listCountHint:
+      (review.rubric?.length ?? 0) +
+      (review.strengths?.length ?? 0) +
+      (review.suggestions?.length ?? 0)
+  });
+
+  const result = {
+    ...review,
+    quality,
+    manualReviewRule: quality.needsHumanReview ? "建议教师先人工复核关键评分项再下发。" : ""
+  };
+
   const saved = await upsertAssignmentAIReview({
     assignmentId: assignment.id,
     studentId: body.studentId,
-    result: review,
+    result,
     provider: review.provider
   });
 
-  return { data: saved };
+  return {
+    data: saved,
+    quality
+  };
 });

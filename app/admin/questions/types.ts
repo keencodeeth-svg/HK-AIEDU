@@ -23,6 +23,11 @@ export type Question = {
   duplicateRisk?: "low" | "medium" | "high" | null;
   ambiguityRisk?: "low" | "medium" | "high" | null;
   answerConsistency?: number | null;
+  duplicateClusterId?: string | null;
+  answerConflict?: boolean;
+  riskLevel?: "low" | "medium" | "high" | null;
+  isolated?: boolean;
+  isolationReason?: string[];
   qualityIssues?: string[];
   qualityCheckedAt?: string | null;
 };

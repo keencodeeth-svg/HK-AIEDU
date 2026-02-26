@@ -31,6 +31,7 @@ type Props = {
   pageStart: number;
   pageEnd: number;
   onDelete: (id: string) => Promise<void>;
+  onToggleIsolation: (id: string, isolated: boolean) => Promise<void>;
 };
 
 export default function QuestionsListPanel({
@@ -46,7 +47,8 @@ export default function QuestionsListPanel({
   setPage,
   pageStart,
   pageEnd,
-  onDelete
+  onDelete,
+  onToggleIsolation
 }: Props) {
   const controlStyle = {
     width: "100%",
@@ -320,11 +322,14 @@ export default function QuestionsListPanel({
               {typeof item.qualityScore === "number" ? (
                 <div style={{ marginBottom: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
                   <span className="badge">质量分 {item.qualityScore}</span>
+                  {item.riskLevel ? <span className="badge">风险等级 {riskLabel[item.riskLevel]}</span> : null}
                   {item.duplicateRisk ? <span className="badge">重复风险 {riskLabel[item.duplicateRisk]}</span> : null}
                   {item.ambiguityRisk ? <span className="badge">歧义风险 {riskLabel[item.ambiguityRisk]}</span> : null}
                   {typeof item.answerConsistency === "number" ? (
                     <span className="badge">答案一致性 {item.answerConsistency}</span>
                   ) : null}
+                  {item.answerConflict ? <span className="badge">答案冲突</span> : null}
+                  {item.isolated ? <span className="badge">隔离池</span> : null}
                 </div>
               ) : null}
               <div
@@ -355,6 +360,13 @@ export default function QuestionsListPanel({
               ) : null}
               <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <div className="badge">答案：{item.answer}</div>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => onToggleIsolation(item.id, !item.isolated)}
+                >
+                  {item.isolated ? "移出隔离池" : "加入隔离池"}
+                </button>
                 <button className="button secondary" type="button" onClick={() => onDelete(item.id)}>
                   删除
                 </button>

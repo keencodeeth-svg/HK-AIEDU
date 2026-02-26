@@ -1,5 +1,6 @@
 import { getCurrentUser } from "@/lib/auth";
 import { generateAssistAnswer } from "@/lib/ai";
+import { assessAiQuality } from "@/lib/ai-quality-control";
 import { badRequest, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 
@@ -46,6 +47,12 @@ export const POST = withApi(async (request) => {
   const feedback = body.studentAnswer
     ? `我看到你的思路：${body.studentAnswer}。我们先对照已知条件和关键公式，再把步骤拆成 2-3 步。`
     : null;
+  const quality = assessAiQuality({
+    kind: "coach",
+    provider: assist.provider,
+    textBlocks: [assist.answer, ...(assist.steps ?? []), ...(assist.hints ?? []), feedback ?? ""],
+    listCountHint: checkpoints.length + (assist.steps?.length ?? 0)
+  });
 
   return {
     data: {
@@ -54,7 +61,8 @@ export const POST = withApi(async (request) => {
       hints: assist.hints,
       checkpoints,
       feedback,
-      provider: assist.provider
+      provider: assist.provider,
+      quality
     }
   };
 });

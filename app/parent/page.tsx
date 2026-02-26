@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Card from "@/components/Card";
 import Stat from "@/components/Stat";
 import EduIcon from "@/components/EduIcon";
@@ -12,37 +12,67 @@ export default function ParentPage() {
   const [reminderCopied, setReminderCopied] = useState(false);
   const [assignmentList, setAssignmentList] = useState<any[]>([]);
   const [assignmentSummary, setAssignmentSummary] = useState<any>(null);
+  const [assignmentExecution, setAssignmentExecution] = useState<any>(null);
   const [assignmentReminder, setAssignmentReminder] = useState("");
   const [assignmentActionItems, setAssignmentActionItems] = useState<any[]>([]);
   const [assignmentParentTips, setAssignmentParentTips] = useState<string[]>([]);
   const [assignmentEstimatedMinutes, setAssignmentEstimatedMinutes] = useState(0);
   const [assignmentCopied, setAssignmentCopied] = useState(false);
   const [favorites, setFavorites] = useState<any[]>([]);
+  const [receiptLoadingKey, setReceiptLoadingKey] = useState<string | null>(null);
+
+  const loadWeekly = useCallback(async () => {
+    const res = await fetch("/api/report/weekly");
+    const data = await res.json();
+    setReport(data);
+  }, []);
+
+  const loadAssignments = useCallback(async () => {
+    const res = await fetch("/api/parent/assignments");
+    const data = await res.json();
+    setAssignmentList(data.data ?? []);
+    setAssignmentSummary(data.summary ?? null);
+    setAssignmentExecution(data.execution ?? null);
+    setAssignmentReminder(data.reminderText ?? "");
+    setAssignmentActionItems(data.actionItems ?? []);
+    setAssignmentParentTips(data.parentTips ?? []);
+    setAssignmentEstimatedMinutes(data.estimatedMinutes ?? 0);
+  }, []);
 
   useEffect(() => {
-    fetch("/api/report/weekly")
-      .then((res) => res.json())
-      .then((data) => setReport(data));
+    loadWeekly();
     fetch("/api/corrections")
       .then((res) => res.json())
       .then((data) => {
         setTasks(data.data ?? []);
         setSummary(data.summary ?? null);
       });
-    fetch("/api/parent/assignments")
-      .then((res) => res.json())
-      .then((data) => {
-        setAssignmentList(data.data ?? []);
-        setAssignmentSummary(data.summary ?? null);
-        setAssignmentReminder(data.reminderText ?? "");
-        setAssignmentActionItems(data.actionItems ?? []);
-        setAssignmentParentTips(data.parentTips ?? []);
-        setAssignmentEstimatedMinutes(data.estimatedMinutes ?? 0);
-      });
+    loadAssignments();
     fetch("/api/parent/favorites")
       .then((res) => res.json())
       .then((data) => setFavorites(data.data ?? []));
-  }, []);
+  }, [loadAssignments, loadWeekly]);
+
+  async function markReceipt(source: "weekly_report" | "assignment_plan", item: any) {
+    const key = `${source}:${item.id}`;
+    setReceiptLoadingKey(key);
+    await fetch("/api/parent/action-items/receipt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source,
+        actionItemId: item.id,
+        status: "done",
+        estimatedMinutes: item.estimatedMinutes ?? 0
+      })
+    });
+    if (source === "weekly_report") {
+      await loadWeekly();
+    } else {
+      await loadAssignments();
+    }
+    setReceiptLoadingKey(null);
+  }
 
   if (!report) {
     return <Card title="家长周报">加载中...</Card>;
@@ -105,9 +135,27 @@ export default function ParentPage() {
                 <p>{item.description}</p>
                 <div style={{ fontSize: 12, color: "var(--ink-1)" }}>建议时长：{item.estimatedMinutes} 分钟</div>
                 <div style={{ fontSize: 12, color: "var(--ink-1)" }}>家长提示：{item.parentTip}</div>
+                <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                  执行状态：{item.receipt?.status === "done" ? "已打卡" : "未打卡"}
+                  {item.receipt?.completedAt ? ` · ${new Date(item.receipt.completedAt).toLocaleString("zh-CN")}` : ""}
+                </div>
+                <div className="cta-row" style={{ marginTop: 8 }}>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    disabled={receiptLoadingKey === `weekly_report:${item.id}`}
+                    onClick={() => markReceipt("weekly_report", item)}
+                  >
+                    {receiptLoadingKey === `weekly_report:${item.id}` ? "打卡中..." : "执行打卡"}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
+        </div>
+        <div style={{ marginTop: 10, fontSize: 12, color: "var(--ink-1)" }}>
+          执行闭环：建议 {report.execution?.suggestedCount ?? 0} 项 · 已打卡 {report.execution?.completedCount ?? 0} 项 ·
+          完成率 {report.execution?.completionRate ?? 0}% · 效果分 {report.effect?.receiptEffectScore ?? 0}
         </div>
       </Card>
       <Card title="薄弱点与建议" tag="诊断">
@@ -226,12 +274,33 @@ export default function ParentPage() {
                   <div className="section-title">{item.title}</div>
                   <p>{item.description}</p>
                   <div style={{ fontSize: 12, color: "var(--ink-1)" }}>建议时长：{item.estimatedMinutes} 分钟</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                    执行状态：{item.receipt?.status === "done" ? "已打卡" : "未打卡"}
+                    {item.receipt?.completedAt
+                      ? ` · ${new Date(item.receipt.completedAt).toLocaleString("zh-CN")}`
+                      : ""}
+                  </div>
+                  <div className="cta-row" style={{ marginTop: 8 }}>
+                    <button
+                      className="button ghost"
+                      type="button"
+                      disabled={receiptLoadingKey === `assignment_plan:${item.id}`}
+                      onClick={() => markReceipt("assignment_plan", item)}
+                    >
+                      {receiptLoadingKey === `assignment_plan:${item.id}` ? "打卡中..." : "执行打卡"}
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           ) : (
             <p>暂无行动卡。</p>
           )}
+        </div>
+        <div style={{ marginTop: 10, fontSize: 12, color: "var(--ink-1)" }}>
+          执行闭环：建议 {assignmentExecution?.suggestedCount ?? 0} 项 · 已打卡{" "}
+          {assignmentExecution?.completedCount ?? 0} 项 · 完成率{" "}
+          {assignmentExecution?.completionRate ?? 0}%
         </div>
         <div style={{ marginTop: 12 }}>
           <div className="section-title">作业清单</div>

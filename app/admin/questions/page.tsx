@@ -329,6 +329,19 @@ export default function QuestionsAdminPage() {
     loadQuestions();
   }
 
+  async function handleToggleIsolation(id: string, isolated: boolean) {
+    await fetch("/api/admin/questions/quality/isolation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        questionId: id,
+        isolated,
+        reason: isolated ? ["管理员手动加入隔离池"] : ["管理员手动移出隔离池"]
+      })
+    });
+    loadQuestions();
+  }
+
   const pageStart = meta.total === 0 ? 0 : (meta.page - 1) * meta.pageSize + 1;
   const pageEnd = meta.total === 0 ? 0 : Math.min(meta.total, meta.page * meta.pageSize);
 
@@ -395,6 +408,7 @@ export default function QuestionsAdminPage() {
           pageStart={pageStart}
           pageEnd={pageEnd}
           onDelete={handleDelete}
+          onToggleIsolation={handleToggleIsolation}
         />
       ) : null}
     </div>

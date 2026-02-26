@@ -75,6 +75,10 @@ export const POST = withApi(async (request) => {
     duplicateRisk: string | null;
     ambiguityRisk: string | null;
     answerConsistency: number | null;
+    duplicateClusterId: string | null;
+    answerConflict: boolean;
+    riskLevel: string | null;
+    isolated: boolean;
   }> = [];
   const failed: { index: number; reason: string }[] = [];
 
@@ -135,7 +139,11 @@ export const POST = withApi(async (request) => {
       qualityScore: quality?.qualityScore ?? null,
       duplicateRisk: quality?.duplicateRisk ?? null,
       ambiguityRisk: quality?.ambiguityRisk ?? null,
-      answerConsistency: quality?.answerConsistency ?? null
+      answerConsistency: quality?.answerConsistency ?? null,
+      duplicateClusterId: quality?.duplicateClusterId ?? null,
+      answerConflict: quality?.answerConflict ?? false,
+      riskLevel: quality?.riskLevel ?? null,
+      isolated: quality?.isolated ?? false
     });
   }
 

@@ -1,6 +1,10 @@
 import { getCurrentUser, getUserById } from "@/lib/auth";
 import { getClassesByStudent } from "@/lib/classes";
 import { getAssignmentProgressByStudent, getAssignmentsByClassIds } from "@/lib/assignments";
+import {
+  buildParentActionReceiptKey,
+  listParentActionReceipts
+} from "@/lib/parent-action-receipts";
 import { getWrongReviewQueue } from "@/lib/wrong-review";
 import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
 
@@ -132,6 +136,37 @@ export const GET = withApi(async () => {
   });
   const estimatedMinutes = actionItems.reduce((sum, item) => sum + item.estimatedMinutes, 0);
   const parentTips = actionItems.map((item) => item.parentTip);
+  const receipts = await listParentActionReceipts({
+    parentId: user.id,
+    studentId: user.studentId,
+    source: "assignment_plan"
+  });
+  const receiptMap = new Map(
+    receipts.map((item) => [
+      buildParentActionReceiptKey({
+        source: item.source,
+        actionItemId: item.actionItemId
+      }),
+      item
+    ])
+  );
+  const actionItemsWithReceipt = actionItems.map((item) => {
+    const receipt = receiptMap.get(
+      buildParentActionReceiptKey({ source: "assignment_plan", actionItemId: item.id })
+    );
+    return {
+      ...item,
+      receipt: receipt
+        ? {
+            status: receipt.status,
+            completedAt: receipt.completedAt,
+            note: receipt.note ?? null,
+            effectScore: receipt.effectScore
+          }
+        : null
+    };
+  });
+  const completedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "done").length;
 
   const reminderText = [
     `${student.name}本周作业提醒：待完成 ${pending.length} 份。`,
@@ -154,8 +189,20 @@ export const GET = withApi(async () => {
       reviewDueToday
     },
     reminderText,
-    actionItems,
+    actionItems: actionItemsWithReceipt,
     estimatedMinutes,
-    parentTips
+    parentTips,
+    execution: {
+      suggestedCount: actionItemsWithReceipt.length,
+      completedCount,
+      completionRate: actionItemsWithReceipt.length
+        ? Math.round((completedCount / actionItemsWithReceipt.length) * 100)
+        : 0,
+      lastCompletedAt: receipts[0]?.completedAt ?? null
+    },
+    effect: {
+      pendingDelta: pending.length - completed.length,
+      receiptEffectScore: receipts.reduce((sum, item) => sum + item.effectScore, 0)
+    }
   };
 });
