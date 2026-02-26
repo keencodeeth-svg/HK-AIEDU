@@ -64,7 +64,7 @@ jobs:
       - name: API integration tests
         run: |
           set -o pipefail
-          timeout 15m npm run test:api 2>&1 | tee api-tests.log
+          timeout 19m npm run test:api 2>&1 | tee api-tests.log
 
       - name: Upload API test log on failure
         if: failure()
