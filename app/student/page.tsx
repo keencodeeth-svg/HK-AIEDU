@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
-import { SUBJECT_LABELS } from "@/lib/constants";
 
 type PlanItem = {
   knowledgePointId: string;
@@ -15,11 +14,46 @@ type PlanItem = {
   masteryLevel?: "weak" | "developing" | "strong";
 };
 
-type ReviewQueueSummary = {
-  totalActive: number;
-  dueToday: number;
-  overdue: number;
-  upcoming: number;
+type TodayTaskStatus = "overdue" | "due_today" | "in_progress" | "pending" | "upcoming" | "optional";
+
+type TodayTask = {
+  id: string;
+  source: "assignment" | "exam" | "wrong_review" | "plan" | "challenge";
+  sourceId: string;
+  title: string;
+  description: string;
+  href: string;
+  status: TodayTaskStatus;
+  priority: number;
+  dueAt: string | null;
+  group: "must_do" | "continue_learning" | "growth";
+  tags: string[];
+};
+
+type TodayTaskPayload = {
+  generatedAt: string;
+  summary: {
+    total: number;
+    mustDo: number;
+    continueLearning: number;
+    growth: number;
+    overdue: number;
+    dueToday: number;
+    inProgress: number;
+    bySource: {
+      assignment: number;
+      exam: number;
+      wrongReview: number;
+      plan: number;
+      challenge: number;
+    };
+  };
+  groups: {
+    mustDo: TodayTask[];
+    continueLearning: TodayTask[];
+    growth: TodayTask[];
+  };
+  tasks: TodayTask[];
 };
 
 type EntryCategory = "priority" | "practice" | "growth";
@@ -247,16 +281,37 @@ const CATEGORY_META: Record<EntryCategory, { label: string; description: string;
 
 const ENTRY_CATEGORIES: EntryCategory[] = ["priority", "practice", "growth"];
 
+function getTodayTaskStatusLabel(status: TodayTaskStatus) {
+  if (status === "overdue") return "逾期";
+  if (status === "due_today") return "今日到期";
+  if (status === "in_progress") return "进行中";
+  if (status === "upcoming") return "待开始";
+  if (status === "optional") return "可选";
+  return "待完成";
+}
+
 export default function StudentPage() {
   const [plan, setPlan] = useState<PlanItem[]>([]);
   const [motivation, setMotivation] = useState<{ streak: number; badges: any[]; weekly: any } | null>(null);
-  const [reviewQueueSummary, setReviewQueueSummary] = useState<ReviewQueueSummary | null>(null);
+  const [todayTasks, setTodayTasks] = useState<TodayTaskPayload | null>(null);
+  const [todayTaskError, setTodayTaskError] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState("");
   const [joinMessage, setJoinMessage] = useState<string | null>(null);
   const [joinRequests, setJoinRequests] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [activeCategory, setActiveCategory] = useState<EntryCategory>("priority");
   const [showAllEntries, setShowAllEntries] = useState(false);
+
+  const loadTodayTasks = useCallback(async () => {
+    setTodayTaskError(null);
+    const res = await fetch("/api/student/today-tasks");
+    const payload = await res.json();
+    if (!res.ok) {
+      setTodayTaskError(payload?.error ?? "加载今日任务失败");
+      return;
+    }
+    setTodayTasks(payload?.data ?? null);
+  }, []);
 
   useEffect(() => {
     fetch("/api/plan")
@@ -267,14 +322,12 @@ export default function StudentPage() {
       });
     fetch("/api/student/motivation")
       .then((res) => res.json())
-      .then((data) => setMotivation(data));
+      .then((data) => setMotivation(data?.data ?? data));
     fetch("/api/student/join-requests")
       .then((res) => res.json())
       .then((data) => setJoinRequests(data.data ?? []));
-    fetch("/api/wrong-book/review-queue")
-      .then((res) => res.json())
-      .then((data) => setReviewQueueSummary(data?.data?.summary ?? null));
-  }, []);
+    loadTodayTasks();
+  }, [loadTodayTasks]);
 
   useEffect(() => {
     setShowAllEntries(false);
@@ -291,6 +344,11 @@ export default function StudentPage() {
   );
 
   const weakPlanCount = useMemo(() => plan.filter((item) => item.masteryLevel === "weak").length, [plan]);
+  const todayTaskPreview = useMemo(() => (todayTasks?.tasks ?? []).slice(0, 6), [todayTasks]);
+  const hiddenTodayTaskCount = useMemo(
+    () => Math.max(0, (todayTasks?.tasks?.length ?? 0) - todayTaskPreview.length),
+    [todayTasks, todayTaskPreview.length]
+  );
 
   const categoryCounts = useMemo(() => {
     return ENTRY_ITEMS.reduce<Record<EntryCategory, number>>(
@@ -339,6 +397,7 @@ export default function StudentPage() {
     if (Array.isArray(items)) {
       setPlan(items);
     }
+    await loadTodayTasks();
     setRefreshing(false);
   }
 
@@ -395,29 +454,53 @@ export default function StudentPage() {
       </div>
 
       <div className="grid grid-2">
-        <Card title="今日任务" tag="计划">
-          {plan.length === 0 ? (
-            <p>尚未生成学习计划，请先完成诊断测评。</p>
+        <Card title="今日任务" tag="队列">
+          {todayTaskError ? <p>{todayTaskError}</p> : null}
+          {todayTaskPreview.length === 0 ? (
+            <p>当前暂无待处理任务，保持节奏即可。</p>
           ) : (
-            <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4 }}>
-              {plan.slice(0, 3).map((item) => (
-                <li key={item.knowledgePointId}>
-                  {item.subject ? `【${SUBJECT_LABELS[item.subject] ?? item.subject}】` : ""}练习 {item.targetCount} 题，截止{" "}
-                  {new Date(item.dueDate).toLocaleDateString("zh-CN")}
-                  {typeof item.masteryScore === "number" ? `，当前掌握 ${item.masteryScore} 分` : ""}
-                </li>
+            <div className="grid" style={{ gap: 8 }}>
+              {todayTaskPreview.map((task) => (
+                <div className="card" key={task.id}>
+                  <div className="card-header">
+                    <div className="section-title" style={{ fontSize: 14 }}>
+                      {task.title}
+                    </div>
+                    <span className="card-tag">{getTodayTaskStatusLabel(task.status)}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--ink-1)" }}>{task.description}</div>
+                  <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {task.tags.slice(0, 2).map((tag) => (
+                      <span className="badge" key={`${task.id}-${tag}`}>
+                        {tag}
+                      </span>
+                    ))}
+                    {task.dueAt ? (
+                      <span style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                        截止 {new Date(task.dueAt).toLocaleString("zh-CN")}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="cta-row" style={{ marginTop: 8 }}>
+                    <Link className="button ghost" href={task.href}>
+                      去完成
+                    </Link>
+                  </div>
+                </div>
               ))}
-              <li>
-                今日错题复练 {reviewQueueSummary?.dueToday ?? 0} 题
-                {reviewQueueSummary?.overdue ? `（逾期 ${reviewQueueSummary.overdue}）` : ""}
-              </li>
-            </ul>
+            </div>
           )}
           <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <span className="badge">必做 {todayTasks?.summary?.mustDo ?? 0}</span>
+            <span className="badge">逾期 {todayTasks?.summary?.overdue ?? 0}</span>
+            <span className="badge">今日到期 {todayTasks?.summary?.dueToday ?? 0}</span>
             <span className="badge">计划题量 {totalPlanCount}</span>
             <span className="badge">薄弱知识点 {weakPlanCount}</span>
-            <span className="badge">复练待完成 {reviewQueueSummary?.dueToday ?? 0}</span>
+            <span className="badge">复练任务 {todayTasks?.summary?.bySource?.wrongReview ?? 0}</span>
           </div>
+          {hiddenTodayTaskCount > 0 ? (
+            <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-1)" }}>还有 {hiddenTodayTaskCount} 项任务待处理。</div>
+          ) : null}
           <div className="cta-row" style={{ marginTop: 12 }}>
             <button className="button secondary" type="button" onClick={refreshPlan}>
               {refreshing ? "刷新中..." : "刷新学习计划"}

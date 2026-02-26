@@ -158,6 +158,23 @@ export async function runLearningSuite(context) {
   assert.ok(queueItem, "Review queue should include newly wrong question");
   assert.equal(queueItem?.intervalLevel, 1, "Review queue item should start at intervalLevel 1");
 
+  const todayTasks = await apiFetch("/api/student/today-tasks");
+  assert.equal(todayTasks.status, 200, `GET /api/student/today-tasks failed: ${todayTasks.raw}`);
+  assert.equal(typeof todayTasks.body?.data?.summary?.total, "number", "Today tasks should include summary.total");
+  assert.equal(typeof todayTasks.body?.data?.summary?.mustDo, "number", "Today tasks should include summary.mustDo");
+  assert.ok(Array.isArray(todayTasks.body?.data?.tasks), "Today tasks should include tasks array");
+  assert.ok(
+    Array.isArray(todayTasks.body?.data?.groups?.mustDo),
+    "Today tasks should include groups.mustDo array"
+  );
+  const firstTodayTask = todayTasks.body?.data?.tasks?.[0];
+  if (firstTodayTask) {
+    assert.equal(typeof firstTodayTask.id, "string");
+    assert.equal(typeof firstTodayTask.source, "string");
+    assert.equal(typeof firstTodayTask.href, "string");
+    assert.equal(typeof firstTodayTask.priority, "number");
+  }
+
   const reviewResult = await apiFetch("/api/wrong-book/review-result", {
     method: "POST",
     json: {
