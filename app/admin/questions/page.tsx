@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@/components/Card";
 import { GRADE_OPTIONS, SUBJECT_LABELS, SUBJECT_OPTIONS } from "@/lib/constants";
 
@@ -25,16 +25,42 @@ type Question = {
   questionType?: string;
   tags?: string[];
   abilities?: string[];
+  qualityScore?: number | null;
+  duplicateRisk?: "low" | "medium" | "high" | null;
+  ambiguityRisk?: "low" | "medium" | "high" | null;
+  answerConsistency?: number | null;
+  qualityIssues?: string[];
+  qualityCheckedAt?: string | null;
 };
 
-type QuestionQuality = {
-  questionId: string;
-  qualityScore: number;
-  duplicateRisk: "low" | "medium" | "high";
-  ambiguityRisk: "low" | "medium" | "high";
-  answerConsistency: number;
-  issues: string[];
-  checkedAt: string | null;
+type FacetItem = { value: string; count: number };
+
+type QuestionTreeNode = {
+  subject: string;
+  count: number;
+  grades: Array<{
+    grade: string;
+    count: number;
+    chapters: Array<{ chapter: string; count: number }>;
+  }>;
+};
+
+type QuestionListPayload = {
+  data?: Question[];
+  meta?: {
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  };
+  facets?: {
+    subjects?: FacetItem[];
+    grades?: FacetItem[];
+    chapters?: FacetItem[];
+    difficulties?: FacetItem[];
+    questionTypes?: FacetItem[];
+  };
+  tree?: QuestionTreeNode[];
 };
 
 const difficultyLabel: Record<string, string> = {
@@ -58,8 +84,32 @@ const riskLabel: Record<"low" | "medium" | "high", string> = {
 export default function QuestionsAdminPage() {
   const [list, setList] = useState<Question[]>([]);
   const [knowledgePoints, setKnowledgePoints] = useState<KnowledgePoint[]>([]);
-  const [qualityMap, setQualityMap] = useState<Record<string, QuestionQuality>>({});
   const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState({
+    subject: "all",
+    grade: "all",
+    chapter: "all",
+    difficulty: "all",
+    questionType: "all",
+    search: ""
+  });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [meta, setMeta] = useState({ total: 0, page: 1, pageSize: 20, totalPages: 1 });
+  const [tree, setTree] = useState<QuestionTreeNode[]>([]);
+  const [facets, setFacets] = useState<{
+    subjects: FacetItem[];
+    grades: FacetItem[];
+    chapters: FacetItem[];
+    difficulties: FacetItem[];
+    questionTypes: FacetItem[];
+  }>({
+    subjects: [],
+    grades: [],
+    chapters: [],
+    difficulties: [],
+    questionTypes: []
+  });
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [form, setForm] = useState({
@@ -101,29 +151,53 @@ export default function QuestionsAdminPage() {
     [knowledgePoints, aiForm.subject, aiForm.grade]
   );
 
-  async function load() {
-    setLoading(true);
-    const [qRes, kpRes, qualityRes] = await Promise.all([
-      fetch("/api/admin/questions"),
-      fetch("/api/admin/knowledge-points"),
-      fetch("/api/admin/questions/quality")
-    ]);
-    const qData = await qRes.json();
+  const loadKnowledgePoints = useCallback(async () => {
+    const kpRes = await fetch("/api/admin/knowledge-points");
     const kpData = await kpRes.json();
-    const qualityData = qualityRes.ok ? await qualityRes.json() : { data: [] };
-    setList(qData.data ?? []);
     setKnowledgePoints(kpData.data ?? []);
-    const map: Record<string, QuestionQuality> = {};
-    (qualityData.data ?? []).forEach((item: QuestionQuality) => {
-      map[item.questionId] = item;
+  }, []);
+
+  const loadQuestions = useCallback(async () => {
+    setLoading(true);
+    const searchParams = new URLSearchParams();
+    if (query.subject !== "all") searchParams.set("subject", query.subject);
+    if (query.grade !== "all") searchParams.set("grade", query.grade);
+    if (query.chapter !== "all") searchParams.set("chapter", query.chapter);
+    if (query.difficulty !== "all") searchParams.set("difficulty", query.difficulty);
+    if (query.questionType !== "all") searchParams.set("questionType", query.questionType);
+    if (query.search.trim()) searchParams.set("search", query.search.trim());
+    searchParams.set("page", String(page));
+    searchParams.set("pageSize", String(pageSize));
+
+    const qRes = await fetch(`/api/admin/questions?${searchParams.toString()}`);
+    const qData = (await qRes.json()) as QuestionListPayload;
+    setList(qData.data ?? []);
+    setMeta(
+      qData.meta ?? {
+        total: qData.data?.length ?? 0,
+        page,
+        pageSize,
+        totalPages: 1
+      }
+    );
+    setTree(qData.tree ?? []);
+    setFacets({
+      subjects: qData.facets?.subjects ?? [],
+      grades: qData.facets?.grades ?? [],
+      chapters: qData.facets?.chapters ?? [],
+      difficulties: qData.facets?.difficulties ?? [],
+      questionTypes: qData.facets?.questionTypes ?? []
     });
-    setQualityMap(map);
     setLoading(false);
-  }
+  }, [page, pageSize, query]);
 
   useEffect(() => {
-    load();
-  }, []);
+    loadKnowledgePoints();
+  }, [loadKnowledgePoints]);
+
+  useEffect(() => {
+    loadQuestions();
+  }, [loadQuestions]);
 
   useEffect(() => {
     if (knowledgePoints.length && !form.knowledgePointId) {
@@ -142,6 +216,11 @@ export default function QuestionsAdminPage() {
       setAiForm((prev) => ({ ...prev, chapter: chapterOptions[0] }));
     }
   }, [aiForm.mode, aiForm.chapter, chapterOptions]);
+
+  function patchQuery(next: Partial<typeof query>) {
+    setQuery((prev) => ({ ...prev, ...next }));
+    setPage(1);
+  }
 
   function parseCsv(text: string) {
     const rows: string[][] = [];
@@ -298,7 +377,7 @@ export default function QuestionsAdminPage() {
       `已导入 ${data.created} 题，失败 ${data.failed?.length ?? 0} 条，高风险 ${highRiskCount} 题。`
     );
     setImportErrors(errors);
-    load();
+    loadQuestions();
   }
 
   async function handleGenerate(event: React.FormEvent) {
@@ -350,7 +429,7 @@ export default function QuestionsAdminPage() {
     ).length;
     setAiMessage(`已生成 ${data.created?.length ?? 0} 题，高风险 ${highRiskCount} 题。`);
     setAiLoading(false);
-    load();
+    loadQuestions();
   }
 
   async function handleCreate(event: React.FormEvent) {
@@ -393,13 +472,16 @@ export default function QuestionsAdminPage() {
       tags: "",
       abilities: ""
     });
-    load();
+    loadQuestions();
   }
 
   async function handleDelete(id: string) {
     await fetch(`/api/admin/questions/${id}`, { method: "DELETE" });
-    load();
+    loadQuestions();
   }
+
+  const pageStart = meta.total === 0 ? 0 : (meta.page - 1) * meta.pageSize + 1;
+  const pageEnd = meta.total === 0 ? 0 : Math.min(meta.total, meta.page * meta.pageSize);
 
   return (
     <div className="grid" style={{ gap: 18 }}>
@@ -679,46 +761,289 @@ export default function QuestionsAdminPage() {
         </form>
       </Card>
 
-      <Card title="题目列表" tag="列表">
-        {loading ? <p>加载中...</p> : null}
-        <div className="grid" style={{ gap: 8 }}>
-          {list.map((item) => (
-            <div className="card" key={item.id}>
-              {(() => {
-                const quality = qualityMap[item.id];
-                return quality ? (
-                  <div style={{ marginBottom: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    <span className="badge">质量分 {quality.qualityScore}</span>
-                    <span className="badge">重复风险 {riskLabel[quality.duplicateRisk]}</span>
-                    <span className="badge">歧义风险 {riskLabel[quality.ambiguityRisk]}</span>
-                    <span className="badge">答案一致性 {quality.answerConsistency}</span>
+      <Card title="题目列表（分类筛选）" tag="列表">
+        <div className="grid grid-3" style={{ gap: 10, alignItems: "end" }}>
+          <label>
+            <div className="section-title">搜索</div>
+            <input
+              value={query.search}
+              onChange={(event) => patchQuery({ search: event.target.value })}
+              placeholder="题干 / 标签 / 章节 / 答案"
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            />
+          </label>
+          <label>
+            <div className="section-title">学科</div>
+            <select
+              value={query.subject}
+              onChange={(event) => patchQuery({ subject: event.target.value, grade: "all", chapter: "all" })}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value="all">全部学科</option>
+              {facets.subjects.map((item) => (
+                <option value={item.value} key={item.value}>
+                  {(SUBJECT_LABELS[item.value] ?? item.value) + ` (${item.count})`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <div className="section-title">年级</div>
+            <select
+              value={query.grade}
+              onChange={(event) => patchQuery({ grade: event.target.value, chapter: "all" })}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value="all">全部年级</option>
+              {facets.grades.map((item) => (
+                <option value={item.value} key={item.value}>
+                  {`${item.value} 年级 (${item.count})`}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="grid grid-3" style={{ gap: 10, alignItems: "end", marginTop: 10 }}>
+          <label>
+            <div className="section-title">章节</div>
+            <select
+              value={query.chapter}
+              onChange={(event) => patchQuery({ chapter: event.target.value })}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value="all">全部章节</option>
+              {facets.chapters.map((item) => (
+                <option value={item.value} key={item.value}>
+                  {`${item.value} (${item.count})`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <div className="section-title">难度</div>
+            <select
+              value={query.difficulty}
+              onChange={(event) => patchQuery({ difficulty: event.target.value })}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value="all">全部难度</option>
+              {facets.difficulties.map((item) => (
+                <option value={item.value} key={item.value}>
+                  {(difficultyLabel[item.value] ?? item.value) + ` (${item.count})`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <div className="section-title">题型</div>
+            <select
+              value={query.questionType}
+              onChange={(event) => patchQuery({ questionType: event.target.value })}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value="all">全部题型</option>
+              {facets.questionTypes.map((item) => (
+                <option value={item.value} key={item.value}>
+                  {(questionTypeLabel[item.value] ?? item.value) + ` (${item.count})`}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="cta-row" style={{ marginTop: 10 }}>
+          <button
+            className="button ghost"
+            type="button"
+            onClick={() =>
+              patchQuery({
+                subject: "all",
+                grade: "all",
+                chapter: "all",
+                difficulty: "all",
+                questionType: "all",
+                search: ""
+              })
+            }
+          >
+            清空筛选
+          </button>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, color: "var(--ink-1)" }}>每页</span>
+            <select
+              value={pageSize}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value));
+                setPage(1);
+              }}
+              style={{ padding: 8, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+            </select>
+          </label>
+        </div>
+
+        <div
+          style={{
+            marginTop: 12,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            gap: 12
+          }}
+        >
+          <div className="card" style={{ padding: 14 }}>
+            <div className="section-title" style={{ marginTop: 0 }}>
+              分类树
+            </div>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() => patchQuery({ subject: "all", grade: "all", chapter: "all" })}
+              style={{ width: "100%", justifyContent: "space-between" }}
+            >
+              全部题目
+              <span>{meta.total}</span>
+            </button>
+            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+              {tree.map((subjectNode) => (
+                <div key={subjectNode.subject} className="card" style={{ padding: 10 }}>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    onClick={() =>
+                      patchQuery({
+                        subject: subjectNode.subject,
+                        grade: "all",
+                        chapter: "all"
+                      })
+                    }
+                    style={{ width: "100%", justifyContent: "space-between" }}
+                  >
+                    {SUBJECT_LABELS[subjectNode.subject] ?? subjectNode.subject}
+                    <span>{subjectNode.count}</span>
+                  </button>
+                  <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                    {subjectNode.grades.map((gradeNode) => (
+                      <div key={`${subjectNode.subject}-${gradeNode.grade}`}>
+                        <button
+                          className="button ghost"
+                          type="button"
+                          onClick={() =>
+                            patchQuery({
+                              subject: subjectNode.subject,
+                              grade: gradeNode.grade,
+                              chapter: "all"
+                            })
+                          }
+                          style={{ width: "100%", justifyContent: "space-between", padding: "8px 12px" }}
+                        >
+                          {gradeNode.grade} 年级
+                          <span>{gradeNode.count}</span>
+                        </button>
+                        <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {gradeNode.chapters.slice(0, 6).map((chapterNode) => (
+                            <button
+                              key={`${subjectNode.subject}-${gradeNode.grade}-${chapterNode.chapter}`}
+                              className="badge"
+                              type="button"
+                              onClick={() =>
+                                patchQuery({
+                                  subject: subjectNode.subject,
+                                  grade: gradeNode.grade,
+                                  chapter: chapterNode.chapter
+                                })
+                              }
+                              style={{ border: "none", cursor: "pointer" }}
+                            >
+                              {chapterNode.chapter} · {chapterNode.count}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ) : null;
-              })()}
-              <div className="section-title">{item.stem}</div>
-              <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
-                {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级 · 难度{" "}
-                {difficultyLabel[item.difficulty ?? "medium"] ?? item.difficulty ?? "中"} · 题型{" "}
-                {questionTypeLabel[item.questionType ?? "choice"] ?? item.questionType ?? "选择题"} · 选项{" "}
-                {item.options.length} 个
-              </div>
-              {item.tags?.length ? (
-                <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {item.tags.map((tag) => (
-                    <span className="badge" key={`${item.id}-${tag}`}>
-                      {tag}
-                    </span>
-                  ))}
                 </div>
-              ) : null}
-              <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-                <div className="badge">答案：{item.answer}</div>
-                <button className="button secondary" onClick={() => handleDelete(item.id)}>
-                  删除
-                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid" style={{ gap: 8 }}>
+            {loading ? <p>加载中...</p> : null}
+            {!loading && list.length === 0 ? (
+              <div className="card">
+                <div className="section-title" style={{ marginTop: 0 }}>
+                  暂无结果
+                </div>
+                <div style={{ color: "var(--ink-1)", fontSize: 13 }}>请调整筛选条件后重试。</div>
+              </div>
+            ) : null}
+            {list.map((item) => (
+              <div className="card" key={item.id}>
+                {typeof item.qualityScore === "number" ? (
+                  <div style={{ marginBottom: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    <span className="badge">质量分 {item.qualityScore}</span>
+                    {item.duplicateRisk ? <span className="badge">重复风险 {riskLabel[item.duplicateRisk]}</span> : null}
+                    {item.ambiguityRisk ? <span className="badge">歧义风险 {riskLabel[item.ambiguityRisk]}</span> : null}
+                    {typeof item.answerConsistency === "number" ? (
+                      <span className="badge">答案一致性 {item.answerConsistency}</span>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="section-title">{item.stem}</div>
+                <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                  {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级 · 难度{" "}
+                  {difficultyLabel[item.difficulty ?? "medium"] ?? item.difficulty ?? "中"} · 题型{" "}
+                  {questionTypeLabel[item.questionType ?? "choice"] ?? item.questionType ?? "选择题"} · 选项{" "}
+                  {item.options.length} 个
+                </div>
+                {item.tags?.length ? (
+                  <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {item.tags.map((tag) => (
+                      <span className="badge" key={`${item.id}-${tag}`}>
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                  <div className="badge">答案：{item.answer}</div>
+                  <button className="button secondary" onClick={() => handleDelete(item.id)}>
+                    删除
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            <div className="card" style={{ padding: 14 }}>
+              <div className="cta-row" style={{ marginTop: 0, justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                  共 {meta.total} 条，当前 {pageStart}-{pageEnd}
+                </div>
+                <div className="cta-row" style={{ marginTop: 0 }}>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    disabled={meta.page <= 1}
+                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                  >
+                    上一页
+                  </button>
+                  <span className="badge">
+                    第 {meta.page}/{Math.max(meta.totalPages, 1)} 页
+                  </span>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    disabled={meta.page >= meta.totalPages}
+                    onClick={() => setPage((prev) => Math.min(meta.totalPages, prev + 1))}
+                  >
+                    下一页
+                  </button>
+                </div>
               </div>
             </div>
-          ))}
+          </div>
         </div>
       </Card>
     </div>

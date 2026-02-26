@@ -632,6 +632,27 @@ async function run() {
       "Create question should include answerConsistency"
     );
 
+    const knowledgePointList = await apiFetch(
+      "/api/admin/knowledge-points?subject=math&grade=4&page=1&pageSize=10"
+    );
+    assert.equal(
+      knowledgePointList.status,
+      200,
+      `GET /api/admin/knowledge-points with pagination failed: ${knowledgePointList.raw}`
+    );
+    assert.ok(Array.isArray(knowledgePointList.body?.data), "Knowledge point list should include data array");
+    assert.equal(typeof knowledgePointList.body?.meta?.total, "number", "Knowledge point list should include meta");
+    assert.ok(Array.isArray(knowledgePointList.body?.tree), "Knowledge point list should include classification tree");
+    assert.ok(Array.isArray(knowledgePointList.body?.facets?.subjects), "Knowledge point list should include facets");
+
+    const questionList = await apiFetch("/api/admin/questions?subject=math&grade=4&page=1&pageSize=10");
+    assert.equal(questionList.status, 200, `GET /api/admin/questions with pagination failed: ${questionList.raw}`);
+    assert.ok(Array.isArray(questionList.body?.data), "Question list should include data array");
+    assert.equal(typeof questionList.body?.meta?.total, "number", "Question list should include meta");
+    assert.ok(Array.isArray(questionList.body?.tree), "Question list should include classification tree");
+    assert.ok(Array.isArray(questionList.body?.facets?.subjects), "Question list should include facets");
+    assert.equal(typeof questionList.body?.data?.[0]?.qualityScore, "number", "Question list should include quality");
+
     const patchQuestion = await apiFetch(`/api/admin/questions/${createdQuestionId}`, {
       method: "PATCH",
       json: { explanation: "patched-by-api-test" }

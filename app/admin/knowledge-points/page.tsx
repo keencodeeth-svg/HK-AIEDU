@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@/components/Card";
 import { GRADE_OPTIONS, SUBJECT_LABELS, SUBJECT_OPTIONS } from "@/lib/constants";
 
@@ -13,9 +13,61 @@ type KnowledgePoint = {
   unit?: string;
 };
 
+type FacetItem = { value: string; count: number };
+
+type KnowledgePointTreeNode = {
+  subject: string;
+  count: number;
+  grades: Array<{
+    grade: string;
+    count: number;
+    units: Array<{ unit: string; count: number }>;
+  }>;
+};
+
+type KnowledgePointListPayload = {
+  data?: KnowledgePoint[];
+  meta?: {
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  };
+  facets?: {
+    subjects?: FacetItem[];
+    grades?: FacetItem[];
+    units?: FacetItem[];
+    chapters?: FacetItem[];
+  };
+  tree?: KnowledgePointTreeNode[];
+};
+
 export default function KnowledgePointsAdminPage() {
   const [list, setList] = useState<KnowledgePoint[]>([]);
+  const [allKnowledgePoints, setAllKnowledgePoints] = useState<KnowledgePoint[]>([]);
   const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState({
+    subject: "all",
+    grade: "all",
+    unit: "all",
+    chapter: "all",
+    search: ""
+  });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [meta, setMeta] = useState({ total: 0, page: 1, pageSize: 20, totalPages: 1 });
+  const [tree, setTree] = useState<KnowledgePointTreeNode[]>([]);
+  const [facets, setFacets] = useState<{
+    subjects: FacetItem[];
+    grades: FacetItem[];
+    units: FacetItem[];
+    chapters: FacetItem[];
+  }>({
+    subjects: [],
+    grades: [],
+    units: [],
+    chapters: []
+  });
   const [form, setForm] = useState({
     subject: "math",
     grade: "4",
@@ -53,28 +105,69 @@ export default function KnowledgePointsAdminPage() {
   const [batchShowDetail, setBatchShowDetail] = useState(false);
 
   const chapterOptions = useMemo(() => {
-    const filtered = list.filter((kp) => kp.subject === aiForm.subject && kp.grade === aiForm.grade);
+    const filtered = allKnowledgePoints.filter(
+      (kp) => kp.subject === aiForm.subject && kp.grade === aiForm.grade
+    );
     const chapters = filtered.map((kp) => kp.chapter).filter(Boolean);
     return Array.from(new Set(chapters));
-  }, [list, aiForm.subject, aiForm.grade]);
+  }, [allKnowledgePoints, aiForm.subject, aiForm.grade]);
 
-  async function load() {
-    setLoading(true);
+  const loadAllKnowledgePoints = useCallback(async () => {
     const res = await fetch("/api/admin/knowledge-points");
     const data = await res.json();
+    setAllKnowledgePoints(data.data ?? []);
+  }, []);
+
+  const loadKnowledgePointList = useCallback(async () => {
+    setLoading(true);
+    const searchParams = new URLSearchParams();
+    if (query.subject !== "all") searchParams.set("subject", query.subject);
+    if (query.grade !== "all") searchParams.set("grade", query.grade);
+    if (query.unit !== "all") searchParams.set("unit", query.unit);
+    if (query.chapter !== "all") searchParams.set("chapter", query.chapter);
+    if (query.search.trim()) searchParams.set("search", query.search.trim());
+    searchParams.set("page", String(page));
+    searchParams.set("pageSize", String(pageSize));
+
+    const res = await fetch(`/api/admin/knowledge-points?${searchParams.toString()}`);
+    const data = (await res.json()) as KnowledgePointListPayload;
     setList(data.data ?? []);
+    setMeta(
+      data.meta ?? {
+        total: data.data?.length ?? 0,
+        page,
+        pageSize,
+        totalPages: 1
+      }
+    );
+    setTree(data.tree ?? []);
+    setFacets({
+      subjects: data.facets?.subjects ?? [],
+      grades: data.facets?.grades ?? [],
+      units: data.facets?.units ?? [],
+      chapters: data.facets?.chapters ?? []
+    });
     setLoading(false);
-  }
+  }, [page, pageSize, query]);
 
   useEffect(() => {
-    load();
-  }, []);
+    loadAllKnowledgePoints();
+  }, [loadAllKnowledgePoints]);
+
+  useEffect(() => {
+    loadKnowledgePointList();
+  }, [loadKnowledgePointList]);
 
   useEffect(() => {
     if (!aiForm.chapter && chapterOptions.length) {
       setAiForm((prev) => ({ ...prev, chapter: chapterOptions[0] }));
     }
   }, [aiForm.chapter, chapterOptions]);
+
+  function patchQuery(next: Partial<typeof query>) {
+    setQuery((prev) => ({ ...prev, ...next }));
+    setPage(1);
+  }
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault();
@@ -84,7 +177,7 @@ export default function KnowledgePointsAdminPage() {
       body: JSON.stringify(form)
     });
     setForm({ ...form, title: "", chapter: "" });
-    load();
+    await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
   }
 
   async function handleAiGenerate(event: React.FormEvent) {
@@ -117,7 +210,7 @@ export default function KnowledgePointsAdminPage() {
     }
     setAiMessage(`已生成 ${data.created?.length ?? 0} 条知识点。`);
     setAiLoading(false);
-    load();
+    await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
   }
 
   async function handleTreeGenerate(event: React.FormEvent) {
@@ -151,7 +244,7 @@ export default function KnowledgePointsAdminPage() {
     }
     setTreeMessage(`已生成 ${data.created?.length ?? 0} 条知识点。`);
     setTreeLoading(false);
-    load();
+    await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
   }
 
   async function handleBatchPreview(event: React.FormEvent) {
@@ -211,13 +304,16 @@ export default function KnowledgePointsAdminPage() {
     }
     setBatchError(`已入库 ${data.created?.length ?? 0} 条，跳过 ${data.skipped?.length ?? 0} 条。`);
     setBatchConfirming(false);
-    load();
+    await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
   }
 
   async function handleDelete(id: string) {
     await fetch(`/api/admin/knowledge-points/${id}`, { method: "DELETE" });
-    load();
+    await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
   }
+
+  const pageStart = meta.total === 0 ? 0 : (meta.page - 1) * meta.pageSize + 1;
+  const pageEnd = meta.total === 0 ? 0 : Math.min(meta.total, meta.page * meta.pageSize);
 
   return (
     <div className="grid" style={{ gap: 18 }}>
@@ -604,22 +700,245 @@ export default function KnowledgePointsAdminPage() {
         </form>
       </Card>
 
-      <Card title="知识点列表" tag="列表">
-        {loading ? <p>加载中...</p> : null}
-        <div className="grid" style={{ gap: 8 }}>
-          {list.map((item) => (
-            <div className="card" key={item.id} style={{ display: "flex", justifyContent: "space-between" }}>
-              <div>
-                <div className="section-title">{item.title}</div>
+      <Card title="知识点列表（分类筛选）" tag="列表">
+        <div className="grid grid-3" style={{ gap: 10, alignItems: "end" }}>
+          <label>
+            <div className="section-title">搜索</div>
+            <input
+              value={query.search}
+              onChange={(event) => patchQuery({ search: event.target.value })}
+              placeholder="知识点 / 章节 / 单元"
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            />
+          </label>
+          <label>
+            <div className="section-title">学科</div>
+            <select
+              value={query.subject}
+              onChange={(event) => patchQuery({ subject: event.target.value, grade: "all", unit: "all" })}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value="all">全部学科</option>
+              {facets.subjects.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {(SUBJECT_LABELS[item.value] ?? item.value) + ` (${item.count})`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <div className="section-title">年级</div>
+            <select
+              value={query.grade}
+              onChange={(event) => patchQuery({ grade: event.target.value, unit: "all" })}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value="all">全部年级</option>
+              {facets.grades.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {`${item.value} 年级 (${item.count})`}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="grid grid-3" style={{ gap: 10, alignItems: "end", marginTop: 10 }}>
+          <label>
+            <div className="section-title">单元</div>
+            <select
+              value={query.unit}
+              onChange={(event) => patchQuery({ unit: event.target.value })}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value="all">全部单元</option>
+              {facets.units.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {`${item.value} (${item.count})`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <div className="section-title">章节</div>
+            <select
+              value={query.chapter}
+              onChange={(event) => patchQuery({ chapter: event.target.value })}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value="all">全部章节</option>
+              {facets.chapters.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {`${item.value} (${item.count})`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <span className="section-title" style={{ marginBottom: 0 }}>
+              每页
+            </span>
+            <select
+              value={pageSize}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value));
+                setPage(1);
+              }}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="cta-row" style={{ marginTop: 10 }}>
+          <button
+            className="button ghost"
+            type="button"
+            onClick={() =>
+              patchQuery({
+                subject: "all",
+                grade: "all",
+                unit: "all",
+                chapter: "all",
+                search: ""
+              })
+            }
+          >
+            清空筛选
+          </button>
+        </div>
+
+        <div
+          style={{
+            marginTop: 12,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            gap: 12
+          }}
+        >
+          <div className="card" style={{ padding: 14 }}>
+            <div className="section-title" style={{ marginTop: 0 }}>
+              分类树
+            </div>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() => patchQuery({ subject: "all", grade: "all", unit: "all" })}
+              style={{ width: "100%", justifyContent: "space-between" }}
+            >
+              全部知识点
+              <span>{meta.total}</span>
+            </button>
+            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+              {tree.map((subjectNode) => (
+                <div key={subjectNode.subject} className="card" style={{ padding: 10 }}>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    onClick={() => patchQuery({ subject: subjectNode.subject, grade: "all", unit: "all" })}
+                    style={{ width: "100%", justifyContent: "space-between" }}
+                  >
+                    {SUBJECT_LABELS[subjectNode.subject] ?? subjectNode.subject}
+                    <span>{subjectNode.count}</span>
+                  </button>
+                  <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                    {subjectNode.grades.map((gradeNode) => (
+                      <div key={`${subjectNode.subject}-${gradeNode.grade}`}>
+                        <button
+                          className="button ghost"
+                          type="button"
+                          onClick={() =>
+                            patchQuery({ subject: subjectNode.subject, grade: gradeNode.grade, unit: "all" })
+                          }
+                          style={{ width: "100%", justifyContent: "space-between", padding: "8px 12px" }}
+                        >
+                          {gradeNode.grade} 年级
+                          <span>{gradeNode.count}</span>
+                        </button>
+                        <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {gradeNode.units.slice(0, 6).map((unitNode) => (
+                            <button
+                              key={`${subjectNode.subject}-${gradeNode.grade}-${unitNode.unit}`}
+                              className="badge"
+                              type="button"
+                              onClick={() =>
+                                patchQuery({
+                                  subject: subjectNode.subject,
+                                  grade: gradeNode.grade,
+                                  unit: unitNode.unit
+                                })
+                              }
+                              style={{ border: "none", cursor: "pointer" }}
+                            >
+                              {unitNode.unit} · {unitNode.count}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid" style={{ gap: 8 }}>
+            {loading ? <p>加载中...</p> : null}
+            {!loading && list.length === 0 ? (
+              <div className="card">
+                <div className="section-title" style={{ marginTop: 0 }}>
+                  暂无结果
+                </div>
+                <div style={{ color: "var(--ink-1)", fontSize: 13 }}>请调整筛选条件后重试。</div>
+              </div>
+            ) : null}
+            {list.map((item) => (
+              <div className="card" key={item.id} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                <div>
+                  <div className="section-title">{item.title}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                    {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级 · {item.unit ?? "未分单元"} ·{" "}
+                    {item.chapter}
+                  </div>
+                </div>
+                <button className="button secondary" onClick={() => handleDelete(item.id)}>
+                  删除
+                </button>
+              </div>
+            ))}
+
+            <div className="card" style={{ padding: 14 }}>
+              <div className="cta-row" style={{ marginTop: 0, justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
-                  {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级 · {item.unit ?? "未分单元"} · {item.chapter}
+                  共 {meta.total} 条，当前 {pageStart}-{pageEnd}
+                </div>
+                <div className="cta-row" style={{ marginTop: 0 }}>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    disabled={meta.page <= 1}
+                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                  >
+                    上一页
+                  </button>
+                  <span className="badge">
+                    第 {meta.page}/{Math.max(meta.totalPages, 1)} 页
+                  </span>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    disabled={meta.page >= meta.totalPages}
+                    onClick={() => setPage((prev) => Math.min(meta.totalPages, prev + 1))}
+                  >
+                    下一页
+                  </button>
                 </div>
               </div>
-              <button className="button secondary" onClick={() => handleDelete(item.id)}>
-                删除
-              </button>
             </div>
-          ))}
+          </div>
         </div>
       </Card>
     </div>
