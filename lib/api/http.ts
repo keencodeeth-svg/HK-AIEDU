@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
+import { recordApiRequest } from "../observability";
 
 const RESERVED_KEYS = new Set(["code", "message", "data", "requestId", "timestamp", "error"]);
 
@@ -133,18 +134,38 @@ export function withApi<TParams extends Record<string, string> = Record<string, 
   return async (request: Request, context: RouteContext<TParams>) => {
     const requestId = getRequestId(request);
     const safeContext = context ?? ({ params: {} as TParams });
+    const startedAt = Date.now();
+    let status = 500;
+    let path = "/";
+
+    try {
+      path = new URL(request.url).pathname;
+    } catch {
+      path = "/";
+    }
+
     try {
       const result = await handler(request, safeContext, { requestId });
       if (result instanceof Response) {
+        status = result.status;
         result.headers.set("x-request-id", requestId);
         return result;
       }
+      status = 200;
       return apiSuccess(result, { requestId });
     } catch (error) {
       const apiErr = toApiError(error);
+      status = apiErr.status;
       return apiError(apiErr.status, apiErr.message, {
         requestId,
         details: apiErr.details
+      });
+    } finally {
+      recordApiRequest({
+        method: request.method || "GET",
+        path,
+        status,
+        durationMs: Date.now() - startedAt
       });
     }
   };

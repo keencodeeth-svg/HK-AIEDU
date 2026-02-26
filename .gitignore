@@ -5,6 +5,9 @@ node_modules/
 .next/
 tsconfig.tsbuildinfo
 
+# Runtime app data (DATA_DIR)
+.runtime-data/
+
 # Env
 .env
 .env.local

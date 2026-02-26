@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { cookies } from "next/headers";
 import { readJson, writeJson } from "./storage";
 import { isDbEnabled, query, queryOne } from "./db";
+export { hashPassword, verifyPassword } from "./password";
 
 export type UserRole = "student" | "parent" | "admin" | "teacher";
 
@@ -87,27 +88,6 @@ export async function saveSessions(sessions: Session[]) {
   if (!isDbEnabled()) {
     writeJson(SESSION_FILE, sessions);
   }
-}
-
-export function verifyPassword(input: string, stored: string) {
-  if (stored.startsWith("plain:")) {
-    return input === stored.replace("plain:", "");
-  }
-
-  const parts = stored.split(":");
-  if (parts.length !== 2) return false;
-  const [salt, hash] = parts;
-  const derived = crypto.scryptSync(input, salt, 64).toString("hex");
-  const hashBuf = Buffer.from(hash, "hex");
-  const derivedBuf = Buffer.from(derived, "hex");
-  if (hashBuf.length !== derivedBuf.length) return false;
-  return crypto.timingSafeEqual(hashBuf, derivedBuf);
-}
-
-export function hashPassword(input: string) {
-  const salt = crypto.randomBytes(16).toString("hex");
-  const hash = crypto.scryptSync(input, salt, 64).toString("hex");
-  return `${salt}:${hash}`;
 }
 
 export async function createUser(user: User) {

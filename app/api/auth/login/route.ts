@@ -9,6 +9,7 @@ import {
 import { addAdminLog } from "@/lib/admin-log";
 import { apiSuccess, forbidden, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
+import { allowLegacyPlainPasswords } from "@/lib/password";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,10 @@ const loginBodySchema = v.object<{
 export const POST = withApi(async (request, _context, { requestId }) => {
   const body = await parseJson(request, loginBodySchema);
   const user = await getUserByEmail(body.email);
+
+  if (user?.password.startsWith("plain:") && !allowLegacyPlainPasswords()) {
+    unauthorized("legacy password disabled, run security:migrate-passwords");
+  }
 
   if (!user || !verifyPassword(body.password, user.password)) {
     unauthorized("invalid credentials");

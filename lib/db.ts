@@ -2,6 +2,7 @@ import { Pool } from "pg";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import { normalizeBootstrapPassword } from "./password";
 
 type QueryParam = string | number | boolean | null | string[] | number[] | Record<string, any>;
 type QueryParams = QueryParam[];
@@ -53,7 +54,7 @@ async function ensureBootstrapAdmin(db: Pool) {
   if (!email || !rawPassword) return;
 
   const name = process.env.ADMIN_BOOTSTRAP_NAME ?? "管理员";
-  const password = rawPassword.includes(":") ? rawPassword : `plain:${rawPassword}`;
+  const password = normalizeBootstrapPassword(rawPassword);
   const id = `u-admin-${crypto.randomBytes(6).toString("hex")}`;
 
   await db.query(
