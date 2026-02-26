@@ -187,6 +187,12 @@ LLM_API_KEY=可选
 - components/ UI 组件
 - data/ 示例知识点与题库
 - lib/ 类型与工具
+- docs/ 验收清单与发布手册
+
+## 验收与发布文档
+
+- Week7 回归验收清单：`docs/week7-challenge-regression-checklist.md`
+- Week8 灰度发布手册：`docs/week8-gray-release-runbook.md`
 
 ## 下一步
 
