@@ -22,6 +22,9 @@
   --card-pad-x: 14px;
   --title-gap-top: 10px;
   --title-gap-bottom: 6px;
+  --motion-fast: 140ms;
+  --motion-base: 220ms;
+  --ease-standard: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
 * {
@@ -166,6 +169,21 @@ a {
   background: rgba(255, 255, 255, 0.98);
   box-shadow: var(--shadow-soft);
   z-index: 20;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  transform-origin: top right;
+  pointer-events: none;
+  visibility: hidden;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.nav-more[open] .nav-more-menu {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+  visibility: visible;
 }
 
 .nav-more-group {
@@ -234,6 +252,16 @@ a {
   color: var(--brand-0);
   background: rgba(27, 108, 168, 0.12);
   border: 1px solid rgba(27, 108, 168, 0.25);
+  transition:
+    transform var(--motion-fast) var(--ease-standard),
+    background var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard);
+}
+
+.chip:hover {
+  transform: translateY(-1px);
+  background: rgba(27, 108, 168, 0.16);
+  border-color: rgba(27, 108, 168, 0.35);
 }
 
 .grid {
@@ -257,7 +285,10 @@ a {
   padding: var(--card-pad-y) var(--card-pad-x);
   position: relative;
   overflow: hidden;
-  transition: transform 180ms ease, box-shadow 180ms ease;
+  transition:
+    transform var(--motion-base) var(--ease-standard),
+    box-shadow var(--motion-base) var(--ease-standard),
+    border-color var(--motion-base) var(--ease-standard);
 }
 
 .card::before {
@@ -268,6 +299,20 @@ a {
   border-image: linear-gradient(90deg, var(--brand-0), var(--accent-0), var(--brand-1)) 1;
   opacity: 0.6;
   pointer-events: none;
+}
+
+.card::after {
+  content: "";
+  position: absolute;
+  width: 160px;
+  height: 160px;
+  top: -84px;
+  left: -84px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(27, 108, 168, 0.14), transparent 68%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-base) var(--ease-standard);
 }
 
 .card-header {
@@ -298,8 +343,13 @@ a {
 }
 
 .card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
   box-shadow: var(--shadow-soft);
+  border-color: rgba(27, 108, 168, 0.22);
+}
+
+.card:hover::after {
+  opacity: 1;
 }
 
 .hero {
@@ -365,7 +415,23 @@ a {
   border: 1px solid transparent;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  position: relative;
+  overflow: hidden;
+  transition:
+    transform var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    background var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard);
+}
+
+.button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.24), transparent 70%);
+  transform: translateX(-120%);
+  transition: transform var(--motion-base) var(--ease-standard);
+  pointer-events: none;
 }
 
 .button.ghost {
@@ -394,6 +460,19 @@ a {
 
 .button:hover {
   transform: translateY(-1px);
+}
+
+.button:hover::after {
+  transform: translateX(120%);
+}
+
+.button:active {
+  transform: translateY(0);
+}
+
+.button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(27, 108, 168, 0.2);
 }
 
 .section-title {
@@ -436,10 +515,23 @@ a {
   font-size: 13px;
   border-radius: 10px;
   border: 1px solid transparent;
-  padding: 8px 10px;
+  padding: 8px 10px 8px 12px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  position: relative;
+  overflow: hidden;
+}
+
+.status-note::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: currentColor;
+  opacity: 0.7;
 }
 
 .status-note.success {
@@ -468,6 +560,17 @@ a {
   border: 1px dashed rgba(27, 108, 168, 0.35);
   background: rgba(255, 255, 255, 0.68);
   color: var(--ink-1);
+  position: relative;
+  overflow: hidden;
+}
+
+.empty-state::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent, rgba(27, 108, 168, 0.06), transparent);
+  transform: translateX(-110%);
+  pointer-events: none;
 }
 
 .empty-state-title {
@@ -507,6 +610,16 @@ textarea:focus {
   border: 1px solid rgba(244, 208, 111, 0.4);
   font-size: 12px;
   color: #9a5d0a;
+  transition:
+    transform var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    background var(--motion-fast) var(--ease-standard);
+}
+
+.pill:hover {
+  transform: translateY(-1px);
+  border-color: rgba(244, 208, 111, 0.55);
+  background: rgba(244, 208, 111, 0.24);
 }
 
 .role-grid {
@@ -574,6 +687,14 @@ textarea:focus {
   background: rgba(255, 255, 255, 0.4);
 }
 
+.gradebook-table tbody tr {
+  transition: background var(--motion-fast) var(--ease-standard);
+}
+
+.gradebook-table tbody tr:hover {
+  background: rgba(27, 108, 168, 0.08);
+}
+
 .gradebook-sub {
   font-size: 11px;
   color: var(--ink-1);
@@ -632,6 +753,10 @@ textarea:focus {
 .feature-card {
   display: grid;
   gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(27, 108, 168, 0.12);
+  background: rgba(255, 255, 255, 0.6);
 }
 
 .feature-card .section-title {
@@ -829,6 +954,15 @@ html[data-density="compact"] .main {
   .card:nth-child(3n) {
     animation-delay: 120ms;
   }
+
+  .status-note,
+  .empty-state {
+    animation: floatIn 260ms ease both;
+  }
+
+  .empty-state::after {
+    animation: shimmerPass 1.8s ease 1;
+  }
 }
 
 @keyframes floatIn {
@@ -839,6 +973,29 @@ html[data-density="compact"] .main {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes shimmerPass {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(110%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .status-note,
+  .empty-state,
+  .chip,
+  .pill,
+  .button,
+  .nav-more-menu,
+  .gradebook-table tbody tr {
+    animation: none !important;
+    transition: none !important;
   }
 }
 
