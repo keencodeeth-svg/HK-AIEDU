@@ -207,6 +207,17 @@ export async function runAdminContentSuite(context) {
   assert.ok(Array.isArray(questionList.body?.tree), "Question list should include classification tree");
   assert.ok(Array.isArray(questionList.body?.facets?.subjects), "Question list should include facets");
   assert.equal(typeof questionList.body?.data?.[0]?.qualityScore, "number", "Question list should include quality");
+  const filteredQuestionList = await apiFetch(
+    "/api/admin/questions?subject=math&grade=4&pool=active&riskLevel=low&answerConflict=no&page=1&pageSize=10"
+  );
+  assert.equal(
+    filteredQuestionList.status,
+    200,
+    `GET /api/admin/questions with quality filters failed: ${filteredQuestionList.raw}`
+  );
+  assert.equal(filteredQuestionList.body?.filters?.pool, "active");
+  assert.equal(filteredQuestionList.body?.filters?.riskLevel, "low");
+  assert.equal(filteredQuestionList.body?.filters?.answerConflict, "no");
 
   const patchQuestion = await apiFetch(`/api/admin/questions/${state.createdQuestionId}`, {
     method: "PATCH",
@@ -241,6 +252,50 @@ export async function runAdminContentSuite(context) {
     "number",
     "Quality list should include summary.averageQualityScore"
   );
+
+  const isolateQuestion = await apiFetch("/api/admin/questions/quality/isolation", {
+    method: "POST",
+    json: {
+      questionId: state.createdQuestionId,
+      isolated: true,
+      reason: ["api-test isolate"]
+    }
+  });
+  assert.equal(
+    isolateQuestion.status,
+    200,
+    `POST /api/admin/questions/quality/isolation isolate failed: ${isolateQuestion.raw}`
+  );
+  assert.equal(isolateQuestion.body?.data?.isolated, true);
+
+  const isolatedQuestionList = await apiFetch(
+    `/api/admin/questions?subject=math&grade=4&pool=isolated&page=1&pageSize=20`
+  );
+  assert.equal(
+    isolatedQuestionList.status,
+    200,
+    `GET /api/admin/questions pool=isolated failed: ${isolatedQuestionList.raw}`
+  );
+  assert.equal(isolatedQuestionList.body?.filters?.pool, "isolated");
+  const isolatedCreatedQuestion = (isolatedQuestionList.body?.data ?? []).find(
+    (item) => item.id === state.createdQuestionId
+  );
+  assert.ok(isolatedCreatedQuestion, "Isolated question list should include manually isolated question");
+
+  const unisolateQuestion = await apiFetch("/api/admin/questions/quality/isolation", {
+    method: "POST",
+    json: {
+      questionId: state.createdQuestionId,
+      isolated: false,
+      reason: ["api-test unisolate"]
+    }
+  });
+  assert.equal(
+    unisolateQuestion.status,
+    200,
+    `POST /api/admin/questions/quality/isolation unisolate failed: ${unisolateQuestion.raw}`
+  );
+  assert.equal(unisolateQuestion.body?.data?.isolated, false);
 
   const importQuestion = await apiFetch("/api/admin/questions/import", {
     method: "POST",

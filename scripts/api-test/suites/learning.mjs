@@ -252,6 +252,126 @@ export async function runLearningSuite(context) {
     "Parent assignments should include estimatedMinutes"
   );
   assert.ok(Array.isArray(parentAssignments.body?.parentTips), "Parent assignments should include parentTips");
+  assert.equal(
+    typeof parentAssignments.body?.execution?.pendingCount,
+    "number",
+    "Parent assignments should include execution.pendingCount"
+  );
+  assert.equal(
+    typeof parentAssignments.body?.effect?.receiptEffectScore,
+    "number",
+    "Parent assignments should include effect.receiptEffectScore"
+  );
+
+  const parentWeekly = await apiFetch("/api/report/weekly");
+  assert.equal(parentWeekly.status, 200, `Parent GET /api/report/weekly failed: ${parentWeekly.raw}`);
+  assert.ok(Array.isArray(parentWeekly.body?.actionItems), "Parent weekly report should include actionItems");
+  assert.equal(
+    typeof parentWeekly.body?.execution?.pendingCount,
+    "number",
+    "Parent weekly report should include execution.pendingCount"
+  );
+  assert.equal(
+    typeof parentWeekly.body?.effect?.doneEffectScore,
+    "number",
+    "Parent weekly report should include effect.doneEffectScore"
+  );
+  assert.equal(
+    typeof parentWeekly.body?.effect?.skippedPenaltyScore,
+    "number",
+    "Parent weekly report should include effect.skippedPenaltyScore"
+  );
+
+  const firstWeeklyAction = parentWeekly.body?.actionItems?.[0];
+  if (firstWeeklyAction?.id) {
+    const skipWithoutNote = await apiFetch("/api/parent/action-items/receipt", {
+      method: "POST",
+      json: {
+        source: "weekly_report",
+        actionItemId: firstWeeklyAction.id,
+        status: "skipped",
+        estimatedMinutes: firstWeeklyAction.estimatedMinutes ?? 0
+      }
+    });
+    assert.equal(
+      skipWithoutNote.status,
+      400,
+      "Skipping parent weekly action without note should be rejected"
+    );
+
+    const skipWithNote = await apiFetch("/api/parent/action-items/receipt", {
+      method: "POST",
+      json: {
+        source: "weekly_report",
+        actionItemId: firstWeeklyAction.id,
+        status: "skipped",
+        note: "本周临时冲突，改为周末完成",
+        estimatedMinutes: firstWeeklyAction.estimatedMinutes ?? 0
+      }
+    });
+    assert.equal(
+      skipWithNote.status,
+      200,
+      `POST /api/parent/action-items/receipt weekly skipped failed: ${skipWithNote.raw}`
+    );
+    assert.equal(skipWithNote.body?.data?.status, "skipped");
+
+    const parentWeeklyAfterSkip = await apiFetch("/api/report/weekly");
+    assert.equal(
+      parentWeeklyAfterSkip.status,
+      200,
+      `Parent weekly report after skip failed: ${parentWeeklyAfterSkip.raw}`
+    );
+    const weeklyActionAfterSkip = (parentWeeklyAfterSkip.body?.actionItems ?? []).find(
+      (item) => item.id === firstWeeklyAction.id
+    );
+    assert.equal(weeklyActionAfterSkip?.receipt?.status, "skipped");
+    assert.equal(
+      typeof parentWeeklyAfterSkip.body?.execution?.skippedCount,
+      "number",
+      "Weekly report should include skippedCount after skip receipt"
+    );
+  }
+
+  const firstAssignmentAction = parentAssignments.body?.actionItems?.[0];
+  if (firstAssignmentAction?.id) {
+    const assignmentDoneReceipt = await apiFetch("/api/parent/action-items/receipt", {
+      method: "POST",
+      json: {
+        source: "assignment_plan",
+        actionItemId: firstAssignmentAction.id,
+        status: "done",
+        estimatedMinutes: firstAssignmentAction.estimatedMinutes ?? 0
+      }
+    });
+    assert.equal(
+      assignmentDoneReceipt.status,
+      200,
+      `POST /api/parent/action-items/receipt assignment done failed: ${assignmentDoneReceipt.raw}`
+    );
+    assert.equal(assignmentDoneReceipt.body?.data?.status, "done");
+
+    const parentAssignmentsAfterDone = await apiFetch("/api/parent/assignments");
+    assert.equal(
+      parentAssignmentsAfterDone.status,
+      200,
+      `Parent assignments after done receipt failed: ${parentAssignmentsAfterDone.raw}`
+    );
+    const assignmentActionAfterDone = (parentAssignmentsAfterDone.body?.actionItems ?? []).find(
+      (item) => item.id === firstAssignmentAction.id
+    );
+    assert.equal(assignmentActionAfterDone?.receipt?.status, "done");
+    assert.equal(
+      typeof parentAssignmentsAfterDone.body?.execution?.completedCount,
+      "number",
+      "Parent assignments should include execution.completedCount after done receipt"
+    );
+    assert.equal(
+      typeof parentAssignmentsAfterDone.body?.effect?.receiptEffectScore,
+      "number",
+      "Parent assignments should include effect.receiptEffectScore after done receipt"
+    );
+  }
 
   const reloginStudent = await apiFetch("/api/auth/login", {
     method: "POST",

@@ -353,6 +353,137 @@ export async function runTeacherExamSuite(context) {
     "Teacher detail should include visibilityHiddenCount from exam events"
   );
 
+  const publishReviewPackDryRun = await apiFetch(
+    `/api/teacher/exams/${createdExamId}/review-pack/publish`,
+    {
+      method: "POST",
+      json: {
+        minRiskLevel: "low",
+        includeParents: false,
+        dryRun: true
+      }
+    }
+  );
+  assert.equal(
+    publishReviewPackDryRun.status,
+    200,
+    `POST /api/teacher/exams/[id]/review-pack/publish dryRun failed: ${publishReviewPackDryRun.raw}`
+  );
+  assert.equal(publishReviewPackDryRun.body?.data?.dryRun, true);
+  assert.equal(
+    typeof publishReviewPackDryRun.body?.data?.targetedStudents,
+    "number",
+    "Review-pack publish dryRun should include targetedStudents"
+  );
+  assert.ok(
+    Array.isArray(publishReviewPackDryRun.body?.data?.published),
+    "Review-pack publish dryRun should include published list"
+  );
+
+  const publishReviewPack = await apiFetch(`/api/teacher/exams/${createdExamId}/review-pack/publish`, {
+    method: "POST",
+    json: {
+      minRiskLevel: "low",
+      includeParents: false,
+      dryRun: false
+    }
+  });
+  assert.equal(
+    publishReviewPack.status,
+    200,
+    `POST /api/teacher/exams/[id]/review-pack/publish failed: ${publishReviewPack.raw}`
+  );
+  assert.equal(publishReviewPack.body?.data?.dryRun, false);
+  assert.ok(
+    (publishReviewPack.body?.data?.publishedStudents ?? 0) >= 1,
+    "Review-pack publish should notify at least one student"
+  );
+
+  const teacherOutline = await apiFetch("/api/teacher/lesson/outline", {
+    method: "POST",
+    json: {
+      classId: examClass.id,
+      topic: `API_TEST_EXAM_OUTLINE_${examSuffix}`
+    }
+  });
+  assert.equal(teacherOutline.status, 200, `POST /api/teacher/lesson/outline failed: ${teacherOutline.raw}`);
+  assert.equal(
+    typeof teacherOutline.body?.data?.quality?.confidenceScore,
+    "number",
+    "Lesson outline should include quality.confidenceScore"
+  );
+  assert.equal(
+    typeof teacherOutline.body?.data?.quality?.riskLevel,
+    "string",
+    "Lesson outline should include quality.riskLevel"
+  );
+
+  const wrongReviewScript = await apiFetch("/api/teacher/lesson/wrong-review", {
+    method: "POST",
+    json: { classId: examClass.id, rangeDays: 7 }
+  });
+  assert.equal(
+    wrongReviewScript.status,
+    200,
+    `POST /api/teacher/lesson/wrong-review failed: ${wrongReviewScript.raw}`
+  );
+  assert.equal(
+    typeof wrongReviewScript.body?.data?.quality?.confidenceScore,
+    "number",
+    "Wrong-review script should include quality.confidenceScore"
+  );
+
+  const classReviewPack = await apiFetch("/api/teacher/lesson/review-pack", {
+    method: "POST",
+    json: { classId: examClass.id, rangeDays: 7 }
+  });
+  assert.equal(
+    classReviewPack.status,
+    200,
+    `POST /api/teacher/lesson/review-pack failed: ${classReviewPack.raw}`
+  );
+  assert.ok(
+    Array.isArray(classReviewPack.body?.data?.afterClassReviewSheet),
+    "Class review-pack should include afterClassReviewSheet"
+  );
+  assert.equal(
+    typeof classReviewPack.body?.data?.quality?.confidenceScore,
+    "number",
+    "Class review-pack should include quality.confidenceScore"
+  );
+  const firstSheet = classReviewPack.body?.data?.afterClassReviewSheet?.[0];
+  if (firstSheet) {
+    assert.equal(
+      typeof firstSheet.knowledgePointId,
+      "string",
+      "Class review-pack sheet item should include knowledgePointId"
+    );
+  }
+
+  const generatedLibraryLesson = await apiFetch("/api/teacher/library/ai-generate", {
+    method: "POST",
+    json: {
+      classId: examClass.id,
+      topic: `API_TEST_LIBRARY_LESSON_${examSuffix}`,
+      contentType: "lesson_plan"
+    }
+  });
+  assert.equal(
+    generatedLibraryLesson.status,
+    200,
+    `POST /api/teacher/library/ai-generate failed: ${generatedLibraryLesson.raw}`
+  );
+  assert.equal(
+    typeof generatedLibraryLesson.body?.data?.quality?.confidenceScore,
+    "number",
+    "Library ai-generate should include quality.confidenceScore"
+  );
+  assert.equal(
+    typeof generatedLibraryLesson.body?.data?.quality?.needsHumanReview,
+    "boolean",
+    "Library ai-generate should include quality.needsHumanReview"
+  );
+
   const teacherAlertsAfterExamEvents = await apiFetch("/api/teacher/alerts");
   assert.equal(
     teacherAlertsAfterExamEvents.status,
