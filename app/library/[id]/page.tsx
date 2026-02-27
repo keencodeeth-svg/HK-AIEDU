@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@/components/Card";
+import LibraryReader from "@/components/LibraryReader";
 import { SUBJECT_LABELS } from "@/lib/constants";
 
 type LibraryItem = {
@@ -82,10 +83,9 @@ export default function LibraryDetailPage({ params }: { params: { id: string } }
   }, [item, knowledgePoints]);
 
   function tryCaptureSelection() {
-    if (!item?.textContent) return;
     const selected = window.getSelection()?.toString().trim() ?? "";
     if (!selected) return;
-    const offset = item.textContent.indexOf(selected);
+    const offset = item?.textContent ? item.textContent.indexOf(selected) : -1;
     setQuote(selected);
     setMessage(offset >= 0 ? `已捕获选中片段（${offset}-${offset + selected.length}）` : "已捕获选中片段");
   }
@@ -176,35 +176,7 @@ export default function LibraryDetailPage({ params }: { params: { id: string } }
       </div>
 
       <Card title="阅读内容" tag="查看">
-        {item.description ? <p>{item.description}</p> : null}
-        {item.sourceType === "link" && item.linkUrl ? (
-          <a href={item.linkUrl} target="_blank" rel="noreferrer">
-            打开外部资源
-          </a>
-        ) : null}
-        {item.sourceType === "file" && item.contentBase64 ? (
-          <div className="grid" style={{ gap: 10 }}>
-            <a
-              className="button secondary"
-              href={`data:${item.mimeType};base64,${item.contentBase64}`}
-              download={item.fileName || item.title}
-            >
-              下载文件
-            </a>
-            {item.mimeType?.includes("pdf") ? (
-              <iframe
-                title="pdf-preview"
-                src={`data:${item.mimeType};base64,${item.contentBase64}`}
-                style={{ width: "100%", minHeight: 520, border: "1px solid var(--stroke)", borderRadius: 12 }}
-              />
-            ) : null}
-          </div>
-        ) : null}
-        {item.sourceType === "text" ? (
-          <div className="card" style={{ whiteSpace: "pre-wrap", lineHeight: 1.7 }} onMouseUp={tryCaptureSelection}>
-            {item.textContent || "暂无文本内容"}
-          </div>
-        ) : null}
+        <LibraryReader item={item} onTextSelection={tryCaptureSelection} />
         <div className="cta-row" style={{ marginTop: 12 }}>
           <button className="button ghost" type="button" onClick={createShare}>
             生成分享链接

@@ -265,6 +265,12 @@ node scripts/seed-stage3.mjs
 node scripts/seed-bulk.mjs
 ```
 
+6. 导入教材/课件演示资源到数据库（部署后直接可见）
+
+```
+npm run seed:library-db
+```
+
 > 若设置了 `DATABASE_URL` 则写入数据库，否则写入 `data/*.json`。
 
 ### Render 快速接入
@@ -277,6 +283,7 @@ node scripts/seed-bulk.mjs
 npm run db:init
 npm run seed:base
 npm run seed:stage3
+npm run seed:library-db
 ```
 
 4. 如需批量演示数据（线上环境推荐）：
@@ -342,6 +349,12 @@ npm run import:open-curriculum
 
 ```bash
 npm run import:open-curriculum -- docs/chinese-download-first-pack.json
+```
+
+若是 PostgreSQL 部署环境，建议改用数据库种子命令（写入 DB，不是 `.runtime-data`）：
+
+```bash
+npm run seed:library-db
 ```
 
 导入后可在 `/library` 的管理端资源库查看。  

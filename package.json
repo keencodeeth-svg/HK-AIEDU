@@ -10,6 +10,7 @@
     "test:api": "node scripts/test-api-routes.mjs",
     "test": "npm run test:api",
     "import:open-curriculum": "node scripts/import-open-curriculum-pack.mjs",
+    "seed:library-db": "node scripts/seed-library-db.mjs",
     "db:init": "node scripts/init-db.mjs",
     "seed:base": "node scripts/seed-db.mjs",
     "seed:stage3": "node scripts/seed-stage3.mjs",
