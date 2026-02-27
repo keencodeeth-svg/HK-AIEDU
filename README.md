@@ -91,7 +91,7 @@ HK-AI-EDU 不是单点工具，而是一个完整的学习运营系统：
 ### P0（高优先，稳定性与可维护性）
 
 1. AI 内核拆层（provider adapter / policy engine / task handlers）
-2. 文件内容迁移到对象存储（V1 已落资料库链路，后续覆盖作业/模块/课程文件）
+2. 文件内容迁移到对象存储（已覆盖资料库/作业上传/模块资源/课程文件，含迁移脚本）
 3. 显式 migration 机制替代运行时自动建表
 4. 统一授权中间层（角色 + 资源归属 + 班级关系）
 5. 测试分层（单测 + API 回归 + E2E 关键链路）
@@ -187,6 +187,28 @@ npm run seed:library-db
 
 - 配置 `DATABASE_URL` 后，系统走 DB，不再读取 `data/*.json`
 - 未配置 `DATABASE_URL` 时使用 JSON fallback
+
+### 7.3 旧文件数据迁移到对象存储
+
+适用场景：历史数据仍在 `content_base64/contentBase64` 字段内联存储，需迁移到对象存储（本地文件实现）。
+
+建议先做一次 dry-run：
+
+```bash
+npm run storage:migrate -- --dry-run
+```
+
+确认统计结果后正式执行：
+
+```bash
+npm run storage:migrate
+```
+
+说明：
+
+- 覆盖表/文件：`learning_library_items`、`assignment_uploads`、`module_resources`、`course_files`
+- DB 模式与 JSON fallback 均支持
+- `LIBRARY_INLINE_FILE_CONTENT=false` / `FILE_INLINE_CONTENT=false` 时会在迁移后清空内联 base64，仅保留对象存储引用
 
 ## 8. 演示账号
 

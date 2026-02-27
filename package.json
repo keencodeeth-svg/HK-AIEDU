@@ -16,7 +16,8 @@
     "seed:stage3": "node scripts/seed-stage3.mjs",
     "seed:bulk": "node scripts/seed-bulk.mjs",
     "export:users": "node scripts/export-users.mjs",
-    "security:migrate-passwords": "node scripts/migrate-password-hash.mjs"
+    "security:migrate-passwords": "node scripts/migrate-password-hash.mjs",
+    "storage:migrate": "node scripts/migrate-file-payloads-to-object-storage.mjs"
   },
   "dependencies": {
     "html-to-image": "1.11.11",
