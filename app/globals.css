@@ -580,6 +580,50 @@ a {
   color: var(--ink-0);
 }
 
+.skeleton-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.skeleton-card {
+  border-radius: 12px;
+  border: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.58);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.skeleton-line {
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(27, 108, 168, 0.1), rgba(27, 108, 168, 0.18), rgba(27, 108, 168, 0.1));
+}
+
+.skeleton-line.lg {
+  height: 14px;
+}
+
+.skeleton-line.w-30 {
+  width: 30%;
+}
+
+.skeleton-line.w-40 {
+  width: 40%;
+}
+
+.skeleton-line.w-60 {
+  width: 60%;
+}
+
+.skeleton-line.w-80 {
+  width: 80%;
+}
+
+.skeleton-line.w-100 {
+  width: 100%;
+}
+
 input,
 select,
 textarea {
@@ -963,6 +1007,10 @@ html[data-density="compact"] .main {
   .empty-state::after {
     animation: shimmerPass 1.8s ease 1;
   }
+
+  .skeleton-line {
+    animation: skeletonPulse 1.4s ease-in-out infinite;
+  }
 }
 
 @keyframes floatIn {
@@ -985,6 +1033,18 @@ html[data-density="compact"] .main {
   }
 }
 
+@keyframes skeletonPulse {
+  0% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.5;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .card,
   .status-note,
@@ -993,7 +1053,8 @@ html[data-density="compact"] .main {
   .pill,
   .button,
   .nav-more-menu,
-  .gradebook-table tbody tr {
+  .gradebook-table tbody tr,
+  .skeleton-line {
     animation: none !important;
     transition: none !important;
   }

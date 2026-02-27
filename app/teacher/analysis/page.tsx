@@ -95,7 +95,8 @@ export default function TeacherAnalysisPage() {
   const [classId, setClassId] = useState("");
   const [heatmap, setHeatmap] = useState<HeatItem[]>([]);
   const [report, setReport] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
+  const [heatmapLoading, setHeatmapLoading] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
   const [students, setStudents] = useState<StudentItem[]>([]);
   const [studentId, setStudentId] = useState("");
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
@@ -120,11 +121,11 @@ export default function TeacherAnalysisPage() {
   }, [classes, classId]);
 
   async function loadHeatmap(targetId: string) {
-    setLoading(true);
+    setHeatmapLoading(true);
     const res = await fetch(`/api/teacher/insights/heatmap?classId=${targetId}`);
     const data = await res.json();
     setHeatmap(data?.data?.items ?? []);
-    setLoading(false);
+    setHeatmapLoading(false);
   }
 
   async function loadAlerts(targetId: string) {
@@ -215,7 +216,7 @@ export default function TeacherAnalysisPage() {
 
   async function generateReport() {
     if (!classId) return;
-    setLoading(true);
+    setReportLoading(true);
     const res = await fetch("/api/teacher/insights/report", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -223,10 +224,12 @@ export default function TeacherAnalysisPage() {
     });
     const data = await res.json();
     setReport(data?.data ?? null);
-    setLoading(false);
+    setReportLoading(false);
   }
 
   const sortedHeatmap = useMemo(() => heatmap.slice(0, 40), [heatmap]);
+  const showHeatmapSkeleton = heatmapLoading && sortedHeatmap.length === 0;
+  const showReportSkeleton = reportLoading && !report;
 
   function ratioColor(ratio: number) {
     const hue = Math.round((ratio / 100) * 120);
@@ -250,8 +253,9 @@ export default function TeacherAnalysisPage() {
             <select
               value={classId}
               onChange={(event) => setClassId(event.target.value)}
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+              style={{ width: "100%" }}
             >
+              {!classes.length ? <option value="">暂无班级</option> : null}
               {classes.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name} · {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级
@@ -259,33 +263,42 @@ export default function TeacherAnalysisPage() {
               ))}
             </select>
           </label>
-          <div className="card" style={{ alignSelf: "end" }}>
+          <div className="feature-card" style={{ alignSelf: "end" }}>
             <div className="section-title">说明</div>
-            <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
-              颜色越偏红表示掌握度越低，可优先安排讲评与补救。
-            </div>
+            <div style={{ fontSize: 12, color: "var(--ink-1)" }}>颜色越偏红表示掌握度越低，可优先安排讲评与补救。</div>
           </div>
         </div>
+        {!classes.length ? (
+          <div className="empty-state">
+            <p className="empty-state-title">暂无班级数据</p>
+            <p>请先在教师端创建班级后再查看分析面板。</p>
+          </div>
+        ) : null}
       </Card>
 
       <Card title="教师预警看板" tag="风险">
-        {alertActionMessage ? <div style={{ marginBottom: 10, fontSize: 13 }}>{alertActionMessage}</div> : null}
+        {alertActionMessage ? <div className="status-note info">{alertActionMessage}</div> : null}
         <div className="grid grid-3">
           <div className="card">
             <div className="section-title">班级风险分</div>
-            <p>{alertSummary?.classRiskScore ?? 0}</p>
+            <div className="kpi-value">{alertSummary?.classRiskScore ?? 0}</div>
           </div>
           <div className="card">
             <div className="section-title">活跃预警</div>
-            <p>{alertSummary?.activeAlerts ?? 0}</p>
+            <div className="kpi-value">{alertSummary?.activeAlerts ?? 0}</div>
           </div>
           <div className="card">
             <div className="section-title">高风险预警</div>
-            <p>{alertSummary?.highRiskAlerts ?? 0}</p>
+            <div className="kpi-value">{alertSummary?.highRiskAlerts ?? 0}</div>
           </div>
         </div>
         <div className="grid" style={{ gap: 10, marginTop: 12 }}>
-          {alerts.length === 0 ? <p>当前班级暂无预警。</p> : null}
+          {alerts.length === 0 ? (
+            <div className="empty-state">
+              <p className="empty-state-title">暂无预警</p>
+              <p>当前班级暂无风险告警。</p>
+            </div>
+          ) : null}
           {alerts.slice(0, 12).map((item) => (
             <div className="card" key={item.id}>
               <div className="section-title">
@@ -383,8 +396,9 @@ export default function TeacherAnalysisPage() {
                       </div>
                     </div>
                   ) : (
-                    <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
-                      当前预警还没有可追踪的动作基线，请先执行“一键布置修复任务”或“提醒学生”。
+                    <div className="empty-state" style={{ padding: 10 }}>
+                      <p className="empty-state-title">暂无追踪基线</p>
+                      <p>请先执行“一键布置修复任务”或“提醒学生”。</p>
                     </div>
                   )}
                 </div>
@@ -395,9 +409,21 @@ export default function TeacherAnalysisPage() {
       </Card>
 
       <Card title="知识点掌握热力图" tag="热力图">
-        {loading ? <p>加载中...</p> : null}
-        {sortedHeatmap.length === 0 ? (
-          <p>暂无练习数据。</p>
+        {showHeatmapSkeleton ? (
+          <div className="skeleton-grid grid-3">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div className="skeleton-card" key={`heat-skeleton-${index}`}>
+                <div className="skeleton-line lg w-80" />
+                <div className="skeleton-line w-60" />
+                <div className="skeleton-line w-100" />
+              </div>
+            ))}
+          </div>
+        ) : sortedHeatmap.length === 0 ? (
+          <div className="empty-state">
+            <p className="empty-state-title">暂无练习数据</p>
+            <p>当前班级还没有可用于热力图的练习记录。</p>
+          </div>
         ) : (
           <div className="grid grid-3" style={{ gap: 12 }}>
             {sortedHeatmap.map((item) => (
@@ -425,11 +451,20 @@ export default function TeacherAnalysisPage() {
 
       <Card title="学情报告 + 重点提醒" tag="报告">
         <div className="cta-row">
-          <button className="button primary" onClick={generateReport} disabled={loading}>
-            {loading ? "生成中..." : "生成学情报告"}
+          <button className="button primary" onClick={generateReport} disabled={reportLoading || !classId}>
+            {reportLoading ? "生成中..." : "生成学情报告"}
           </button>
         </div>
-        {report ? (
+        {showReportSkeleton ? (
+          <div className="skeleton-grid" style={{ marginTop: 12 }}>
+            <div className="skeleton-card">
+              <div className="skeleton-line lg w-40" />
+              <div className="skeleton-line w-100" />
+              <div className="skeleton-line w-100" />
+              <div className="skeleton-line w-80" />
+            </div>
+          </div>
+        ) : report ? (
           <div className="grid" style={{ gap: 10, marginTop: 12 }}>
             <div className="card">
               <div className="section-title">报告摘要</div>
@@ -456,7 +491,12 @@ export default function TeacherAnalysisPage() {
               </div>
             ) : null}
           </div>
-        ) : null}
+        ) : (
+          <div className="empty-state" style={{ marginTop: 12 }}>
+            <p className="empty-state-title">尚未生成报告</p>
+            <p>点击上方按钮生成当前班级的学情摘要与重点提醒。</p>
+          </div>
+        )}
       </Card>
 
       <Card title="学生收藏题目" tag="收藏">
@@ -466,8 +506,9 @@ export default function TeacherAnalysisPage() {
             <select
               value={studentId}
               onChange={(event) => setStudentId(event.target.value)}
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+              style={{ width: "100%" }}
             >
+              {!students.length ? <option value="">暂无学生</option> : null}
               {students.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name} · {item.grade ?? "-"} 年级
@@ -481,7 +522,12 @@ export default function TeacherAnalysisPage() {
           </div>
         </div>
         <div className="grid" style={{ gap: 10, marginTop: 12 }}>
-          {favorites.length === 0 ? <p>暂无收藏记录。</p> : null}
+          {favorites.length === 0 ? (
+            <div className="empty-state">
+              <p className="empty-state-title">暂无收藏记录</p>
+              <p>该学生还没有收藏题目。</p>
+            </div>
+          ) : null}
           {favorites.slice(0, 6).map((item) => (
             <div className="card" key={item.id}>
               <div className="section-title">{item.question?.stem ?? "题目"}</div>

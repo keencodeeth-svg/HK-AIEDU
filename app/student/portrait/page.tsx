@@ -55,6 +55,7 @@ function buildGridPoints(count: number, radius: number, center: number) {
 export default function PortraitPage() {
   const [abilities, setAbilities] = useState<AbilityStat[]>([]);
   const [mastery, setMastery] = useState<MasterySummary | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetch("/api/student/radar")
@@ -62,7 +63,8 @@ export default function PortraitPage() {
       .then((data) => {
         setAbilities(data?.data?.abilities ?? []);
         setMastery(data?.data?.mastery ?? null);
-      });
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const normalized = abilities;
@@ -88,15 +90,23 @@ export default function PortraitPage() {
           <EduIcon name="chart" />
           <p>展示算数、阅读、逻辑等能力分布。</p>
         </div>
-        {normalized.length ? (
-          <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 24, alignItems: "center" }}>
+        {loading ? (
+          <div className="skeleton-grid" style={{ marginTop: 12 }}>
+            <div className="skeleton-card">
+              <div className="skeleton-line lg w-40" />
+              <div className="skeleton-line w-100" />
+              <div className="skeleton-line w-80" />
+            </div>
+          </div>
+        ) : normalized.length ? (
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 280px) 1fr", gap: 24, alignItems: "center" }}>
             <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
               {gridLevels.map((level) => (
                 <polygon
                   key={level}
                   points={buildGridPoints(normalized.length, radius * level, center)}
                   fill="none"
-                  stroke="rgba(255,255,255,0.15)"
+                  stroke="rgba(27,108,168,0.18)"
                   strokeWidth="1"
                 />
               ))}
@@ -111,12 +121,12 @@ export default function PortraitPage() {
                     y1={center}
                     x2={x}
                     y2={y}
-                    stroke="rgba(255,255,255,0.15)"
+                    stroke="rgba(27,108,168,0.16)"
                     strokeWidth="1"
                   />
                 );
               })}
-              <polygon points={polygonPoints} fill="rgba(255,204,0,0.35)" stroke="#ffcc00" strokeWidth="2" />
+              <polygon points={polygonPoints} fill="rgba(244,208,111,0.28)" stroke="#d36b3f" strokeWidth="2" />
             </svg>
             <div className="grid" style={{ gap: 10 }}>
               {normalized.map((item) => (
@@ -131,7 +141,10 @@ export default function PortraitPage() {
             </div>
           </div>
         ) : (
-          <p>暂无学习数据，先完成练习或诊断测评。</p>
+          <div className="empty-state">
+            <p className="empty-state-title">暂无学习数据</p>
+            <p>先完成练习或诊断测评，系统会自动生成能力雷达。</p>
+          </div>
         )}
       </Card>
 
@@ -139,15 +152,23 @@ export default function PortraitPage() {
         <div className="grid grid-2">
           <div className="card">
             <div className="section-title">平均掌握分</div>
-            <div style={{ fontSize: 20, fontWeight: 600 }}>{mastery?.averageMasteryScore ?? 0} 分</div>
+            <div className="kpi-value">{mastery?.averageMasteryScore ?? 0} 分</div>
           </div>
           <div className="card">
             <div className="section-title">已跟踪知识点</div>
-            <div style={{ fontSize: 20, fontWeight: 600 }}>{mastery?.trackedKnowledgePoints ?? 0}</div>
+            <div className="kpi-value">{mastery?.trackedKnowledgePoints ?? 0}</div>
           </div>
         </div>
 
-        {mastery?.weakKnowledgePoints?.length ? (
+        {loading ? (
+          <div className="skeleton-grid" style={{ marginTop: 12 }}>
+            <div className="skeleton-card">
+              <div className="skeleton-line lg w-60" />
+              <div className="skeleton-line w-80" />
+              <div className="skeleton-line w-40" />
+            </div>
+          </div>
+        ) : mastery?.weakKnowledgePoints?.length ? (
           <div className="grid" style={{ gap: 10, marginTop: 12 }}>
             {mastery.weakKnowledgePoints.map((item) => (
               <div className="card" key={item.knowledgePointId}>
@@ -160,7 +181,10 @@ export default function PortraitPage() {
             ))}
           </div>
         ) : (
-          <p style={{ marginTop: 12 }}>暂无知识点掌握数据。</p>
+          <div className="empty-state" style={{ marginTop: 12 }}>
+            <p className="empty-state-title">暂无知识点掌握数据</p>
+            <p>完成几轮针对性练习后，这里会展示薄弱知识点。</p>
+          </div>
         )}
       </Card>
     </div>
