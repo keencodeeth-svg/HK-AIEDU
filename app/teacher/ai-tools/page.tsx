@@ -50,6 +50,9 @@ export default function TeacherAiToolsPage() {
   const [wrongForm, setWrongForm] = useState({ classId: "", rangeDays: 7 });
   const [wrongResult, setWrongResult] = useState<any>(null);
   const [reviewPackResult, setReviewPackResult] = useState<any>(null);
+  const [reviewPackAssigningId, setReviewPackAssigningId] = useState<string | null>(null);
+  const [reviewPackAssignMessage, setReviewPackAssignMessage] = useState<string | null>(null);
+  const [reviewPackAssignError, setReviewPackAssignError] = useState<string | null>(null);
   const [checkForm, setCheckForm] = useState({
     questionId: "",
     stem: "",
@@ -168,6 +171,56 @@ export default function TeacherAiToolsPage() {
     const data = await res.json();
     setCheckResult(data?.data ?? null);
     setLoading(false);
+  }
+
+  function formatDateForInput(days: number) {
+    const due = new Date();
+    due.setDate(due.getDate() + Math.max(1, days));
+    const year = due.getFullYear();
+    const month = String(due.getMonth() + 1).padStart(2, "0");
+    const day = String(due.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  async function handleAssignReviewSheet(item: any) {
+    if (!wrongForm.classId) return;
+    const assignKey = String(item?.id ?? "");
+    setReviewPackAssignMessage(null);
+    setReviewPackAssignError(null);
+    setReviewPackAssigningId(assignKey);
+
+    try {
+      const dueDate = formatDateForInput(Number(item?.dueInDays ?? 1));
+      const questionCount = Math.max(3, Math.min(12, Number(item?.suggestedCount ?? 5)));
+      const res = await fetch("/api/teacher/assignments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          classId: wrongForm.classId,
+          title: `${item?.title ?? "课后复练"}（AI讲评包）`,
+          description: `来源于班级共性错因讲评包，建议在 ${item?.dueInDays ?? 1} 天内完成。`,
+          dueDate,
+          questionCount,
+          knowledgePointId: item?.knowledgePointId,
+          mode: "bank",
+          submissionType: "quiz"
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setReviewPackAssignError(data?.error ?? "布置失败");
+        return;
+      }
+      setReviewPackAssignMessage(
+        `已布置：${data?.data?.title ?? item?.title ?? "课后复练"}，截止 ${new Date(
+          data?.data?.dueDate ?? dueDate
+        ).toLocaleDateString("zh-CN")}`
+      );
+    } catch {
+      setReviewPackAssignError("布置失败");
+    } finally {
+      setReviewPackAssigningId(null);
+    }
   }
 
   return (
@@ -552,13 +605,32 @@ export default function TeacherAiToolsPage() {
             </div>
             <div className="card">
               <div className="section-title">课后复练单</div>
-              <ul style={{ margin: "8px 0 0 16px" }}>
+              <div className="grid" style={{ gap: 8, marginTop: 8 }}>
                 {(reviewPackResult.afterClassReviewSheet ?? []).map((item: any) => (
-                  <li key={item.id}>
-                    {item.title}：建议 {item.suggestedCount} 题，{item.dueInDays} 天内完成
-                  </li>
+                  <div className="card" key={item.id}>
+                    <div className="section-title">{item.title}</div>
+                    <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                      建议 {item.suggestedCount} 题，{item.dueInDays} 天内完成
+                    </div>
+                    <div className="cta-row" style={{ marginTop: 8 }}>
+                      <button
+                        className="button ghost"
+                        type="button"
+                        disabled={reviewPackAssigningId === item.id}
+                        onClick={() => handleAssignReviewSheet(item)}
+                      >
+                        {reviewPackAssigningId === item.id ? "布置中..." : "一键布置该条复练"}
+                      </button>
+                    </div>
+                  </div>
                 ))}
-              </ul>
+              </div>
+              {reviewPackAssignMessage ? (
+                <div style={{ marginTop: 8, fontSize: 12, color: "#027a48" }}>{reviewPackAssignMessage}</div>
+              ) : null}
+              {reviewPackAssignError ? (
+                <div style={{ marginTop: 8, fontSize: 12, color: "#b42318" }}>{reviewPackAssignError}</div>
+              ) : null}
             </div>
           </div>
         ) : null}

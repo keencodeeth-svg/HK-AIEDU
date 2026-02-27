@@ -101,6 +101,7 @@ export const POST = withApi(async (request) => {
 
   const afterClassReviewSheet = reviewOrder.slice(0, 4).map((item, idx) => ({
     id: `sheet-${idx + 1}`,
+    knowledgePointId: item.knowledgePointId,
     title: `课后复练：${item.title}`,
     suggestedCount: idx === 0 ? 6 : 4,
     dueInDays: idx === 0 ? 1 : idx <= 2 ? 3 : 7
