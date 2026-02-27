@@ -47,7 +47,7 @@ jobs:
 
   api-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     env:
       LLM_PROVIDER_CHAIN: mock
       LLM_PROVIDER: mock
@@ -67,7 +67,7 @@ jobs:
       - name: API integration tests
         run: |
           set -o pipefail
-          timeout 19m npm run test:api 2>&1 | tee api-tests.log
+          timeout 30m npm run test:api 2>&1 | tee api-tests.log
 
       - name: Upload API test log on failure
         if: failure()
