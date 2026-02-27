@@ -10,6 +10,7 @@ import type {
   QuestionFacets,
   QuestionForm,
   QuestionListPayload,
+  QuestionQualitySummary,
   QuestionQuery,
   QuestionTreeNode
 } from "./types";
@@ -36,6 +37,7 @@ export default function QuestionsAdminPage() {
   const [pageSize, setPageSize] = useState(20);
   const [meta, setMeta] = useState({ total: 0, page: 1, pageSize: 20, totalPages: 1 });
   const [tree, setTree] = useState<QuestionTreeNode[]>([]);
+  const [qualitySummary, setQualitySummary] = useState<QuestionQualitySummary | null>(null);
   const [facets, setFacets] = useState<QuestionFacets>({
     subjects: [],
     grades: [],
@@ -118,6 +120,7 @@ export default function QuestionsAdminPage() {
       }
     );
     setTree(qData.tree ?? []);
+    setQualitySummary(qData.qualitySummary ?? null);
     setFacets({
       subjects: qData.facets?.subjects ?? [],
       grades: qData.facets?.grades ?? [],
@@ -407,6 +410,7 @@ export default function QuestionsAdminPage() {
           patchQuery={patchQuery}
           facets={facets}
           tree={tree}
+          qualitySummary={qualitySummary}
           loading={loading}
           list={list}
           meta={meta}

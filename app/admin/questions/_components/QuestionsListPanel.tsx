@@ -8,6 +8,7 @@ import {
   riskLabel,
   type Question,
   type QuestionFacets,
+  type QuestionQualitySummary,
   type QuestionQuery,
   type QuestionTreeNode
 } from "../types";
@@ -17,6 +18,7 @@ type Props = {
   patchQuery: (next: Partial<QuestionQuery>) => void;
   facets: QuestionFacets;
   tree: QuestionTreeNode[];
+  qualitySummary: QuestionQualitySummary | null;
   loading: boolean;
   list: Question[];
   meta: {
@@ -39,6 +41,7 @@ export default function QuestionsListPanel({
   patchQuery,
   facets,
   tree,
+  qualitySummary,
   loading,
   list,
   meta,
@@ -97,6 +100,42 @@ export default function QuestionsListPanel({
           </div>
         </div>
       </div>
+
+      {qualitySummary ? (
+        <div className="card" style={{ padding: 12, marginBottom: 10 }}>
+          <div className="section-title" style={{ marginTop: 0 }}>
+            质量治理概览
+          </div>
+          <div className="pill-list">
+            <span className="pill">已质检 {qualitySummary.trackedCount}</span>
+            <span className="pill">高风险 {qualitySummary.highRiskCount}</span>
+            <span className="pill">中风险 {qualitySummary.mediumRiskCount}</span>
+            <span className="pill">答案冲突 {qualitySummary.answerConflictCount}</span>
+            <span className="pill">隔离池 {qualitySummary.isolatedCount}</span>
+            <span className="pill">重复簇 {qualitySummary.duplicateClusterCount}</span>
+          </div>
+          {qualitySummary.topDuplicateClusters?.length ? (
+            <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {qualitySummary.topDuplicateClusters.map((cluster) => (
+                <button
+                  className="badge"
+                  key={cluster.id}
+                  type="button"
+                  onClick={() =>
+                    patchQuery({
+                      duplicateClusterId: cluster.id,
+                      pool: "all"
+                    })
+                  }
+                  style={{ border: "none", cursor: "pointer" }}
+                >
+                  簇 {cluster.id} · {cluster.count} 题 · 高风险 {cluster.highRiskCount}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="grid" style={{ gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))" }}>
         <label>

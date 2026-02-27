@@ -207,6 +207,15 @@ export async function runAdminContentSuite(context) {
   assert.ok(Array.isArray(questionList.body?.tree), "Question list should include classification tree");
   assert.ok(Array.isArray(questionList.body?.facets?.subjects), "Question list should include facets");
   assert.equal(typeof questionList.body?.data?.[0]?.qualityScore, "number", "Question list should include quality");
+  assert.equal(
+    typeof questionList.body?.qualitySummary?.trackedCount,
+    "number",
+    "Question list should include qualitySummary.trackedCount"
+  );
+  assert.ok(
+    Array.isArray(questionList.body?.qualitySummary?.topDuplicateClusters),
+    "Question list should include qualitySummary.topDuplicateClusters"
+  );
   const filteredQuestionList = await apiFetch(
     "/api/admin/questions?subject=math&grade=4&pool=active&riskLevel=low&answerConflict=no&page=1&pageSize=10"
   );

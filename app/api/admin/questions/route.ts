@@ -72,6 +72,35 @@ function buildFacet(values: string[]) {
     .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
 }
 
+function isHighQualityRisk(metric?: {
+  riskLevel?: string | null;
+  duplicateRisk?: string | null;
+  ambiguityRisk?: string | null;
+  answerConflict?: boolean | null;
+}) {
+  if (!metric) return false;
+  return (
+    metric.riskLevel === "high" ||
+    metric.duplicateRisk === "high" ||
+    metric.ambiguityRisk === "high" ||
+    Boolean(metric.answerConflict)
+  );
+}
+
+function isMediumQualityRisk(metric?: {
+  riskLevel?: string | null;
+  duplicateRisk?: string | null;
+  ambiguityRisk?: string | null;
+}) {
+  if (!metric) return false;
+  if (isHighQualityRisk(metric)) return false;
+  return (
+    metric.riskLevel === "medium" ||
+    metric.duplicateRisk === "medium" ||
+    metric.ambiguityRisk === "medium"
+  );
+}
+
 type QuestionTreeNode = {
   subject: string;
   count: number;
@@ -200,6 +229,36 @@ export const GET = withApi(async (request) => {
   const paged = sorted.slice(start, end);
 
   const data = paged.map((item) => attachQualityFields(item, qualityMetricMap.get(item.id) ?? null));
+  const metricsOfSorted = sorted.map((item) => qualityMetricMap.get(item.id)).filter(Boolean);
+  const isolatedCount = metricsOfSorted.filter((item) => Boolean(item?.isolated)).length;
+  const answerConflictCount = metricsOfSorted.filter((item) => Boolean(item?.answerConflict)).length;
+  const highRiskCount = metricsOfSorted.filter((item) => isHighQualityRisk(item)).length;
+  const mediumRiskCount = metricsOfSorted.filter((item) => isMediumQualityRisk(item)).length;
+  const duplicateClusters = new Map<
+    string,
+    { id: string; count: number; isolatedCount: number; highRiskCount: number }
+  >();
+  metricsOfSorted.forEach((metric) => {
+    const clusterId = metric?.duplicateClusterId;
+    if (!clusterId) return;
+    const current = duplicateClusters.get(clusterId) ?? {
+      id: clusterId,
+      count: 0,
+      isolatedCount: 0,
+      highRiskCount: 0
+    };
+    current.count += 1;
+    if (metric?.isolated) current.isolatedCount += 1;
+    if (isHighQualityRisk(metric)) current.highRiskCount += 1;
+    duplicateClusters.set(clusterId, current);
+  });
+  const topDuplicateClusters = Array.from(duplicateClusters.values())
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      if (b.highRiskCount !== a.highRiskCount) return b.highRiskCount - a.highRiskCount;
+      return a.id.localeCompare(b.id);
+    })
+    .slice(0, 8);
 
   const facetsSource = sorted;
   const subjectFacet = buildFacet(facetsSource.map((item) => item.subject));
@@ -284,6 +343,15 @@ export const GET = withApi(async (request) => {
       duplicateClusterId: duplicateClusterId ?? null,
       sortBy,
       sortDir
+    },
+    qualitySummary: {
+      trackedCount: metricsOfSorted.length,
+      isolatedCount,
+      highRiskCount,
+      mediumRiskCount,
+      answerConflictCount,
+      duplicateClusterCount: duplicateClusters.size,
+      topDuplicateClusters
     }
   };
 });

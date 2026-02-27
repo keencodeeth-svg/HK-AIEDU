@@ -44,6 +44,21 @@ export type QuestionTreeNode = {
   }>;
 };
 
+export type QuestionQualitySummary = {
+  trackedCount: number;
+  isolatedCount: number;
+  highRiskCount: number;
+  mediumRiskCount: number;
+  answerConflictCount: number;
+  duplicateClusterCount: number;
+  topDuplicateClusters: Array<{
+    id: string;
+    count: number;
+    isolatedCount: number;
+    highRiskCount: number;
+  }>;
+};
+
 export type QuestionListPayload = {
   data?: Question[];
   meta?: {
@@ -60,6 +75,7 @@ export type QuestionListPayload = {
     questionTypes?: FacetItem[];
   };
   tree?: QuestionTreeNode[];
+  qualitySummary?: QuestionQualitySummary;
 };
 
 export type QuestionQuery = {
