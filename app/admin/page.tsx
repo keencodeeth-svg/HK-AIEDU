@@ -16,6 +16,15 @@ export default function AdminPage() {
       </div>
 
       <div className="grid grid-2">
+        <Card title="教材课件管理" tag="资料">
+          <div className="feature-card">
+            <EduIcon name="book" />
+            <p>导入教材、上传课件/教案、执行全学科批量导入。</p>
+          </div>
+          <Link className="button secondary" href="/library" style={{ marginTop: 12 }}>
+            进入资料库
+          </Link>
+        </Card>
         <Card title="题库管理" tag="题库">
           <div className="feature-card">
             <EduIcon name="pencil" />
