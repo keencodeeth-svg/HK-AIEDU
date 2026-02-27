@@ -7,9 +7,15 @@ import {
   verifyPassword
 } from "@/lib/auth";
 import { addAdminLog } from "@/lib/admin-log";
-import { apiSuccess, forbidden, unauthorized, withApi } from "@/lib/api/http";
+import { ApiError, apiSuccess, forbidden, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 import { allowLegacyPlainPasswords } from "@/lib/password";
+import {
+  buildLoginAttemptIdentity,
+  clearLoginAttempt,
+  getLoginAttemptStatus,
+  registerFailedLoginAttempt
+} from "@/lib/auth-security";
 
 export const dynamic = "force-dynamic";
 
@@ -28,13 +34,32 @@ const loginBodySchema = v.object<{
 
 export const POST = withApi(async (request, _context, { requestId }) => {
   const body = await parseJson(request, loginBodySchema);
-  const user = await getUserByEmail(body.email);
-
-  if (user?.password.startsWith("plain:") && !allowLegacyPlainPasswords()) {
-    unauthorized("legacy password disabled, run security:migrate-passwords");
+  const attemptIdentity = buildLoginAttemptIdentity({
+    email: body.email,
+    forwardedFor: request.headers.get("x-forwarded-for")
+  });
+  const attemptStatus = await getLoginAttemptStatus(attemptIdentity);
+  if (attemptStatus.locked) {
+    throw new ApiError(429, "登录失败次数过多，请稍后再试", {
+      lockUntil: attemptStatus.lockUntil
+    });
   }
 
-  if (!user || !verifyPassword(body.password, user.password)) {
+  const user = await getUserByEmail(body.email);
+  const legacyPasswordDisabled = Boolean(
+    user?.password.startsWith("plain:") && !allowLegacyPlainPasswords()
+  );
+
+  if (!user || legacyPasswordDisabled || !verifyPassword(body.password, user.password)) {
+    const failed = await registerFailedLoginAttempt(attemptIdentity);
+    if (failed.locked) {
+      throw new ApiError(429, "登录失败次数过多，请稍后再试", {
+        lockUntil: failed.lockUntil
+      });
+    }
+    if (legacyPasswordDisabled) {
+      unauthorized("legacy password disabled, run security:migrate-passwords");
+    }
     unauthorized("invalid credentials");
   }
 
@@ -46,6 +71,12 @@ export const POST = withApi(async (request, _context, { requestId }) => {
     } catch {
       // keep login available even if background migration fails
     }
+  }
+
+  try {
+    await clearLoginAttempt(attemptIdentity);
+  } catch {
+    // lockout cleanup should not block successful login
   }
 
   if (body.role && user.role !== body.role) {

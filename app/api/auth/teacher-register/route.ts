@@ -7,7 +7,8 @@ import {
   hashPassword,
   setSessionCookie
 } from "@/lib/auth";
-import { apiSuccess, conflict, forbidden, withApi } from "@/lib/api/http";
+import { validatePasswordPolicy } from "@/lib/password";
+import { apiSuccess, badRequest, conflict, forbidden, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,13 @@ const teacherRegisterSchema = v.object<{
 
 export const POST = withApi(async (request, _context, { requestId }) => {
   const body = await parseJson(request, teacherRegisterSchema);
+  const passwordValidation = validatePasswordPolicy(body.password);
+  if (!passwordValidation.ok) {
+    badRequest(passwordValidation.errors[0], {
+      passwordPolicy: passwordValidation.policy,
+      errors: passwordValidation.errors
+    });
+  }
 
   const expectedInvite = process.env.TEACHER_INVITE_CODE?.trim();
   const inviteList = process.env.TEACHER_INVITE_CODES?.trim();

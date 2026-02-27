@@ -70,9 +70,12 @@ export default function AdminRegisterPage() {
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="至少 6 位"
+              placeholder="默认建议至少 8 位，含大小写和数字"
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             />
+            <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-1)" }}>
+              实际规则由后端密码策略配置控制。
+            </div>
           </label>
           <label>
             <div className="section-title">邀请码（可选）</div>

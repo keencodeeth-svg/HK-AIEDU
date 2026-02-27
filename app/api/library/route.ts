@@ -1,10 +1,25 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getClassesByStudent, getClassesByTeacher } from "@/lib/classes";
-import { listLearningLibraryItems } from "@/lib/learning-library";
+import {
+  listLearningLibraryItems,
+  type LearningLibraryItem
+} from "@/lib/learning-library";
 import { unauthorized, withApi } from "@/lib/api/http";
 import { parseSearchParams, v } from "@/lib/api/validation";
 
 export const dynamic = "force-dynamic";
+
+function useLightListMode() {
+  if (process.env.LIBRARY_LIGHT_LIST === "false") return false;
+  if (process.env.LIBRARY_LIGHT_LIST === "true") return true;
+  return true;
+}
+
+function toLibraryListItem(item: LearningLibraryItem, lightList: boolean) {
+  if (!lightList) return item;
+  const { contentBase64, textContent, ...rest } = item;
+  return rest;
+}
 
 const querySchema = v.object<{
   subject?: string;
@@ -20,6 +35,7 @@ const querySchema = v.object<{
 );
 
 export const GET = withApi(async (request) => {
+  const lightList = useLightListMode();
   const user = await getCurrentUser();
   if (!user) {
     unauthorized();
@@ -40,7 +56,7 @@ export const GET = withApi(async (request) => {
   });
 
   if (user.role === "admin") {
-    return { data: all };
+    return { data: all.map((item) => toLibraryListItem(item, lightList)) };
   }
 
   let classIds: string[] = [];
@@ -69,5 +85,5 @@ export const GET = withApi(async (request) => {
     return classIdSet.has(item.classId);
   });
 
-  return { data };
+  return { data: data.map((item) => toLibraryListItem(item, lightList)) };
 });

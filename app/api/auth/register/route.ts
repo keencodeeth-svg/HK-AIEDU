@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { createUser, getUserByEmail, getUserById, hashPassword } from "@/lib/auth";
 import { SUBJECT_OPTIONS } from "@/lib/constants";
 import { getStudentProfileByObserverCode, upsertStudentProfile } from "@/lib/profiles";
+import { validatePasswordPolicy } from "@/lib/password";
 import { apiSuccess, badRequest, conflict, notFound, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 
@@ -30,6 +31,13 @@ const registerBodySchema = v.object<{
 
 export const POST = withApi(async (request, _context, { requestId }) => {
   const body = await parseJson(request, registerBodySchema);
+  const passwordValidation = validatePasswordPolicy(body.password);
+  if (!passwordValidation.ok) {
+    badRequest(passwordValidation.errors[0], {
+      passwordPolicy: passwordValidation.policy,
+      errors: passwordValidation.errors
+    });
+  }
 
   const existing = await getUserByEmail(body.email);
   if (existing) {

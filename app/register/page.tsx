@@ -95,6 +95,9 @@ export default function RegisterPage() {
               onChange={(event) => setPassword(event.target.value)}
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             />
+            <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-1)" }}>
+              默认建议至少 8 位，包含大写字母、小写字母和数字（以系统配置为准）。
+            </div>
           </label>
           {role === "student" ? (
             <label>

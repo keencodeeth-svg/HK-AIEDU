@@ -396,6 +396,21 @@ export default function LibraryPage() {
     await loadItems();
   }
 
+  async function fetchLibraryItemDetail(id: string) {
+    const res = await fetch(`/api/library/${id}`, { cache: "no-store" });
+    let data: any = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+    if (!res.ok) {
+      setError(data?.error ?? "获取资料详情失败");
+      return null;
+    }
+    return (data?.data as LibraryItem | null) ?? null;
+  }
+
   function downloadText(item: LibraryItem) {
     const text = item.textContent ?? "";
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
@@ -409,28 +424,50 @@ export default function LibraryPage() {
     URL.revokeObjectURL(url);
   }
 
-  function downloadItem(item: LibraryItem) {
+  async function downloadItem(item: LibraryItem) {
     if (item.contentType === "textbook" && item.sourceType === "link") {
       setError("教材资源只支持文件，当前外链已禁用");
       return;
     }
-    if (item.sourceType === "text") {
-      downloadText(item);
+    setError(null);
+    let detail = item;
+
+    if (item.sourceType === "text" || item.sourceType === "file") {
+      const loaded = await fetchLibraryItemDetail(item.id);
+      if (!loaded) return;
+      detail = loaded;
+    }
+
+    if (detail.sourceType === "text") {
+      if (!detail.textContent) {
+        setError("文本内容为空或不可用");
+        return;
+      }
+      downloadText(detail);
       return;
     }
-    if (item.sourceType === "file" && item.contentBase64) {
-      const href = `data:${item.mimeType || "application/octet-stream"};base64,${item.contentBase64}`;
+
+    if (detail.sourceType === "file") {
+      if (!detail.contentBase64) {
+        setError("文件内容不可用，请稍后重试");
+        return;
+      }
+      const href = `data:${detail.mimeType || "application/octet-stream"};base64,${detail.contentBase64}`;
       const a = document.createElement("a");
       a.href = href;
-      a.download = item.fileName || item.title || "资料";
+      a.download = detail.fileName || detail.title || "资料";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       return;
     }
-    if (item.linkUrl) {
-      window.open(item.linkUrl, "_blank", "noopener,noreferrer");
+
+    if (detail.linkUrl) {
+      window.open(detail.linkUrl, "_blank", "noopener,noreferrer");
+      return;
     }
+
+    setError("资料缺少可下载内容");
   }
 
   async function removeItem(item: LibraryItem) {

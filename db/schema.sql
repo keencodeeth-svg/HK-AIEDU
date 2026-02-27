@@ -16,6 +16,19 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS auth_login_attempts (
+  key TEXT PRIMARY KEY,
+  email TEXT NOT NULL,
+  ip TEXT NOT NULL,
+  failed_count INT NOT NULL DEFAULT 0,
+  first_failed_at TIMESTAMPTZ NOT NULL,
+  lock_until TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS auth_login_attempts_lock_idx ON auth_login_attempts (lock_until);
+CREATE INDEX IF NOT EXISTS auth_login_attempts_updated_idx ON auth_login_attempts (updated_at);
+
 CREATE TABLE IF NOT EXISTS student_profiles (
   id TEXT PRIMARY KEY,
   user_id TEXT UNIQUE REFERENCES users(id) ON DELETE CASCADE,
@@ -188,6 +201,24 @@ CREATE TABLE IF NOT EXISTS wrong_review_items (
 
 CREATE INDEX IF NOT EXISTS wrong_review_items_user_idx ON wrong_review_items (user_id);
 CREATE INDEX IF NOT EXISTS wrong_review_items_next_idx ON wrong_review_items (next_review_at);
+
+CREATE TABLE IF NOT EXISTS review_tasks (
+  id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+  question_id TEXT REFERENCES questions(id) ON DELETE CASCADE,
+  subject TEXT,
+  knowledge_point_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  interval_level INT NOT NULL DEFAULT 1,
+  due_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ,
+  payload JSONB,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS review_tasks_user_idx ON review_tasks (user_id, status);
+CREATE INDEX IF NOT EXISTS review_tasks_due_idx ON review_tasks (due_at);
 
 CREATE TABLE IF NOT EXISTS teacher_alert_acks (
   id TEXT PRIMARY KEY,
@@ -773,6 +804,60 @@ CREATE TABLE IF NOT EXISTS api_route_logs (
 
 CREATE INDEX IF NOT EXISTS api_route_logs_created_idx ON api_route_logs (created_at);
 CREATE INDEX IF NOT EXISTS api_route_logs_method_path_idx ON api_route_logs (method, path);
+
+CREATE TABLE IF NOT EXISTS ai_provider_configs (
+  id TEXT PRIMARY KEY,
+  provider TEXT UNIQUE NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT false,
+  model TEXT,
+  base_url TEXT,
+  api_key_ref TEXT,
+  weight INT NOT NULL DEFAULT 0,
+  timeout_ms INT NOT NULL DEFAULT 30000,
+  max_retries INT NOT NULL DEFAULT 2,
+  extra JSONB,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ai_provider_configs_enabled_idx ON ai_provider_configs (enabled, weight);
+
+CREATE TABLE IF NOT EXISTS ai_task_policies_runtime (
+  id TEXT PRIMARY KEY,
+  task_type TEXT UNIQUE NOT NULL,
+  primary_provider TEXT,
+  fallback_chain TEXT[] NOT NULL DEFAULT '{}',
+  temperature REAL,
+  max_tokens INT,
+  confidence_threshold INT,
+  human_review_required BOOLEAN NOT NULL DEFAULT false,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ai_task_policies_runtime_task_idx ON ai_task_policies_runtime (task_type);
+
+CREATE TABLE IF NOT EXISTS ai_call_logs (
+  id TEXT PRIMARY KEY,
+  task_type TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT,
+  user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  request_id TEXT,
+  prompt_tokens INT,
+  completion_tokens INT,
+  total_tokens INT,
+  latency_ms INT,
+  status TEXT NOT NULL DEFAULT 'success',
+  error_code TEXT,
+  error_message TEXT,
+  trace_id TEXT,
+  meta JSONB,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ai_call_logs_created_idx ON ai_call_logs (created_at);
+CREATE INDEX IF NOT EXISTS ai_call_logs_provider_idx ON ai_call_logs (provider, status);
+CREATE INDEX IF NOT EXISTS ai_call_logs_task_idx ON ai_call_logs (task_type);
+CREATE INDEX IF NOT EXISTS ai_call_logs_user_idx ON ai_call_logs (user_id);
 
 CREATE INDEX IF NOT EXISTS classes_teacher_idx ON classes (teacher_id);
 CREATE INDEX IF NOT EXISTS class_students_class_idx ON class_students (class_id);
