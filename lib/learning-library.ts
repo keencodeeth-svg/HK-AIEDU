@@ -514,6 +514,29 @@ export async function issueLearningLibraryShareToken(id: string) {
   return row ? mapDbItem(row) : null;
 }
 
+export async function deleteLearningLibraryItem(id: string) {
+  if (!isDbEnabled()) {
+    const items = readJson<LearningLibraryItem[]>(ITEM_FILE, []);
+    const nextItems = items.filter((item) => item.id !== id);
+    if (nextItems.length === items.length) return false;
+    writeJson(ITEM_FILE, nextItems);
+
+    // Keep local annotation store consistent in file mode.
+    const annotations = readJson<LearningLibraryAnnotation[]>(ANNOTATION_FILE, []);
+    const nextAnnotations = annotations.filter((item) => item.itemId !== id);
+    if (nextAnnotations.length !== annotations.length) {
+      writeJson(ANNOTATION_FILE, nextAnnotations);
+    }
+    return true;
+  }
+
+  const rows = await query<{ id: string }>(
+    "DELETE FROM learning_library_items WHERE id = $1 RETURNING id",
+    [id]
+  );
+  return rows.length > 0;
+}
+
 export async function listLearningLibraryAnnotations(itemId: string) {
   if (!isDbEnabled()) {
     const list = readJson<LearningLibraryAnnotation[]>(ANNOTATION_FILE, []);

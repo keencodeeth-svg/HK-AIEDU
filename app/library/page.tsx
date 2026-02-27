@@ -15,6 +15,11 @@ type LibraryItem = {
   grade: string;
   accessScope: "global" | "class";
   sourceType: "file" | "link" | "text";
+  fileName?: string;
+  mimeType?: string;
+  contentBase64?: string;
+  linkUrl?: string;
+  textContent?: string;
   classId?: string;
   generatedByAi: boolean;
   createdAt: string;
@@ -131,13 +136,24 @@ export default function LibraryPage() {
     topic: "",
     contentType: "lesson_plan"
   });
+  const [subjectFilter, setSubjectFilter] = useState("all");
+  const [contentFilter, setContentFilter] = useState<"all" | "textbook" | "courseware" | "lesson_plan">("all");
+  const [keyword, setKeyword] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
-    const res = await fetch("/api/library");
-    const data = await res.json();
-    setItems(data.data ?? []);
-    setLoading(false);
+    try {
+      const res = await fetch("/api/library");
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.error ?? "资料加载失败");
+        return;
+      }
+      setItems(data.data ?? []);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -161,13 +177,49 @@ export default function LibraryPage() {
     }
   }, [aiForm.classId, user?.role]);
 
+  const subjectList = useMemo(() => {
+    const keys = Array.from(new Set(items.map((item) => item.subject)));
+    return keys.sort((a, b) => {
+      const left = SUBJECT_LABELS[a] ?? a;
+      const right = SUBJECT_LABELS[b] ?? b;
+      return left.localeCompare(right, "zh-CN");
+    });
+  }, [items]);
+
+  const filteredItems = useMemo(() => {
+    const kw = keyword.trim().toLowerCase();
+    return items
+      .filter((item) => (subjectFilter === "all" ? true : item.subject === subjectFilter))
+      .filter((item) => (contentFilter === "all" ? true : item.contentType === contentFilter))
+      .filter((item) => {
+        if (!kw) return true;
+        return `${item.title} ${item.description ?? ""}`.toLowerCase().includes(kw);
+      });
+  }, [contentFilter, items, keyword, subjectFilter]);
+
   const grouped = useMemo(() => {
     return {
-      textbook: items.filter((item) => item.contentType === "textbook"),
-      courseware: items.filter((item) => item.contentType === "courseware"),
-      lessonPlan: items.filter((item) => item.contentType === "lesson_plan")
+      textbook: filteredItems.filter((item) => item.contentType === "textbook"),
+      courseware: filteredItems.filter((item) => item.contentType === "courseware"),
+      lessonPlan: filteredItems.filter((item) => item.contentType === "lesson_plan")
     };
-  }, [items]);
+  }, [filteredItems]);
+
+  const groupedBySubject = useMemo(() => {
+    const bucket = new Map<string, LibraryItem[]>();
+    filteredItems.forEach((item) => {
+      const list = bucket.get(item.subject) ?? [];
+      list.push(item);
+      bucket.set(item.subject, list);
+    });
+    return Array.from(bucket.entries())
+      .map(([subject, list]) => ({
+        subject,
+        label: SUBJECT_LABELS[subject] ?? subject,
+        list: list.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, "zh-CN"));
+  }, [filteredItems]);
 
   async function submitImport(event: React.FormEvent) {
     event.preventDefault();
@@ -323,6 +375,61 @@ export default function LibraryPage() {
     setMessage("AI 资料已生成并发布");
     setAiForm((prev) => ({ ...prev, topic: "" }));
     await loadItems();
+  }
+
+  function downloadText(item: LibraryItem) {
+    const text = item.textContent ?? "";
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${item.title || "资料"}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadItem(item: LibraryItem) {
+    if (item.sourceType === "text") {
+      downloadText(item);
+      return;
+    }
+    if (item.sourceType === "file" && item.contentBase64) {
+      const href = `data:${item.mimeType || "application/octet-stream"};base64,${item.contentBase64}`;
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = item.fileName || item.title || "资料";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    }
+    if (item.linkUrl) {
+      window.open(item.linkUrl, "_blank", "noopener,noreferrer");
+    }
+  }
+
+  async function removeItem(item: LibraryItem) {
+    if (user?.role !== "admin") return;
+    const confirmed = window.confirm(`确认删除「${item.title}」吗？删除后不可恢复。`);
+    if (!confirmed) return;
+
+    setMessage(null);
+    setError(null);
+    setDeletingId(item.id);
+    try {
+      const res = await fetch(`/api/library/${item.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.error ?? "删除失败");
+        return;
+      }
+      setMessage("资料已删除");
+      await loadItems();
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
@@ -541,42 +648,103 @@ export default function LibraryPage() {
       {error ? <div style={{ color: "#b42318", fontSize: 13 }}>{error}</div> : null}
       {message ? <div style={{ color: "#027a48", fontSize: 13 }}>{message}</div> : null}
 
-      <Card title="资料列表" tag="阅读">
+      <Card title="分学科管理" tag="筛选">
+        <div className="grid grid-3">
+          <label>
+            <div className="section-title">学科</div>
+            <select
+              value={subjectFilter}
+              onChange={(event) => setSubjectFilter(event.target.value)}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value="all">全部学科</option>
+              {subjectList.map((subject) => (
+                <option key={subject} value={subject}>
+                  {SUBJECT_LABELS[subject] ?? subject}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <div className="section-title">类型</div>
+            <select
+              value={contentFilter}
+              onChange={(event) =>
+                setContentFilter(event.target.value as "all" | "textbook" | "courseware" | "lesson_plan")
+              }
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value="all">全部类型</option>
+              <option value="textbook">教材</option>
+              <option value="courseware">课件</option>
+              <option value="lesson_plan">教案</option>
+            </select>
+          </label>
+          <label>
+            <div className="section-title">关键词</div>
+            <input
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              placeholder="按标题或简介搜索"
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            />
+          </label>
+        </div>
+        <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 10 }}>
+          当前筛选结果：共 {filteredItems.length} 条（教材 {grouped.textbook.length}，课件 {grouped.courseware.length}，教案{" "}
+          {grouped.lessonPlan.length}）
+        </div>
+      </Card>
+
+      <Card title="资料管理列表" tag="管理">
         {loading ? <p>加载中...</p> : null}
         {!loading ? (
           <div className="grid" style={{ gap: 14 }}>
-            <div className="card">
-              <div className="section-title">教材（{grouped.textbook.length}）</div>
-              <div className="grid" style={{ gap: 8, marginTop: 8 }}>
-                {grouped.textbook.map((item) => (
-                  <Link className="card" key={item.id} href={`/library/${item.id}`}>
-                    <div className="section-title">{item.title}</div>
-                    <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
-                      {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级 ·{" "}
-                      {item.accessScope === "global" ? "全局可见" : "班级可见"}
+            {groupedBySubject.map((group) => (
+              <div className="card" key={group.subject}>
+                <div className="section-title">
+                  {group.label}（{group.list.length}）
+                </div>
+                <div className="grid" style={{ gap: 10, marginTop: 10 }}>
+                  {group.list.map((item) => (
+                    <div className="card" key={item.id}>
+                      <div className="section-title">
+                        {item.title} <span className="badge">{contentTypeLabel(item.contentType)}</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 6 }}>
+                        {item.grade} 年级 · 来源：
+                        {item.sourceType === "file"
+                          ? "文件上传"
+                          : item.sourceType === "link"
+                            ? "外部链接"
+                            : "文本录入"}{" "}
+                        · {item.generatedByAi ? "AI生成" : "人工上传"}
+                      </div>
+                      <div className="cta-row" style={{ marginTop: 10 }}>
+                        <Link className="button ghost" href={`/library/${item.id}`}>
+                          查看
+                        </Link>
+                        <button className="button secondary" type="button" onClick={() => downloadItem(item)}>
+                          {item.sourceType === "link" ? "打开链接" : "下载"}
+                        </button>
+                        {user?.role === "admin" ? (
+                          <button
+                            className="button ghost"
+                            style={{ borderColor: "#fecaca", color: "#b42318" }}
+                            type="button"
+                            onClick={() => removeItem(item)}
+                            disabled={deletingId === item.id}
+                          >
+                            {deletingId === item.id ? "删除中..." : "删除"}
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
-                  </Link>
-                ))}
-                {!grouped.textbook.length ? <p>暂无教材。</p> : null}
+                  ))}
+                </div>
               </div>
-            </div>
-            <div className="card">
-              <div className="section-title">课件与教案（{grouped.courseware.length + grouped.lessonPlan.length}）</div>
-              <div className="grid" style={{ gap: 8, marginTop: 8 }}>
-                {[...grouped.courseware, ...grouped.lessonPlan].map((item) => (
-                  <Link className="card" key={item.id} href={`/library/${item.id}`}>
-                    <div className="section-title">
-                      {item.title} <span className="badge">{contentTypeLabel(item.contentType)}</span>
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
-                      {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级 ·{" "}
-                      {item.generatedByAi ? "AI生成" : "人工上传"}
-                    </div>
-                  </Link>
-                ))}
-                {!grouped.courseware.length && !grouped.lessonPlan.length ? <p>暂无课件/教案。</p> : null}
-              </div>
-            </div>
+            ))}
+            {!groupedBySubject.length ? <p>当前筛选条件下暂无资料。</p> : null}
           </div>
         ) : null}
       </Card>
