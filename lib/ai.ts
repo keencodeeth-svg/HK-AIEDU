@@ -164,6 +164,20 @@ export type LlmProbeResult = {
   message: string;
 };
 
+export type LlmProviderCapabilityHealth = {
+  configured: boolean;
+  missingEnv: string[];
+  model?: string;
+  baseUrl?: string;
+  chatPath?: string;
+};
+
+export type LlmProviderHealth = {
+  provider: string;
+  chat: LlmProviderCapabilityHealth;
+  vision: LlmProviderCapabilityHealth;
+};
+
 type LlmResolvedConfig = {
   provider: Exclude<LlmProvider, "mock" | "custom">;
   baseUrl: string;
@@ -257,6 +271,117 @@ function normalizeProviderChain(values?: string[]) {
     }
   });
   return Array.from(unique);
+}
+
+function getProviderCapabilityHealth(
+  provider: LlmProvider,
+  capability: LlmCapability
+): LlmProviderCapabilityHealth {
+  if (provider === "mock") {
+    return {
+      configured: true,
+      missingEnv: [],
+      model: "mock",
+      baseUrl: "",
+      chatPath: ""
+    };
+  }
+
+  if (provider === "custom") {
+    const endpoint = firstNonEmpty(process.env.LLM_ENDPOINT);
+    const configured = Boolean(endpoint);
+    return {
+      configured,
+      missingEnv: configured ? [] : ["LLM_ENDPOINT"],
+      model: "custom",
+      baseUrl: endpoint,
+      chatPath: ""
+    };
+  }
+
+  if (provider === "compatible") {
+    const baseUrl = firstNonEmpty(process.env.LLM_BASE_URL);
+    const apiKey = firstNonEmpty(process.env.LLM_API_KEY);
+    const model = firstNonEmpty(
+      capability === "vision" ? process.env.LLM_VISION_MODEL : "",
+      process.env.LLM_MODEL
+    );
+    const chatPath = firstNonEmpty(process.env.LLM_CHAT_PATH, "/chat/completions");
+    const missingEnv: string[] = [];
+    if (!baseUrl) missingEnv.push("LLM_BASE_URL");
+    if (!apiKey) missingEnv.push("LLM_API_KEY");
+    if (!model) {
+      missingEnv.push(capability === "vision" ? "LLM_VISION_MODEL/LLM_MODEL" : "LLM_MODEL");
+    }
+    return {
+      configured: missingEnv.length === 0,
+      missingEnv,
+      model,
+      baseUrl,
+      chatPath
+    };
+  }
+
+  const prefix = PROVIDER_PREFIX[provider];
+  const defaults = PROVIDER_DEFAULTS[provider];
+  const baseUrl = firstNonEmpty(
+    process.env[`${prefix}_BASE_URL`],
+    provider === "zhipu" ? process.env.LLM_BASE_URL : "",
+    defaults.baseUrl
+  );
+  const apiKey = firstNonEmpty(
+    process.env[`${prefix}_API_KEY`],
+    provider === "zhipu" ? process.env.LLM_API_KEY : ""
+  );
+  const model = firstNonEmpty(
+    capability === "vision" ? process.env[`${prefix}_VISION_MODEL`] : "",
+    process.env[`${prefix}_MODEL`],
+    provider === "zhipu"
+      ? capability === "vision"
+        ? process.env.LLM_VISION_MODEL
+        : process.env.LLM_MODEL
+      : "",
+    capability === "vision" ? defaults.visionModel : defaults.model
+  );
+  const chatPath = firstNonEmpty(
+    process.env[`${prefix}_CHAT_PATH`],
+    provider === "zhipu" ? process.env.LLM_CHAT_PATH : "",
+    defaults.chatPath
+  );
+  const missingEnv: string[] = [];
+  if (!apiKey) {
+    missingEnv.push(provider === "zhipu" ? "ZHIPU_API_KEY/LLM_API_KEY" : `${prefix}_API_KEY`);
+  }
+  if (!baseUrl) {
+    missingEnv.push(provider === "zhipu" ? "ZHIPU_BASE_URL/LLM_BASE_URL" : `${prefix}_BASE_URL`);
+  }
+  if (!model) {
+    if (provider === "zhipu") {
+      missingEnv.push(capability === "vision" ? "ZHIPU_VISION_MODEL/LLM_VISION_MODEL" : "ZHIPU_MODEL/LLM_MODEL");
+    } else {
+      missingEnv.push(capability === "vision" ? `${prefix}_VISION_MODEL/${prefix}_MODEL` : `${prefix}_MODEL`);
+    }
+  }
+  return {
+    configured: missingEnv.length === 0,
+    missingEnv,
+    model,
+    baseUrl,
+    chatPath
+  };
+}
+
+export function getLlmProviderHealth(input: { providers?: string[] } = {}) {
+  const normalized = normalizeProviderChain(input.providers);
+  const providers = normalized.length
+    ? normalized
+    : (["zhipu", "deepseek", "kimi", "minimax", "seedance", "compatible", "custom", "mock"] as LlmProvider[]);
+
+  return providers.map((provider) => ({
+    provider,
+    chat: getProviderCapabilityHealth(provider, "chat"),
+    vision: getProviderCapabilityHealth(provider, "vision")
+  })) as LlmProviderHealth[];
 }
 
 function getProviderChain() {

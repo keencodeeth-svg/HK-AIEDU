@@ -10,11 +10,26 @@ type ProviderOption = {
   description: string;
 };
 
+type ProviderCapabilityHealth = {
+  configured: boolean;
+  missingEnv: string[];
+  model?: string;
+  baseUrl?: string;
+  chatPath?: string;
+};
+
+type ProviderHealth = {
+  provider: string;
+  chat: ProviderCapabilityHealth;
+  vision: ProviderCapabilityHealth;
+};
+
 type ConfigData = {
   availableProviders: ProviderOption[];
   runtimeProviderChain: string[];
   envProviderChain: string[];
   effectiveProviderChain: string[];
+  providerHealth?: ProviderHealth[];
   updatedAt?: string;
   updatedBy?: string;
 };
@@ -200,6 +215,23 @@ export default function AdminAiModelsPage() {
     return config?.envProviderChain ?? ["mock"];
   }, [config?.envProviderChain, draftChain]);
 
+  const providerHealthMap = useMemo(() => {
+    const map = new Map<string, ProviderHealth>();
+    (config?.providerHealth ?? []).forEach((item) => {
+      map.set(item.provider, item);
+    });
+    return map;
+  }, [config?.providerHealth]);
+
+  const chainChatHealthIssues = useMemo(() => {
+    return effectivePreview
+      .map((provider) => ({
+        provider,
+        health: providerHealthMap.get(provider)
+      }))
+      .filter((item) => item.provider !== "mock" && item.health && !item.health.chat.configured);
+  }, [effectivePreview, providerHealthMap]);
+
   function addProvider(provider: string) {
     setDraftChain((prev) => (prev.includes(provider) ? prev : [...prev, provider]));
   }
@@ -379,6 +411,16 @@ export default function AdminAiModelsPage() {
             <div className="card" style={{ fontSize: 12, color: "var(--ink-1)" }}>
               生效链：{config.effectiveProviderChain.join(" -> ")}
             </div>
+            {chainChatHealthIssues.length ? (
+              <div className="card" style={{ fontSize: 12, color: "#b42318" }}>
+                当前生效链存在未完成配置的模型：
+                {chainChatHealthIssues
+                  .map((item) =>
+                    `${item.provider}${item.health?.chat.missingEnv?.length ? `（缺少 ${item.health.chat.missingEnv.join(" / ")}）` : ""}`
+                  )
+                  .join("、")}
+              </div>
+            ) : null}
             <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
               更新时间：{config.updatedAt ? new Date(config.updatedAt).toLocaleString("zh-CN") : "-"} · 操作人：
               {config.updatedBy ?? "-"}
@@ -395,10 +437,23 @@ export default function AdminAiModelsPage() {
           <div className="grid" style={{ gap: 8 }}>
             {(config?.availableProviders ?? []).map((provider) => {
               const selected = draftChain.includes(provider.key);
+              const health = providerHealthMap.get(provider.key);
               return (
                 <div className="card" key={provider.key}>
                   <div className="section-title">{provider.label}</div>
                   <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 4 }}>{provider.description}</div>
+                  {health ? (
+                    <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 6 }}>
+                      文本能力：{health.chat.configured ? "已配置" : "未配置"} · 视觉能力：
+                      {health.vision.configured ? "已配置" : "未配置"}
+                      {health.chat.model ? ` · chat模型 ${health.chat.model}` : ""}
+                    </div>
+                  ) : null}
+                  {health && !health.chat.configured && health.chat.missingEnv.length ? (
+                    <div style={{ fontSize: 12, color: "#b42318", marginTop: 4 }}>
+                      缺少：{health.chat.missingEnv.join(" / ")}
+                    </div>
+                  ) : null}
                   <div className="cta-row" style={{ marginTop: 8 }}>
                     {!selected ? (
                       <button className="button secondary" type="button" onClick={() => addProvider(provider.key)}>

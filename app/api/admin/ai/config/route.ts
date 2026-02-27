@@ -2,6 +2,7 @@ import { requireRole } from "@/lib/guard";
 import { addAdminLog } from "@/lib/admin-log";
 import { badRequest, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
+import { getLlmProviderHealth } from "@/lib/ai";
 import {
   getEffectiveAiProviderChain,
   getEnvAiProviderChain,
@@ -27,11 +28,15 @@ const updateBodySchema = v.object<{
 async function buildPayload() {
   await refreshRuntimeAiProviderConfig();
   const runtime = getRuntimeAiProviderConfig();
+  const availableProviders = listAiProviderOptions();
   return {
-    availableProviders: listAiProviderOptions(),
+    availableProviders,
     runtimeProviderChain: runtime.providerChain,
     envProviderChain: getEnvAiProviderChain(),
     effectiveProviderChain: getEffectiveAiProviderChain(),
+    providerHealth: getLlmProviderHealth({
+      providers: availableProviders.map((item) => item.key)
+    }),
     updatedAt: runtime.updatedAt,
     updatedBy: runtime.updatedBy
   };

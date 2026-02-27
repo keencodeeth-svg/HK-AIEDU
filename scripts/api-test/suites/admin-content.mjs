@@ -31,6 +31,21 @@ export async function runAdminContentSuite(context) {
   );
   assert.ok(Array.isArray(observabilityMetrics.body?.data?.routes), "Observability metrics should include routes");
 
+  const aiConfig = await apiFetch("/api/admin/ai/config");
+  assert.equal(aiConfig.status, 200, `GET /api/admin/ai/config failed: ${aiConfig.raw}`);
+  assert.ok(
+    Array.isArray(aiConfig.body?.data?.availableProviders),
+    "AI config should include availableProviders array"
+  );
+  assert.ok(Array.isArray(aiConfig.body?.data?.providerHealth), "AI config should include providerHealth array");
+  if (aiConfig.body?.data?.providerHealth?.[0]) {
+    assert.equal(
+      typeof aiConfig.body.data.providerHealth[0]?.chat?.configured,
+      "boolean",
+      "providerHealth item should include chat.configured"
+    );
+  }
+
   const aiPolicies = await apiFetch("/api/admin/ai/policies");
   assert.equal(aiPolicies.status, 200, `GET /api/admin/ai/policies failed: ${aiPolicies.raw}`);
   const assistPolicy = (aiPolicies.body?.data?.policies ?? []).find((item) => item.taskType === "assist");
