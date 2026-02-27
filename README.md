@@ -324,6 +324,31 @@ LLM_API_KEY=可选
 - lib/ 类型与工具
 - docs/ 验收清单与发布手册
 
+## 公开教材/课件导入（演示资源）
+
+项目已提供一份中文全学科公开资源导入包（教材 + 课件）：
+
+- 导入包：`docs/chinese-open-curriculum-pack.json`
+- 下载优先包（PDF/PPT/DOC/ZIP 直链）：`docs/chinese-download-first-pack.json`
+- 导入脚本：`scripts/import-open-curriculum-pack.mjs`
+
+一键导入到运行时数据（管理端可见）：
+
+```bash
+npm run import:open-curriculum
+```
+
+导入下载优先包：
+
+```bash
+npm run import:open-curriculum -- docs/chinese-download-first-pack.json
+```
+
+导入后可在 `/library` 的管理端资源库查看。  
+说明：
+- 当前导入包优先使用公开入口资源（Wikibooks、国家智慧教育平台）。
+- 资源链接用于产品能力演示，具体使用需遵循源站条款与版权声明。
+
 ## 验收与发布文档
 
 - Week7 回归验收清单：`docs/week7-challenge-regression-checklist.md`

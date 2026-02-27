@@ -1,0 +1,271 @@
+{
+  "options": {
+    "autoCreateKnowledgePoint": false,
+    "skipExistingQuestionStem": true
+  },
+  "textbooks": [
+    {
+      "title": "数学-精品课PPT模板（可下载）",
+      "description": "来源：基础教育精品课官方模板（PPTX直链下载）。",
+      "contentType": "courseware",
+      "subject": "math",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235w9ba.pptx",
+      "accessScope": "global"
+    },
+    {
+      "title": "语文-精品课PPT模板（可下载）",
+      "description": "来源：基础教育精品课官方模板（PPTX直链下载）。",
+      "contentType": "courseware",
+      "subject": "chinese",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235w9ba.pptx",
+      "accessScope": "global"
+    },
+    {
+      "title": "英语-精品课PPT模板（可下载）",
+      "description": "来源：基础教育精品课官方模板（PPTX直链下载）。",
+      "contentType": "courseware",
+      "subject": "english",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235w9ba.pptx",
+      "accessScope": "global"
+    },
+    {
+      "title": "科学-精品课PPT模板（可下载）",
+      "description": "来源：基础教育精品课官方模板（PPTX直链下载）。",
+      "contentType": "courseware",
+      "subject": "science",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235w9ba.pptx",
+      "accessScope": "global"
+    },
+    {
+      "title": "物理-精品课PPT模板（可下载）",
+      "description": "来源：基础教育精品课官方模板（PPTX直链下载）。",
+      "contentType": "courseware",
+      "subject": "physics",
+      "grade": "8",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235w9ba.pptx",
+      "accessScope": "global"
+    },
+    {
+      "title": "化学-精品课PPT模板（可下载）",
+      "description": "来源：基础教育精品课官方模板（PPTX直链下载）。",
+      "contentType": "courseware",
+      "subject": "chemistry",
+      "grade": "10",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235w9ba.pptx",
+      "accessScope": "global"
+    },
+    {
+      "title": "生物-精品课PPT模板（可下载）",
+      "description": "来源：基础教育精品课官方模板（PPTX直链下载）。",
+      "contentType": "courseware",
+      "subject": "biology",
+      "grade": "10",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235w9ba.pptx",
+      "accessScope": "global"
+    },
+    {
+      "title": "历史-精品课PPT模板（可下载）",
+      "description": "来源：基础教育精品课官方模板（PPTX直链下载）。",
+      "contentType": "courseware",
+      "subject": "history",
+      "grade": "8",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235w9ba.pptx",
+      "accessScope": "global"
+    },
+    {
+      "title": "地理-精品课PPT模板（可下载）",
+      "description": "来源：基础教育精品课官方模板（PPTX直链下载）。",
+      "contentType": "courseware",
+      "subject": "geography",
+      "grade": "8",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235w9ba.pptx",
+      "accessScope": "global"
+    },
+    {
+      "title": "道德与法治-精品课PPT模板（可下载）",
+      "description": "来源：基础教育精品课官方模板（PPTX直链下载）。",
+      "contentType": "courseware",
+      "subject": "politics",
+      "grade": "8",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235w9ba.pptx",
+      "accessScope": "global"
+    },
+
+    {
+      "title": "数学-教学设计模板（可下载DOCX）",
+      "description": "来源：基础教育精品课官方模板（DOCX直链下载）。",
+      "contentType": "lesson_plan",
+      "subject": "math",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235tdrn.docx",
+      "accessScope": "global"
+    },
+    {
+      "title": "语文-教学设计模板（可下载DOCX）",
+      "description": "来源：基础教育精品课官方模板（DOCX直链下载）。",
+      "contentType": "lesson_plan",
+      "subject": "chinese",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235tdrn.docx",
+      "accessScope": "global"
+    },
+    {
+      "title": "英语-教学设计模板（可下载DOCX）",
+      "description": "来源：基础教育精品课官方模板（DOCX直链下载）。",
+      "contentType": "lesson_plan",
+      "subject": "english",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235tdrn.docx",
+      "accessScope": "global"
+    },
+    {
+      "title": "科学-教学设计模板（可下载DOCX）",
+      "description": "来源：基础教育精品课官方模板（DOCX直链下载）。",
+      "contentType": "lesson_plan",
+      "subject": "science",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235tdrn.docx",
+      "accessScope": "global"
+    },
+    {
+      "title": "物理-教学设计模板（可下载DOCX）",
+      "description": "来源：基础教育精品课官方模板（DOCX直链下载）。",
+      "contentType": "lesson_plan",
+      "subject": "physics",
+      "grade": "8",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235tdrn.docx",
+      "accessScope": "global"
+    },
+    {
+      "title": "化学-教学设计模板（可下载DOCX）",
+      "description": "来源：基础教育精品课官方模板（DOCX直链下载）。",
+      "contentType": "lesson_plan",
+      "subject": "chemistry",
+      "grade": "10",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235tdrn.docx",
+      "accessScope": "global"
+    },
+    {
+      "title": "生物-教学设计模板（可下载DOCX）",
+      "description": "来源：基础教育精品课官方模板（DOCX直链下载）。",
+      "contentType": "lesson_plan",
+      "subject": "biology",
+      "grade": "10",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235tdrn.docx",
+      "accessScope": "global"
+    },
+    {
+      "title": "历史-教学设计模板（可下载DOCX）",
+      "description": "来源：基础教育精品课官方模板（DOCX直链下载）。",
+      "contentType": "lesson_plan",
+      "subject": "history",
+      "grade": "8",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235tdrn.docx",
+      "accessScope": "global"
+    },
+    {
+      "title": "地理-教学设计模板（可下载DOCX）",
+      "description": "来源：基础教育精品课官方模板（DOCX直链下载）。",
+      "contentType": "lesson_plan",
+      "subject": "geography",
+      "grade": "8",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235tdrn.docx",
+      "accessScope": "global"
+    },
+    {
+      "title": "道德与法治-教学设计模板（可下载DOCX）",
+      "description": "来源：基础教育精品课官方模板（DOCX直链下载）。",
+      "contentType": "lesson_plan",
+      "subject": "politics",
+      "grade": "8",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235tdrn.docx",
+      "accessScope": "global"
+    },
+
+    {
+      "title": "学习任务单模板（可下载DOCX）",
+      "description": "来源：基础教育精品课官方模板（DOCX直链下载）。",
+      "contentType": "lesson_plan",
+      "subject": "math",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141235lisj.docx",
+      "accessScope": "global"
+    },
+    {
+      "title": "作业练习模板（可下载DOCX）",
+      "description": "来源：基础教育精品课官方模板（DOCX直链下载）。",
+      "contentType": "lesson_plan",
+      "subject": "math",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/0114123519g2.docx",
+      "accessScope": "global"
+    },
+    {
+      "title": "精品课全套模板包（可下载ZIP）",
+      "description": "来源：基础教育精品课官方模板打包下载（ZIP直链下载）。",
+      "contentType": "courseware",
+      "subject": "math",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/01141021ptip.zip",
+      "accessScope": "global"
+    },
+    {
+      "title": "2023部级精品课评价指标（可下载PDF）",
+      "description": "来源：教育部基础教育精品课官方材料（PDF直链下载）。",
+      "contentType": "textbook",
+      "subject": "math",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/19141907e95j.pdf",
+      "accessScope": "global"
+    },
+    {
+      "title": "精品课制作要求（可下载PDF）",
+      "description": "来源：教育部基础教育精品课官方材料（PDF直链下载）。",
+      "contentType": "textbook",
+      "subject": "math",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/191434203a93.pdf",
+      "accessScope": "global"
+    },
+    {
+      "title": "2023学科课程遴选工作指南（可下载PDF）",
+      "description": "来源：教育部基础教育精品课官方材料（PDF直链下载）。",
+      "contentType": "textbook",
+      "subject": "math",
+      "grade": "7",
+      "sourceType": "link",
+      "linkUrl": "https://jpk.basic.smartedu.cn/u/cms/1s1k/202309/12164422go5f.pdf",
+      "accessScope": "global"
+    }
+  ],
+  "questions": []
+}

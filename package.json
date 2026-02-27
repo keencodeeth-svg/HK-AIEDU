@@ -9,6 +9,7 @@
     "lint": "next lint",
     "test:api": "node scripts/test-api-routes.mjs",
     "test": "npm run test:api",
+    "import:open-curriculum": "node scripts/import-open-curriculum-pack.mjs",
     "db:init": "node scripts/init-db.mjs",
     "seed:base": "node scripts/seed-db.mjs",
     "seed:stage3": "node scripts/seed-stage3.mjs",
