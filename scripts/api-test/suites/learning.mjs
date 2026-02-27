@@ -175,6 +175,51 @@ export async function runLearningSuite(context) {
     assert.equal(typeof firstTodayTask.priority, "number");
   }
 
+  const libraryPaged = await apiFetch("/api/library?page=1&pageSize=5");
+  assert.equal(libraryPaged.status, 200, `GET /api/library paged failed: ${libraryPaged.raw}`);
+  assert.ok(Array.isArray(libraryPaged.body?.data), "Library list should include data array");
+  assert.equal(typeof libraryPaged.body?.meta?.total, "number", "Library list should include meta.total");
+  assert.equal(typeof libraryPaged.body?.meta?.page, "number", "Library list should include meta.page");
+  assert.equal(typeof libraryPaged.body?.meta?.pageSize, "number", "Library list should include meta.pageSize");
+  assert.equal(
+    typeof libraryPaged.body?.meta?.totalPages,
+    "number",
+    "Library list should include meta.totalPages"
+  );
+  assert.ok(Array.isArray(libraryPaged.body?.facets?.subjects), "Library list should include facets.subjects");
+  assert.ok(Array.isArray(libraryPaged.body?.facets?.grades), "Library list should include facets.grades");
+  assert.ok(
+    Array.isArray(libraryPaged.body?.facets?.contentTypes),
+    "Library list should include facets.contentTypes"
+  );
+  assert.equal(
+    typeof libraryPaged.body?.summary?.textbookCount,
+    "number",
+    "Library list should include summary.textbookCount"
+  );
+  assert.equal(
+    typeof libraryPaged.body?.summary?.coursewareCount,
+    "number",
+    "Library list should include summary.coursewareCount"
+  );
+  assert.equal(
+    typeof libraryPaged.body?.summary?.lessonPlanCount,
+    "number",
+    "Library list should include summary.lessonPlanCount"
+  );
+
+  const uniqueKeyword = `api_test_library_kw_${Date.now().toString(36)}`;
+  const libraryKeyword = await apiFetch(
+    `/api/library?page=1&pageSize=5&keyword=${encodeURIComponent(uniqueKeyword)}`
+  );
+  assert.equal(libraryKeyword.status, 200, `GET /api/library keyword failed: ${libraryKeyword.raw}`);
+  assert.ok(Array.isArray(libraryKeyword.body?.data), "Library keyword list should include data array");
+  assert.equal(typeof libraryKeyword.body?.meta?.total, "number");
+  assert.ok(
+    (libraryKeyword.body?.data?.length ?? 0) <= 5,
+    "Library keyword list should respect pageSize upper bound"
+  );
+
   const reviewResult = await apiFetch("/api/wrong-book/review-result", {
     method: "POST",
     json: {

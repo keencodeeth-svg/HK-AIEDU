@@ -43,6 +43,48 @@ type BatchImportSummary = {
   knowledgePointsCreated: number;
 };
 
+type LibraryMeta = {
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasPrev: boolean;
+  hasNext: boolean;
+};
+
+type LibraryFacets = {
+  subjects: Array<{ value: string; count: number }>;
+  grades: Array<{ value: string; count: number }>;
+  contentTypes: Array<{ value: string; count: number }>;
+};
+
+type LibrarySummary = {
+  textbookCount: number;
+  coursewareCount: number;
+  lessonPlanCount: number;
+};
+
+const DEFAULT_META: LibraryMeta = {
+  total: 0,
+  page: 1,
+  pageSize: 24,
+  totalPages: 0,
+  hasPrev: false,
+  hasNext: false
+};
+
+const DEFAULT_FACETS: LibraryFacets = {
+  subjects: [],
+  grades: [],
+  contentTypes: []
+};
+
+const DEFAULT_SUMMARY: LibrarySummary = {
+  textbookCount: 0,
+  coursewareCount: 0,
+  lessonPlanCount: 0
+};
+
 function buildBatchImportTemplate() {
   return {
     options: {
@@ -141,22 +183,62 @@ export default function LibraryPage() {
   const [subjectFilter, setSubjectFilter] = useState("all");
   const [contentFilter, setContentFilter] = useState<"all" | "textbook" | "courseware" | "lesson_plan">("all");
   const [keyword, setKeyword] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(24);
+  const [meta, setMeta] = useState<LibraryMeta>(DEFAULT_META);
+  const [facets, setFacets] = useState<LibraryFacets>(DEFAULT_FACETS);
+  const [summary, setSummary] = useState<LibrarySummary>(DEFAULT_SUMMARY);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadItems = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch("/api/library", { cache: "no-store" });
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("pageSize", String(pageSize));
+      if (subjectFilter !== "all") {
+        params.set("subject", subjectFilter);
+      }
+      if (contentFilter !== "all") {
+        params.set("contentType", contentFilter);
+      }
+      if (keyword.trim()) {
+        params.set("keyword", keyword.trim());
+      }
+      const res = await fetch(`/api/library?${params.toString()}`, { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) {
         setError(data?.error ?? "资料加载失败");
         return;
       }
       setItems(data.data ?? []);
+      const nextMeta: LibraryMeta = {
+        total: Number(data?.meta?.total ?? 0),
+        page: Number(data?.meta?.page ?? 1),
+        pageSize: Number(data?.meta?.pageSize ?? pageSize),
+        totalPages: Number(data?.meta?.totalPages ?? 0),
+        hasPrev: Boolean(data?.meta?.hasPrev),
+        hasNext: Boolean(data?.meta?.hasNext)
+      };
+      setMeta(nextMeta);
+      setFacets({
+        subjects: Array.isArray(data?.facets?.subjects) ? data.facets.subjects : [],
+        grades: Array.isArray(data?.facets?.grades) ? data.facets.grades : [],
+        contentTypes: Array.isArray(data?.facets?.contentTypes) ? data.facets.contentTypes : []
+      });
+      setSummary({
+        textbookCount: Number(data?.summary?.textbookCount ?? 0),
+        coursewareCount: Number(data?.summary?.coursewareCount ?? 0),
+        lessonPlanCount: Number(data?.summary?.lessonPlanCount ?? 0)
+      });
+      if (nextMeta.page !== page) {
+        setPage(nextMeta.page);
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [contentFilter, keyword, page, pageSize, subjectFilter]);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -190,37 +272,22 @@ export default function LibraryPage() {
     }
   }, [importForm.contentType, importForm.sourceType]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [subjectFilter, contentFilter, keyword, pageSize]);
+
   const subjectList = useMemo(() => {
-    const keys = Array.from(new Set(items.map((item) => item.subject)));
-    return keys.sort((a, b) => {
+    const keys = facets.subjects.map((item) => item.value);
+    return keys.slice().sort((a, b) => {
       const left = SUBJECT_LABELS[a] ?? a;
       const right = SUBJECT_LABELS[b] ?? b;
       return left.localeCompare(right, "zh-CN");
     });
-  }, [items]);
-
-  const filteredItems = useMemo(() => {
-    const kw = keyword.trim().toLowerCase();
-    return items
-      .filter((item) => (subjectFilter === "all" ? true : item.subject === subjectFilter))
-      .filter((item) => (contentFilter === "all" ? true : item.contentType === contentFilter))
-      .filter((item) => {
-        if (!kw) return true;
-        return `${item.title} ${item.description ?? ""}`.toLowerCase().includes(kw);
-      });
-  }, [contentFilter, items, keyword, subjectFilter]);
-
-  const grouped = useMemo(() => {
-    return {
-      textbook: filteredItems.filter((item) => item.contentType === "textbook"),
-      courseware: filteredItems.filter((item) => item.contentType === "courseware"),
-      lessonPlan: filteredItems.filter((item) => item.contentType === "lesson_plan")
-    };
-  }, [filteredItems]);
+  }, [facets.subjects]);
 
   const groupedBySubject = useMemo(() => {
     const bucket = new Map<string, LibraryItem[]>();
-    filteredItems.forEach((item) => {
+    items.forEach((item) => {
       const list = bucket.get(item.subject) ?? [];
       list.push(item);
       bucket.set(item.subject, list);
@@ -232,7 +299,7 @@ export default function LibraryPage() {
         list: list.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       }))
       .sort((a, b) => a.label.localeCompare(b.label, "zh-CN"));
-  }, [filteredItems]);
+  }, [items]);
 
   async function submitImport(event: React.FormEvent) {
     event.preventDefault();
@@ -756,7 +823,8 @@ export default function LibraryPage() {
               <option value="all">全部学科</option>
               {subjectList.map((subject) => (
                 <option key={subject} value={subject}>
-                  {SUBJECT_LABELS[subject] ?? subject}
+                  {SUBJECT_LABELS[subject] ?? subject}（
+                  {facets.subjects.find((item) => item.value === subject)?.count ?? 0}）
                 </option>
               ))}
             </select>
@@ -786,9 +854,41 @@ export default function LibraryPage() {
             />
           </label>
         </div>
+        <div className="cta-row" style={{ marginTop: 10 }}>
+          <label style={{ display: "grid", gap: 4 }}>
+            <span className="section-title">每页数量</span>
+            <select
+              value={pageSize}
+              onChange={(event) => setPageSize(Number(event.target.value))}
+              style={{ padding: 8, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            >
+              <option value={12}>12</option>
+              <option value={24}>24</option>
+              <option value={48}>48</option>
+            </select>
+          </label>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              disabled={!meta.hasPrev || loading}
+            >
+              上一页
+            </button>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() => setPage((prev) => prev + 1)}
+              disabled={!meta.hasNext || loading}
+            >
+              下一页
+            </button>
+          </div>
+        </div>
         <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 10 }}>
-          当前筛选结果：共 {filteredItems.length} 条（教材 {grouped.textbook.length}，课件 {grouped.courseware.length}，教案{" "}
-          {grouped.lessonPlan.length}）
+          当前筛选结果：共 {meta.total} 条（教材 {summary.textbookCount}，课件 {summary.coursewareCount}，教案{" "}
+          {summary.lessonPlanCount}）· 第 {meta.page} / {Math.max(meta.totalPages, 1)} 页
         </div>
       </Card>
 
@@ -851,6 +951,11 @@ export default function LibraryPage() {
               </div>
             ))}
             {!groupedBySubject.length ? <p>当前筛选条件下暂无资料。</p> : null}
+            {groupedBySubject.length ? (
+              <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                当前页展示 {items.length} 条，筛选总量 {meta.total} 条。
+              </div>
+            ) : null}
           </div>
         ) : null}
       </Card>
