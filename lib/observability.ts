@@ -8,6 +8,7 @@ type ApiRouteLog = {
   path: string;
   status: number;
   durationMs: number;
+  traceId?: string;
   createdAt: string;
 };
 
@@ -17,6 +18,7 @@ type DbApiRouteLog = {
   path: string;
   status: number;
   duration_ms: number;
+  trace_id: string | null;
   created_at: string;
 };
 
@@ -61,6 +63,7 @@ function mapDbLog(row: DbApiRouteLog): ApiRouteLog {
     path: row.path,
     status: row.status,
     durationMs: row.duration_ms,
+    traceId: row.trace_id ?? undefined,
     createdAt: row.created_at
   };
 }
@@ -75,9 +78,9 @@ async function appendRouteLog(log: ApiRouteLog) {
   }
 
   await query(
-    `INSERT INTO api_route_logs (id, method, path, status, duration_ms, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [log.id, log.method, log.path, log.status, log.durationMs, log.createdAt]
+    `INSERT INTO api_route_logs (id, method, path, status, duration_ms, trace_id, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [log.id, log.method, log.path, log.status, log.durationMs, log.traceId ?? null, log.createdAt]
   );
   await query(
     `DELETE FROM api_route_logs
@@ -113,6 +116,7 @@ export async function recordApiRequest(input: {
   path: string;
   status: number;
   durationMs: number;
+  traceId?: string;
 }) {
   const log: ApiRouteLog = {
     id: `api-route-log-${crypto.randomBytes(8).toString("hex")}`,
@@ -120,6 +124,7 @@ export async function recordApiRequest(input: {
     path: input.path || "/",
     status: Number.isFinite(input.status) ? input.status : 500,
     durationMs: Math.max(0, Math.round(input.durationMs || 0)),
+    traceId: input.traceId?.trim() || undefined,
     createdAt: new Date().toISOString()
   };
   await appendRouteLog(log);
@@ -221,6 +226,7 @@ export async function getApiMetricsSummary(limit = 20) {
         path: item.path,
         status: item.status,
         durationMs: item.durationMs,
+        traceId: item.traceId,
         createdAt: item.createdAt
       }))
   };

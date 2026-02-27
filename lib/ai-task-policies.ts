@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { getEffectiveAiProviderChain, type AiProviderKey } from "./ai-config";
 import { isDbEnabled, query } from "./db";
+import { getTraceIdFromContext } from "./request-context";
 import { readJson, writeJson } from "./storage";
 
 export type AiTaskType =
@@ -50,6 +51,7 @@ type DbAiCallLogRow = {
   status: string;
   error_code: string | null;
   error_message: string | null;
+  trace_id: string | null;
   meta: Record<string, unknown> | null;
   created_at: string;
 };
@@ -83,6 +85,7 @@ export type AiCallLog = {
   policyHit?: "budget_limit" | "quality_threshold";
   policyDetail?: string;
   errorMessage?: string;
+  traceId?: string;
   createdAt: string;
 };
 
@@ -511,6 +514,7 @@ export function recordAiCallLog(input: Omit<AiCallLog, "id" | "createdAt">) {
         : undefined,
     policyDetail: input.policyDetail?.slice(0, 160),
     errorMessage: input.errorMessage?.slice(0, 280),
+    traceId: input.traceId?.trim() || getTraceIdFromContext(),
     createdAt: new Date().toISOString()
   };
 
@@ -531,13 +535,14 @@ export function recordAiCallLog(input: Omit<AiCallLog, "id" | "createdAt">) {
     responseChars: item.responseChars,
     qualityScore: item.qualityScore ?? null,
     policyHit: item.policyHit ?? null,
-    policyDetail: item.policyDetail ?? ""
+    policyDetail: item.policyDetail ?? "",
+    traceId: item.traceId ?? null
   };
 
   void query(
     `INSERT INTO ai_call_logs
-      (id, task_type, provider, latency_ms, status, error_code, error_message, meta, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      (id, task_type, provider, latency_ms, status, error_code, error_message, trace_id, meta, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     [
       item.id,
       item.taskType,
@@ -546,6 +551,7 @@ export function recordAiCallLog(input: Omit<AiCallLog, "id" | "createdAt">) {
       item.ok ? "success" : "failed",
       item.timeout ? "timeout" : item.policyHit ?? null,
       item.errorMessage ?? null,
+      item.traceId ?? null,
       meta,
       item.createdAt
     ]
@@ -584,6 +590,7 @@ function mapDbCallLogRow(row: DbAiCallLogRow): AiCallLog {
     policyHit,
     policyDetail: typeof meta.policyDetail === "string" ? meta.policyDetail : undefined,
     errorMessage: row.error_message ?? undefined,
+    traceId: row.trace_id ?? (typeof meta.traceId === "string" ? meta.traceId : undefined),
     createdAt: row.created_at
   };
 }
@@ -597,7 +604,7 @@ async function getRecentAiCallLogs(limit = 8000) {
   }
 
   const rows = await query<DbAiCallLogRow>(
-    `SELECT id, task_type, provider, latency_ms, status, error_code, error_message, meta, created_at
+    `SELECT id, task_type, provider, latency_ms, status, error_code, error_message, trace_id, meta, created_at
      FROM ai_call_logs
      ORDER BY created_at DESC
      LIMIT $1`,

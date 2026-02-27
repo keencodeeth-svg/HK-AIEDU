@@ -1,13 +1,15 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { recordApiRequest } from "../observability";
+import { runWithRequestContext } from "../request-context";
 
-const RESERVED_KEYS = new Set(["code", "message", "data", "requestId", "timestamp", "error"]);
+const RESERVED_KEYS = new Set(["code", "message", "data", "requestId", "traceId", "timestamp", "error"]);
 
 type ApiEnvelopeBase = {
   code: number;
   message: string;
   requestId: string;
+  traceId: string;
   timestamp: string;
 };
 
@@ -44,6 +46,12 @@ export function getRequestId(request?: Request) {
   return crypto.randomUUID();
 }
 
+export function getTraceId(request?: Request, fallbackRequestId?: string) {
+  const headerId = request?.headers.get("x-trace-id")?.trim();
+  if (headerId) return headerId;
+  return fallbackRequestId ?? getRequestId(request);
+}
+
 export function apiSuccess<T>(
   data: T,
   options: {
@@ -51,15 +59,18 @@ export function apiSuccess<T>(
     message?: string;
     request?: Request;
     requestId?: string;
+    traceId?: string;
     legacyRoot?: boolean;
   } = {}
 ) {
   const requestId = options.requestId ?? getRequestId(options.request);
+  const traceId = options.traceId ?? getTraceId(options.request, requestId);
   const payload: Record<string, unknown> = {
     code: 0,
     message: options.message ?? "ok",
     data,
     requestId,
+    traceId,
     timestamp: getTimestamp()
   };
 
@@ -83,7 +94,7 @@ export function apiSuccess<T>(
 
   return NextResponse.json(payload as ApiSuccessEnvelope<T>, {
     status: options.status ?? 200,
-    headers: { "x-request-id": requestId }
+    headers: { "x-request-id": requestId, "x-trace-id": traceId }
   });
 }
 
@@ -94,21 +105,24 @@ export function apiError(
     details?: unknown;
     request?: Request;
     requestId?: string;
+    traceId?: string;
   } = {}
 ) {
   const requestId = options.requestId ?? getRequestId(options.request);
+  const traceId = options.traceId ?? getTraceId(options.request, requestId);
   const payload: ApiErrorEnvelope = {
     code: status,
     message,
     error: message,
     data: null,
     requestId,
+    traceId,
     timestamp: getTimestamp(),
     details: options.details
   };
   return NextResponse.json(payload, {
     status,
-    headers: { "x-request-id": requestId }
+    headers: { "x-request-id": requestId, "x-trace-id": traceId }
   });
 }
 
@@ -125,7 +139,7 @@ type RouteContext<TParams extends Record<string, string> = Record<string, string
 type RouteHandler<TParams extends Record<string, string> = Record<string, string>> = (
   request: Request,
   context: RouteContext<TParams>,
-  meta: { requestId: string }
+  meta: { requestId: string; traceId: string }
 ) => Promise<Response | unknown>;
 
 export function withApi<TParams extends Record<string, string> = Record<string, string>>(
@@ -133,6 +147,7 @@ export function withApi<TParams extends Record<string, string> = Record<string, 
 ) {
   return async (request: Request, context: RouteContext<TParams>) => {
     const requestId = getRequestId(request);
+    const traceId = getTraceId(request, requestId);
     const safeContext = context ?? ({ params: {} as TParams });
     const startedAt = Date.now();
     let status = 500;
@@ -145,19 +160,23 @@ export function withApi<TParams extends Record<string, string> = Record<string, 
     }
 
     try {
-      const result = await handler(request, safeContext, { requestId });
+      const result = await runWithRequestContext({ requestId, traceId }, () =>
+        handler(request, safeContext, { requestId, traceId })
+      );
       if (result instanceof Response) {
         status = result.status;
         result.headers.set("x-request-id", requestId);
+        result.headers.set("x-trace-id", traceId);
         return result;
       }
       status = 200;
-      return apiSuccess(result, { requestId });
+      return apiSuccess(result, { requestId, traceId });
     } catch (error) {
       const apiErr = toApiError(error);
       status = apiErr.status;
       return apiError(apiErr.status, apiErr.message, {
         requestId,
+        traceId,
         details: apiErr.details
       });
     } finally {
@@ -166,7 +185,8 @@ export function withApi<TParams extends Record<string, string> = Record<string, 
           method: request.method || "GET",
           path,
           status,
-          durationMs: Date.now() - startedAt
+          durationMs: Date.now() - startedAt,
+          traceId
         });
       } catch {
         // observability must never block business response

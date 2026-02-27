@@ -82,6 +82,7 @@ HK-AI-EDU 不是单点工具，而是一个完整的学习运营系统：
 - [x] 资料库文件对象存储适配（文件内容可脱离 DB 存储，DB 仅保留元数据）
 - [x] 显式数据库迁移命令（`db:migrate`），运行时不再自动建表
 - [x] 统一授权中间层 V1（角色 + 班级归属校验抽离复用）
+- [x] traceId 贯穿 API 响应头与 AI 调用日志（便于跨链路排障）
 - [x] AI 多模型路由（zhipu/deepseek/kimi/minimax/seedance/compatible/custom）
 - [x] AI 任务策略（providerChain、timeout、retries、budget、minQualityScore）
 - [x] AI 配置与日志 DB 优先存储（多实例一致）
@@ -97,7 +98,7 @@ HK-AI-EDU 不是单点工具，而是一个完整的学习运营系统：
 3. 显式 migration 机制替代运行时自动建表（已落地 `db:migrate`）
 4. 统一授权中间层（角色 + 资源归属 + 班级关系，V1 已落地）
 5. 测试分层（单测 + API 回归 + E2E 关键链路）
-6. 可观测性增强（traceId 串联业务和 AI 日志）
+6. 可观测性增强（traceId 串联业务和 AI 日志，V1 已落地）
 
 ### P1（次优先，提分效果增强）
 

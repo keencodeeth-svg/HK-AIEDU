@@ -819,11 +819,15 @@ CREATE TABLE IF NOT EXISTS api_route_logs (
   path TEXT NOT NULL,
   status INT NOT NULL,
   duration_ms INT NOT NULL,
+  trace_id TEXT,
   created_at TIMESTAMPTZ NOT NULL
 );
 
+ALTER TABLE api_route_logs ADD COLUMN IF NOT EXISTS trace_id TEXT;
+
 CREATE INDEX IF NOT EXISTS api_route_logs_created_idx ON api_route_logs (created_at);
 CREATE INDEX IF NOT EXISTS api_route_logs_method_path_idx ON api_route_logs (method, path);
+CREATE INDEX IF NOT EXISTS api_route_logs_trace_idx ON api_route_logs (trace_id);
 
 CREATE TABLE IF NOT EXISTS ai_provider_configs (
   id TEXT PRIMARY KEY,
