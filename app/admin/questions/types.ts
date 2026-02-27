@@ -69,6 +69,10 @@ export type QuestionQuery = {
   difficulty: string;
   questionType: string;
   search: string;
+  pool: "all" | "isolated" | "active";
+  riskLevel: "all" | "low" | "medium" | "high";
+  answerConflict: "all" | "yes" | "no";
+  duplicateClusterId: string;
 };
 
 export type QuestionForm = {

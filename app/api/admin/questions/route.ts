@@ -24,6 +24,10 @@ const listQuestionsQuerySchema = v.object<{
   difficulty?: string;
   questionType?: string;
   search?: string;
+  pool?: "all" | "isolated" | "active";
+  riskLevel?: "all" | "low" | "medium" | "high";
+  answerConflict?: "all" | "yes" | "no";
+  duplicateClusterId?: string;
   page?: number;
   pageSize?: number;
   sortBy?: "updatedAt" | "subject" | "grade" | "chapter" | "difficulty" | "questionType";
@@ -37,6 +41,10 @@ const listQuestionsQuerySchema = v.object<{
     difficulty: v.optional(v.string({ allowEmpty: true, trim: false })),
     questionType: v.optional(v.string({ allowEmpty: true, trim: false })),
     search: v.optional(v.string({ allowEmpty: true, trim: false })),
+    pool: v.optional(v.enum(["all", "isolated", "active"] as const)),
+    riskLevel: v.optional(v.enum(["all", "low", "medium", "high"] as const)),
+    answerConflict: v.optional(v.enum(["all", "yes", "no"] as const)),
+    duplicateClusterId: v.optional(v.string({ allowEmpty: true, trim: false })),
     page: v.optional(v.number({ integer: true, min: 1, coerce: true })),
     pageSize: v.optional(v.number({ integer: true, min: 1, max: 200, coerce: true })),
     sortBy: v.optional(
@@ -88,6 +96,10 @@ export const GET = withApi(async (request) => {
   const difficulty = normalizeQueryString(query.difficulty);
   const questionType = normalizeQueryString(query.questionType);
   const search = normalizeQueryString(query.search)?.toLowerCase();
+  const pool = query.pool ?? "all";
+  const riskLevel = query.riskLevel ?? "all";
+  const answerConflict = query.answerConflict ?? "all";
+  const duplicateClusterId = normalizeQueryString(query.duplicateClusterId)?.toLowerCase();
   const sortBy = query.sortBy ?? "updatedAt";
   const sortDir = query.sortDir ?? "desc";
   const shouldPaginate = query.page !== undefined || query.pageSize !== undefined;
@@ -124,7 +136,38 @@ export const GET = withApi(async (request) => {
     return true;
   });
 
-  const sorted = filtered.slice().sort((a, b) => {
+  const qualityMetrics = await listQuestionQualityMetrics({
+    questionIds: filtered.map((item) => item.id)
+  });
+  const qualityMetricMap = new Map(qualityMetrics.map((item) => [item.questionId, item]));
+
+  const qualityFiltered = filtered.filter((item) => {
+    const metric = qualityMetricMap.get(item.id);
+    const isolated = Boolean(metric?.isolated);
+    if (pool === "isolated" && !isolated) return false;
+    if (pool === "active" && isolated) return false;
+
+    if (riskLevel !== "all" && (metric?.riskLevel ?? "low") !== riskLevel) {
+      return false;
+    }
+
+    if (answerConflict === "yes" && !metric?.answerConflict) {
+      return false;
+    }
+    if (answerConflict === "no" && Boolean(metric?.answerConflict)) {
+      return false;
+    }
+
+    if (duplicateClusterId) {
+      const cluster = metric?.duplicateClusterId?.toLowerCase() ?? "";
+      if (!cluster || !cluster.includes(duplicateClusterId)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  const sorted = qualityFiltered.slice().sort((a, b) => {
     const chapterA = chapterByKnowledgePointId.get(a.knowledgePointId) ?? "未分章节";
     const chapterB = chapterByKnowledgePointId.get(b.knowledgePointId) ?? "未分章节";
     const diffA = a.difficulty ?? "medium";
@@ -156,11 +199,7 @@ export const GET = withApi(async (request) => {
   const end = shouldPaginate ? start + pageSize : sorted.length;
   const paged = sorted.slice(start, end);
 
-  const metrics = await listQuestionQualityMetrics({
-    questionIds: paged.map((item) => item.id)
-  });
-  const metricMap = new Map(metrics.map((item) => [item.questionId, item]));
-  const data = paged.map((item) => attachQualityFields(item, metricMap.get(item.id) ?? null));
+  const data = paged.map((item) => attachQualityFields(item, qualityMetricMap.get(item.id) ?? null));
 
   const facetsSource = sorted;
   const subjectFacet = buildFacet(facetsSource.map((item) => item.subject));
@@ -239,6 +278,10 @@ export const GET = withApi(async (request) => {
       difficulty: difficulty ?? null,
       questionType: questionType ?? null,
       search: search ?? null,
+      pool,
+      riskLevel,
+      answerConflict,
+      duplicateClusterId: duplicateClusterId ?? null,
       sortBy,
       sortDir
     }

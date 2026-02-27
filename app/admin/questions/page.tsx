@@ -26,7 +26,11 @@ export default function QuestionsAdminPage() {
     chapter: "all",
     difficulty: "all",
     questionType: "all",
-    search: ""
+    search: "",
+    pool: "all",
+    riskLevel: "all",
+    answerConflict: "all",
+    duplicateClusterId: ""
   });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -95,6 +99,10 @@ export default function QuestionsAdminPage() {
     if (query.difficulty !== "all") searchParams.set("difficulty", query.difficulty);
     if (query.questionType !== "all") searchParams.set("questionType", query.questionType);
     if (query.search.trim()) searchParams.set("search", query.search.trim());
+    if (query.pool !== "all") searchParams.set("pool", query.pool);
+    if (query.riskLevel !== "all") searchParams.set("riskLevel", query.riskLevel);
+    if (query.answerConflict !== "all") searchParams.set("answerConflict", query.answerConflict);
+    if (query.duplicateClusterId.trim()) searchParams.set("duplicateClusterId", query.duplicateClusterId.trim());
     searchParams.set("page", String(page));
     searchParams.set("pageSize", String(pageSize));
 

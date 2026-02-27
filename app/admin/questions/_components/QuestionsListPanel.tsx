@@ -65,7 +65,16 @@ export default function QuestionsListPanel({
     query.questionType !== "all"
       ? `题型：${questionTypeLabel[query.questionType] ?? query.questionType}`
       : null,
-    query.search.trim() ? `关键词：${query.search.trim()}` : null
+    query.search.trim() ? `关键词：${query.search.trim()}` : null,
+    query.pool === "isolated" ? "题目池：仅隔离池" : null,
+    query.pool === "active" ? "题目池：排除隔离池" : null,
+    query.riskLevel !== "all" ? `风险：${riskLabel[query.riskLevel]}` : null,
+    query.answerConflict === "yes"
+      ? "答案冲突：仅冲突"
+      : query.answerConflict === "no"
+        ? "答案冲突：排除冲突"
+        : null,
+    query.duplicateClusterId.trim() ? `重复簇：${query.duplicateClusterId.trim()}` : null
   ].filter(Boolean) as string[];
 
   return (
@@ -174,6 +183,58 @@ export default function QuestionsListPanel({
             ))}
           </select>
         </label>
+        <label>
+          <div className="section-title">题目池</div>
+          <select
+            value={query.pool}
+            onChange={(event) =>
+              patchQuery({ pool: event.target.value as "all" | "isolated" | "active" })
+            }
+            style={controlStyle}
+          >
+            <option value="all">全部题目</option>
+            <option value="isolated">仅隔离池</option>
+            <option value="active">排除隔离池</option>
+          </select>
+        </label>
+        <label>
+          <div className="section-title">质量风险</div>
+          <select
+            value={query.riskLevel}
+            onChange={(event) =>
+              patchQuery({ riskLevel: event.target.value as "all" | "low" | "medium" | "high" })
+            }
+            style={controlStyle}
+          >
+            <option value="all">全部风险</option>
+            <option value="high">高风险</option>
+            <option value="medium">中风险</option>
+            <option value="low">低风险</option>
+          </select>
+        </label>
+        <label>
+          <div className="section-title">答案冲突</div>
+          <select
+            value={query.answerConflict}
+            onChange={(event) =>
+              patchQuery({ answerConflict: event.target.value as "all" | "yes" | "no" })
+            }
+            style={controlStyle}
+          >
+            <option value="all">全部</option>
+            <option value="yes">仅冲突</option>
+            <option value="no">排除冲突</option>
+          </select>
+        </label>
+        <label>
+          <div className="section-title">重复簇 ID</div>
+          <input
+            value={query.duplicateClusterId}
+            onChange={(event) => patchQuery({ duplicateClusterId: event.target.value })}
+            placeholder="输入簇 ID（支持包含匹配）"
+            style={controlStyle}
+          />
+        </label>
       </div>
 
       <div className="cta-row" style={{ marginTop: 10 }}>
@@ -187,7 +248,11 @@ export default function QuestionsListPanel({
               chapter: "all",
               difficulty: "all",
               questionType: "all",
-              search: ""
+              search: "",
+              pool: "all",
+              riskLevel: "all",
+              answerConflict: "all",
+              duplicateClusterId: ""
             })
           }
         >
@@ -212,9 +277,40 @@ export default function QuestionsListPanel({
           <button
             className={query.subject === "all" ? "button secondary" : "button ghost"}
             type="button"
-            onClick={() => patchQuery({ subject: "all", grade: "all", chapter: "all" })}
+            onClick={() =>
+              patchQuery({
+                subject: "all",
+                grade: "all",
+                chapter: "all",
+                pool: "all",
+                riskLevel: "all",
+                answerConflict: "all",
+                duplicateClusterId: ""
+              })
+            }
           >
             全部
+          </button>
+          <button
+            className={query.pool === "isolated" ? "button secondary" : "button ghost"}
+            type="button"
+            onClick={() => patchQuery({ pool: "isolated" })}
+          >
+            隔离池
+          </button>
+          <button
+            className={query.riskLevel === "high" ? "button secondary" : "button ghost"}
+            type="button"
+            onClick={() => patchQuery({ riskLevel: "high" })}
+          >
+            高风险
+          </button>
+          <button
+            className={query.answerConflict === "yes" ? "button secondary" : "button ghost"}
+            type="button"
+            onClick={() => patchQuery({ answerConflict: "yes" })}
+          >
+            答案冲突
           </button>
           {tree.slice(0, 6).map((subjectNode) => (
             <button
@@ -329,6 +425,7 @@ export default function QuestionsListPanel({
                     <span className="badge">答案一致性 {item.answerConsistency}</span>
                   ) : null}
                   {item.answerConflict ? <span className="badge">答案冲突</span> : null}
+                  {item.duplicateClusterId ? <span className="badge">重复簇 {item.duplicateClusterId}</span> : null}
                   {item.isolated ? <span className="badge">隔离池</span> : null}
                 </div>
               ) : null}
@@ -356,6 +453,11 @@ export default function QuestionsListPanel({
                       {tag}
                     </span>
                   ))}
+                </div>
+              ) : null}
+              {item.isolationReason?.length ? (
+                <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-1)" }}>
+                  隔离原因：{item.isolationReason.join("；")}
                 </div>
               ) : null}
               <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
