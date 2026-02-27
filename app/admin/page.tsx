@@ -78,7 +78,7 @@ export default function AdminPage() {
         <Card title="AI 模型路由" tag="AI">
           <div className="feature-card">
             <EduIcon name="brain" />
-            <p>配置智谱/DeepSeek/Kimi/MiniMax/Seedance 的主备链路并在线测试。</p>
+            <p>配置模型主备链、任务级策略、连通性测试与调用指标。</p>
           </div>
           <Link className="button secondary" href="/admin/ai-models" style={{ marginTop: 12 }}>
             打开模型中心

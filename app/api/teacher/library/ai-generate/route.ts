@@ -2,7 +2,9 @@ import { getCurrentUser } from "@/lib/auth";
 import { generateLessonOutline } from "@/lib/ai";
 import { getClassById } from "@/lib/classes";
 import { getKnowledgePoints } from "@/lib/content";
-import { createLearningLibraryItem } from "@/lib/learning-library";
+import { createLearningLibraryItem, listLearningLibraryItems, type LearningLibraryItem } from "@/lib/learning-library";
+import { canAccessLearningLibraryItem } from "@/lib/library-access";
+import { retrieveLibraryCitations, toCitationPrompts } from "@/lib/library-rag";
 import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 
@@ -33,6 +35,7 @@ function formatOutlineToMarkdown(input: {
   keyPoints: string[];
   slides: Array<{ title: string; bullets: string[] }>;
   blackboardSteps: string[];
+  citations?: Array<{ itemTitle: string; snippet: string }>;
 }) {
   const header = `# ${input.topic}\n\n- 班级：${input.className}\n- 学科：${input.subject}\n- 年级：${input.grade}\n- 类型：${
     input.type === "courseware" ? "课件" : "教案"
@@ -46,7 +49,12 @@ function formatOutlineToMarkdown(input: {
     )
     .join("\n\n")}`;
   const board = `\n## 板书/讲解顺序\n${input.blackboardSteps.map((item, index) => `${index + 1}. ${item}`).join("\n")}`;
-  return `${header}${goals}${keyPoints}${slideBlocks}${board}\n`;
+  const citations = input.citations?.length
+    ? `\n## 教材依据（AI 检索）\n${input.citations
+        .map((item, index) => `${index + 1}. 《${item.itemTitle}》：${item.snippet}`)
+        .join("\n")}`
+    : "";
+  return `${header}${goals}${keyPoints}${slideBlocks}${board}${citations}\n`;
 }
 
 export const POST = withApi(async (request) => {
@@ -79,13 +87,37 @@ export const POST = withApi(async (request) => {
     .filter(Boolean)
     .map((item) => (item ? item.title : ""))
     .filter(Boolean);
+  const libraryItems = await listLearningLibraryItems({
+    subject: klass.subject,
+    grade: klass.grade
+  });
+  const accessibleItems = (
+    await Promise.all(
+      libraryItems.map(async (item) => {
+        const allowed = await canAccessLearningLibraryItem(user, item);
+        if (!allowed) return null;
+        if (item.status !== "published" && item.ownerId !== user.id) {
+          return null;
+        }
+        return item;
+      })
+    )
+  ).filter((item): item is LearningLibraryItem => Boolean(item));
+  const citations = await retrieveLibraryCitations({
+    query: `${topic}\n${kpTitles.join("、")}`,
+    subject: klass.subject,
+    grade: klass.grade,
+    limit: 4,
+    itemIds: accessibleItems.map((item) => item.id)
+  });
 
   const outline =
     (await generateLessonOutline({
       subject: klass.subject,
       grade: klass.grade,
       topic,
-      knowledgePoints: kpTitles
+      knowledgePoints: kpTitles,
+      citations: toCitationPrompts(citations)
     })) ?? {
       objectives: ["掌握核心概念", "会用标准步骤解题", "完成课堂巩固任务"],
       keyPoints: kpTitles.length ? kpTitles : ["关键概念", "易错点"],
@@ -107,7 +139,11 @@ export const POST = withApi(async (request) => {
     objectives: outline.objectives ?? [],
     keyPoints: outline.keyPoints ?? [],
     slides: outline.slides ?? [],
-    blackboardSteps: outline.blackboardSteps ?? []
+    blackboardSteps: outline.blackboardSteps ?? [],
+    citations: citations.map((item) => ({
+      itemTitle: item.itemTitle,
+      snippet: item.snippet
+    }))
   });
 
   const item = await createLearningLibraryItem({
@@ -130,7 +166,8 @@ export const POST = withApi(async (request) => {
   return {
     data: {
       item,
-      outline
+      outline,
+      citations
     }
   };
 });

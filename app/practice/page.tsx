@@ -36,6 +36,12 @@ type ExplainPack = {
   visual: string;
   analogy: string;
   provider?: string;
+  citations?: Array<{
+    itemId: string;
+    itemTitle: string;
+    snippet: string;
+    score: number;
+  }>;
 };
 
 export default function PracticePage() {
@@ -516,6 +522,17 @@ export default function PracticePage() {
           {explainPack?.provider ? (
             <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-1)" }}>
               解析来源：{explainPack.provider}
+            </div>
+          ) : null}
+          {explainPack?.citations?.length ? (
+            <div className="grid" style={{ gap: 6, marginTop: 10 }}>
+              <div className="badge">教材依据</div>
+              {explainPack.citations.map((item) => (
+                <div className="card" key={`${item.itemId}-${item.score}`} style={{ fontSize: 12 }}>
+                  <div style={{ fontWeight: 600 }}>{item.itemTitle}</div>
+                  <div style={{ color: "var(--ink-1)", marginTop: 4 }}>{item.snippet}</div>
+                </div>
+              ))}
             </div>
           ) : null}
           <div className="cta-row" style={{ marginTop: 12 }}>

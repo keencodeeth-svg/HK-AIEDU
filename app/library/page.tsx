@@ -390,7 +390,8 @@ export default function LibraryPage() {
       setError(data?.error ?? "生成失败");
       return;
     }
-    setMessage("AI 资料已生成并发布");
+    const citationCount = Array.isArray(data?.data?.citations) ? data.data.citations.length : 0;
+    setMessage(citationCount ? `AI 资料已生成并发布（引用教材片段 ${citationCount} 条）` : "AI 资料已生成并发布");
     setAiForm((prev) => ({ ...prev, topic: "" }));
     await loadItems();
   }

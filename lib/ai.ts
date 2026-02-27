@@ -1,5 +1,6 @@
 import { retrieveKnowledgePoints, retrieveSimilarQuestion } from "./rag";
 import { getEffectiveAiProviderChain } from "./ai-config";
+import { getAiTaskPolicy, recordAiCallLog, type AiTaskType } from "./ai-task-policies";
 
 export type AssistPayload = {
   question: string;
@@ -382,6 +383,36 @@ async function callCustomLLM(prompt: string) {
   }
 }
 
+function countMessageChars(messages: ChatMessage[]) {
+  return messages.reduce((sum, item) => sum + normalizeMessageContentToText(item.content).length, 0);
+}
+
+async function runWithTimeout<T>(runner: () => Promise<T>, timeoutMs: number) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    try {
+      return { value: await runner(), timeout: false, error: "" };
+    } catch (error) {
+      return {
+        value: null as T | null,
+        timeout: false,
+        error: error instanceof Error ? error.message : "runner error"
+      };
+    }
+  }
+
+  const wrapped = runner()
+    .then((value) => ({ value, timeout: false, error: "" }))
+    .catch((error) => ({
+      value: null as T | null,
+      timeout: false,
+      error: error instanceof Error ? error.message : "runner error"
+    }));
+  const timeout = new Promise<{ value: T | null; timeout: true; error: string }>((resolve) => {
+    setTimeout(() => resolve({ value: null, timeout: true, error: "timeout" }), timeoutMs);
+  });
+  return Promise.race([wrapped, timeout]);
+}
+
 async function callChatCompletions(params: {
   baseUrl: string;
   apiKey: string;
@@ -424,34 +455,113 @@ async function callRoutedLLM(params: {
   capability?: LlmCapability;
   customPrompt?: string;
   chain?: LlmProvider[];
+  taskType?: AiTaskType;
 }) {
-  const chain = params.chain?.length ? params.chain : getProviderChain();
+  const taskType = params.taskType ?? "assist";
+  const policy = getAiTaskPolicy(taskType);
+  const chain = params.chain?.length ? params.chain : normalizeProviderChain(policy.providerChain);
   const capability = params.capability ?? "chat";
+  const requestChars = countMessageChars(params.messages);
+  const retries = Math.max(0, policy.maxRetries);
+  const timeoutMs = policy.timeoutMs;
 
-  for (const provider of chain) {
+  for (let providerIndex = 0; providerIndex < chain.length; providerIndex += 1) {
+    const provider = chain[providerIndex];
     if (provider === "mock") continue;
-    if (provider === "custom") {
-      const prompt = params.customPrompt ?? buildCustomPrompt(params.messages);
-      const text = await callCustomLLM(prompt);
-      if (text) {
-        return { text, provider } as const;
+
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      const startedAt = Date.now();
+
+      if (provider === "custom") {
+        const prompt = params.customPrompt ?? buildCustomPrompt(params.messages);
+        const result = await runWithTimeout(() => callCustomLLM(prompt), timeoutMs);
+        const text = typeof result.value === "string" ? result.value : null;
+
+        try {
+          recordAiCallLog({
+            taskType,
+            provider,
+            capability,
+            ok: Boolean(text),
+            latencyMs: Date.now() - startedAt,
+            fallbackCount: providerIndex,
+            timeout: result.timeout,
+            requestChars,
+            responseChars: text?.length ?? 0,
+            errorMessage: text ? "" : result.error || "empty response"
+          });
+        } catch {
+          // observability should never block ai business flow
+        }
+
+        if (text) {
+          return { text, provider } as const;
+        }
+        if (result.timeout) {
+          break;
+        }
+        continue;
       }
-      continue;
-    }
 
-    const config = getProviderConfig(provider, capability);
-    if (!config) continue;
+      const config = getProviderConfig(provider, capability);
+      if (!config) {
+        try {
+          recordAiCallLog({
+            taskType,
+            provider,
+            capability,
+            ok: false,
+            latencyMs: Date.now() - startedAt,
+            fallbackCount: providerIndex,
+            timeout: false,
+            requestChars,
+            responseChars: 0,
+            errorMessage: "missing credentials or model config"
+          });
+        } catch {
+          // observability should never block ai business flow
+        }
+        break;
+      }
 
-    const text = await callChatCompletions({
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      model: config.model,
-      chatPath: config.chatPath,
-      messages: params.messages,
-      temperature: params.temperature
-    });
-    if (text) {
-      return { text, provider: config.provider } as const;
+      const result = await runWithTimeout(
+        () =>
+          callChatCompletions({
+            baseUrl: config.baseUrl,
+            apiKey: config.apiKey,
+            model: config.model,
+            chatPath: config.chatPath,
+            messages: params.messages,
+            temperature: params.temperature
+          }),
+        timeoutMs
+      );
+      const text = typeof result.value === "string" ? result.value : null;
+
+      try {
+        recordAiCallLog({
+          taskType,
+          provider: config.provider,
+          capability,
+          ok: Boolean(text),
+          latencyMs: Date.now() - startedAt,
+          fallbackCount: providerIndex,
+          timeout: result.timeout,
+          requestChars,
+          responseChars: text?.length ?? 0,
+          errorMessage: text ? "" : result.error || "empty response"
+        });
+      } catch {
+        // observability should never block ai business flow
+      }
+
+      if (text) {
+        return { text, provider: config.provider } as const;
+      }
+
+      if (result.timeout) {
+        break;
+      }
     }
   }
 
@@ -481,6 +591,7 @@ export async function probeLlmProviders(input: {
     const startedAt = Date.now();
     const response = await callRoutedLLM({
       chain: [provider],
+      taskType: "probe",
       capability,
       temperature: 0,
       messages: [
@@ -586,6 +697,7 @@ export async function generateQuestionDraft(payload: GenerateQuestionPayload) {
 
   const userPrompt = `${context}\n请生成 1 道四选一选择题，字段为: stem, options, answer, explanation。\n要求: options 为 4 个简短选项，answer 必须完全等于其中一个选项文本，不要包含 A/B/C/D 前缀。`;
   const llm = await callRoutedLLM({
+    taskType: "question_generate",
     messages: [
       { role: "system", content: GENERATE_PROMPT },
       { role: "user", content: userPrompt }
@@ -616,6 +728,7 @@ export async function generateWrongExplanation(payload: {
 
   const userPrompt = `${context}\n题目：${payload.question}\n学生答案：${payload.studentAnswer}\n正确答案：${payload.correctAnswer}\n已有解析：${payload.explanation ?? ""}\n请指出学生可能的错误原因，并用简洁语言给出纠正讲解与 2-3 条提示。返回 JSON：{\"analysis\":\"...\",\"hints\":[\"...\",\"...\"]}。不要输出多余文本。`;
   const llm = await callRoutedLLM({
+    taskType: "explanation",
     messages: [
       { role: "system", content: GENERATE_PROMPT },
       { role: "user", content: userPrompt }
@@ -654,6 +767,7 @@ export async function generateVariantDrafts(payload: {
 
   const userPrompt = `${context}\n参考题目：${payload.seedQuestion}\n请生成 ${count} 道同类型变式选择题，返回 JSON：{\"items\":[{\"stem\":\"...\",\"options\":[\"...\"],\"answer\":\"...\",\"explanation\":\"...\"}]}。要求选项为 4 个，答案必须等于某个选项文本，不要附加 A/B/C/D。不要输出多余文本。`;
   const llm = await callRoutedLLM({
+    taskType: "variant_generate",
     messages: [
       { role: "system", content: GENERATE_PROMPT },
       { role: "user", content: userPrompt }
@@ -705,17 +819,25 @@ export async function generateExplainVariants(payload: {
   answer: string;
   explanation?: string;
   knowledgePointTitle?: string;
+  citations?: string[];
 }) {
   const context = [
     `学科：${payload.subject}`,
     `年级：${payload.grade}`,
-    payload.knowledgePointTitle ? `知识点：${payload.knowledgePointTitle}` : ""
+    payload.knowledgePointTitle ? `知识点：${payload.knowledgePointTitle}` : "",
+    payload.citations?.length
+      ? `教材依据：\n${payload.citations
+          .slice(0, 4)
+          .map((item, index) => `${index + 1}. ${item}`)
+          .join("\n")}`
+      : ""
   ]
     .filter(Boolean)
     .join("\n");
 
   const userPrompt = `${context}\n题目：${payload.stem}\n答案：${payload.answer}\n解析：${payload.explanation ?? ""}\n请给出三种版本讲解：文字版、图解版、生活类比版。输出 JSON：{\"text\":\"...\",\"visual\":\"...\",\"analogy\":\"...\"}。不要输出多余文本。`;
   const llm = await callRoutedLLM({
+    taskType: "explanation",
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userPrompt }
@@ -824,6 +946,7 @@ export async function generateHomeworkReview(payload: {
   });
 
   const llm = await callRoutedLLM({
+    taskType: "homework_review",
     messages: [
       { role: "system", content: "你是老师，擅长批改作业。请给出可执行的点评与评分。" },
       { role: "user", content }
@@ -920,6 +1043,7 @@ export async function generateWritingFeedback(payload: {
 
   const userPrompt = `${context}\n写作内容：${payload.content}\n请给出结构、语法、词汇三个维度的评分（0-100），并提供简短总结、优点、改进建议。返回 JSON：{\"scores\":{\"structure\":80,\"grammar\":78,\"vocab\":75},\"summary\":\"...\",\"strengths\":[\"...\"],\"improvements\":[\"...\"],\"corrected\":\"...\"}。不要输出多余文本。`;
   const llm = await callRoutedLLM({
+    taskType: "writing_feedback",
     messages: [
       { role: "system", content: GENERATE_PROMPT },
       { role: "user", content: userPrompt }
@@ -983,6 +1107,7 @@ export async function extractKnowledgePointCandidates(payload: {
   const userPrompt = `${context}\n文本内容：${text}\n请提取最相关的知识点，返回 JSON：{"points":["知识点1","知识点2"]}。只输出 JSON，不要解释。`;
 
   const llm = await callRoutedLLM({
+    taskType: "kp_extract",
     messages: [
       { role: "system", content: GENERATE_PROMPT },
       { role: "user", content: userPrompt }
@@ -1016,18 +1141,26 @@ export async function generateLessonOutline(payload: {
   grade: string;
   topic: string;
   knowledgePoints?: string[];
+  citations?: string[];
 }) {
   const context = [
     `学科：${payload.subject}`,
     `年级：${payload.grade}`,
     `主题：${payload.topic}`,
-    payload.knowledgePoints?.length ? `知识点：${payload.knowledgePoints.join("、")}` : ""
+    payload.knowledgePoints?.length ? `知识点：${payload.knowledgePoints.join("、")}` : "",
+    payload.citations?.length
+      ? `教材依据：\n${payload.citations
+          .slice(0, 4)
+          .map((item, index) => `${index + 1}. ${item}`)
+          .join("\n")}`
+      : ""
   ]
     .filter(Boolean)
     .join("\n");
 
   const userPrompt = `${context}\n请生成课堂讲稿结构，输出 JSON：{\"objectives\":[\"...\"],\"keyPoints\":[\"...\"],\"slides\":[{\"title\":\"...\",\"bullets\":[\"...\"]}],\"blackboardSteps\":[\"...\"]}。slides 为 PPT 大纲，blackboardSteps 为板书步骤。不要输出多余文本。`;
   const llm = await callRoutedLLM({
+    taskType: "lesson_outline",
     messages: [
       { role: "system", content: GENERATE_PROMPT },
       { role: "user", content: userPrompt }
@@ -1076,6 +1209,7 @@ export async function generateWrongReviewScript(payload: {
 
   const userPrompt = `${context}\n请输出“错题讲评课”脚本，JSON 格式：{\"agenda\":[\"...\"],\"script\":[\"...\"],\"reminders\":[\"...\"]}。script 为讲评课流程话术分段。不要输出多余文本。`;
   const llm = await callRoutedLLM({
+    taskType: "wrong_review_script",
     messages: [
       { role: "system", content: GENERATE_PROMPT },
       { role: "user", content: userPrompt }
@@ -1112,6 +1246,7 @@ export async function generateLearningReport(payload: {
 
   const userPrompt = `${context}\n请生成学情报告，输出 JSON：{\"report\":\"...\",\"highlights\":[\"...\"],\"reminders\":[\"...\"]}。report 为简短段落，reminders 为重点提醒。不要输出多余文本。`;
   const llm = await callRoutedLLM({
+    taskType: "learning_report",
     messages: [
       { role: "system", content: GENERATE_PROMPT },
       { role: "user", content: userPrompt }
@@ -1150,6 +1285,7 @@ export async function generateQuestionCheck(payload: {
 
   const userPrompt = `${context}\n题目：${payload.stem}\n选项：${payload.options.join(" | ")}\n答案：${payload.answer}\n解析：${payload.explanation ?? ""}\n请检查是否存在题目歧义、答案错误或选项重复。输出 JSON：{\"issues\":[\"...\"],\"risk\":\"low|medium|high\",\"suggestedAnswer\":\"...\",\"notes\":\"...\"}。不要输出多余文本。`;
   const llm = await callRoutedLLM({
+    taskType: "question_check",
     messages: [
       { role: "system", content: GENERATE_PROMPT },
       { role: "user", content: userPrompt }
@@ -1186,6 +1322,7 @@ export async function generateKnowledgePointsDraft(payload: GenerateKnowledgePoi
 
   const userPrompt = `${context}\n请生成 ${count} 个知识点名称，返回 JSON。格式: {\"items\":[{\"title\":\"...\",\"chapter\":\"...\"}]}。\n要求: title 简洁准确，chapter 如果已提供则使用，否则给出合理章节名。不要输出多余文本。`;
   const llm = await callRoutedLLM({
+    taskType: "knowledge_points_generate",
     messages: [
       { role: "system", content: GENERATE_PROMPT },
       { role: "user", content: userPrompt }
@@ -1232,6 +1369,7 @@ export async function generateKnowledgeTreeDraft(payload: GenerateKnowledgeTreeP
 
   const userPrompt = `${context}\n请输出整本书的知识点树，按“单元->章节->知识点”分层，返回 JSON：{\"units\":[{\"title\":\"第一单元\",\"chapters\":[{\"title\":\"...\",\"points\":[{\"title\":\"...\"}]}]}]}。\n单元数量约 ${unitCount} 个，每单元 ${chaptersPerUnit} 章，每章 ${pointsPerChapter} 个知识点。不要输出多余文本。`;
   const llm = await callRoutedLLM({
+    taskType: "knowledge_tree_generate",
     messages: [
       { role: "system", content: GENERATE_PROMPT },
       { role: "user", content: userPrompt }
@@ -1295,6 +1433,7 @@ export async function generateAssistAnswer(payload: AssistPayload): Promise<Assi
   const userPrompt = `问题：${question}\n${contextLines.join("\n")}\n请用 3-5 句话讲清楚思路。`;
 
   const llm = await callRoutedLLM({
+    taskType: "assist",
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userPrompt }

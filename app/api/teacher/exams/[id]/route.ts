@@ -1,6 +1,7 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getClassById, getClassStudents } from "@/lib/classes";
 import { getQuestions } from "@/lib/content";
+import { evaluateExamRisk } from "@/lib/exam-risk";
 import {
   ensureExamAssignmentsForPaper,
   getExamPaperById,
@@ -44,6 +45,7 @@ export const GET = withApi(async (_request, context) => {
   const submissionMap = new Map(submissions.map((item) => [item.studentId, item]));
   const eventAggregates = await getExamEventsByPaper(paper.id);
   const eventMap = new Map(eventAggregates.map((item) => [item.studentId, item]));
+  const items = await getExamPaperItems(paper.id);
   const students = await getClassStudents(paper.classId);
   const studentMap = new Map(students.map((student) => [student.id, student]));
   const targetStudentIds =
@@ -60,6 +62,18 @@ export const GET = withApi(async (_request, context) => {
       const assignment = assignmentMap.get(student.id);
       const submission = submissionMap.get(student.id);
       const examEvent = eventMap.get(student.id);
+      const risk = evaluateExamRisk({
+        antiCheatLevel: paper.antiCheatLevel,
+        blurCount: examEvent?.blurCount ?? 0,
+        visibilityHiddenCount: examEvent?.visibilityHiddenCount ?? 0,
+        startedAt: assignment?.startedAt,
+        submittedAt: assignment?.submittedAt ?? submission?.submittedAt,
+        durationMinutes: paper.durationMinutes,
+        answerCount: Object.values(submission?.answers ?? {}).filter((value) => String(value ?? "").trim()).length,
+        questionCount: items.length,
+        score: assignment?.score ?? submission?.score,
+        total: assignment?.total ?? submission?.total
+      });
       return {
         ...student,
         status: assignment?.status ?? (submission ? "submitted" : "pending"),
@@ -70,12 +84,15 @@ export const GET = withApi(async (_request, context) => {
         submittedAt: assignment?.submittedAt ?? submission?.submittedAt ?? null,
         blurCount: examEvent?.blurCount ?? 0,
         visibilityHiddenCount: examEvent?.visibilityHiddenCount ?? 0,
-        lastExamEventAt: examEvent?.lastEventAt ?? null
+        lastExamEventAt: examEvent?.lastEventAt ?? null,
+        riskScore: risk.riskScore,
+        riskLevel: risk.riskLevel,
+        riskReasons: risk.riskReasons,
+        recommendedAction: risk.recommendedAction
       };
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
-  const items = await getExamPaperItems(paper.id);
   const questionMap = new Map((await getQuestions()).map((item) => [item.id, item]));
   const questions = items
     .map((item) => {
@@ -117,7 +134,9 @@ export const GET = withApi(async (_request, context) => {
       pending: roster.length - completed,
       avgScore,
       totalBlurCount: roster.reduce((sum, item) => sum + (item.blurCount ?? 0), 0),
-      totalVisibilityHiddenCount: roster.reduce((sum, item) => sum + (item.visibilityHiddenCount ?? 0), 0)
+      totalVisibilityHiddenCount: roster.reduce((sum, item) => sum + (item.visibilityHiddenCount ?? 0), 0),
+      highRiskCount: roster.filter((item) => item.riskLevel === "high").length,
+      mediumRiskCount: roster.filter((item) => item.riskLevel === "medium").length
     },
     questions,
     students: roster

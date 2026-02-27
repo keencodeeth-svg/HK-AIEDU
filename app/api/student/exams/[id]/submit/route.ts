@@ -1,6 +1,8 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getClassesByStudent } from "@/lib/classes";
 import { getQuestions } from "@/lib/content";
+import { getExamEventByPaperAndStudent } from "@/lib/exam-events";
+import { evaluateExamRisk } from "@/lib/exam-risk";
 import {
   ensureExamAssignment,
   getExamAssignment,
@@ -156,6 +158,19 @@ export const POST = withApi(async (request, context) => {
       questionMap,
       answers: existingSubmission.answers
     });
+    const existingEvent = await getExamEventByPaperAndStudent(paper.id, user.id);
+    const risk = evaluateExamRisk({
+      antiCheatLevel: paper.antiCheatLevel,
+      blurCount: existingEvent?.blurCount ?? 0,
+      visibilityHiddenCount: existingEvent?.visibilityHiddenCount ?? 0,
+      startedAt: assignmentBeforeSubmit.startedAt,
+      submittedAt: existingSubmission.submittedAt,
+      durationMinutes: paper.durationMinutes,
+      answerCount: Object.values(existingSubmission.answers ?? {}).filter((item) => String(item ?? "").trim()).length,
+      questionCount: items.length,
+      score: existingSubmission.score,
+      total: existingSubmission.total
+    });
     const wrongCount = rescored.details.filter((item) => !item.correct).length;
     return {
       score: existingSubmission.score,
@@ -171,6 +186,10 @@ export const POST = withApi(async (request, context) => {
             topWeakKnowledgePoints: existingReviewPack.data.summary.topWeakKnowledgePoints
           }
         : null,
+      riskScore: risk.riskScore,
+      riskLevel: risk.riskLevel,
+      riskReasons: risk.riskReasons,
+      recommendedAction: risk.recommendedAction,
       alreadySubmitted: true
     };
   }
@@ -243,6 +262,19 @@ export const POST = withApi(async (request, context) => {
     studentId: user.id,
     data: reviewPackData
   });
+  const event = await getExamEventByPaperAndStudent(paper.id, user.id);
+  const risk = evaluateExamRisk({
+    antiCheatLevel: paper.antiCheatLevel,
+    blurCount: event?.blurCount ?? 0,
+    visibilityHiddenCount: event?.visibilityHiddenCount ?? 0,
+    startedAt: assignmentBeforeSubmit.startedAt,
+    submittedAt: submission.submittedAt,
+    durationMinutes: paper.durationMinutes,
+    answerCount: Object.values(answers).filter((item) => String(item ?? "").trim()).length,
+    questionCount: items.length,
+    score: submission.score,
+    total: submission.total
+  });
 
   return {
     score: submission.score,
@@ -258,6 +290,10 @@ export const POST = withApi(async (request, context) => {
           topWeakKnowledgePoints: reviewPack.data.summary.topWeakKnowledgePoints
         }
       : null,
+    riskScore: risk.riskScore,
+    riskLevel: risk.riskLevel,
+    riskReasons: risk.riskReasons,
+    recommendedAction: risk.recommendedAction,
     alreadySubmitted: false
   };
 });

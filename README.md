@@ -76,6 +76,7 @@ node scripts/seed-bulk.mjs
 
 - 题库治理：单题/批量 AI 出题、CSV 导入、题目纠错、质量评分与风险标签（重复/歧义/答案一致性）。
 - 知识点治理：知识点树生成、批量预览导入、结构化维护（学科-年级-单元-知识点）。
+- AI 路由治理：模型链配置 + 任务级策略（超时/重试/预算/质量阈值）+ 调用指标看板。
 - 运营看板：核心漏斗（登录→练习→提交→复练→周报查看）与关键行为埋点。
 - A/B 与灰度：实验开关、分流比例、实验报告、放量建议，支持快速回滚。
 - 审计能力：管理员操作日志记录关键变更动作。
@@ -97,7 +98,9 @@ node scripts/seed-bulk.mjs
 - 教师端页面：`/teacher`、`/teacher/analysis`、`/teacher/gradebook`
 - 管理端页面：`/admin`、`/admin/questions`、`/admin/knowledge-points`、`/admin/experiments`
 - 核心 API：
+  - AI 策略治理：`/api/admin/ai/config`、`/api/admin/ai/policies`、`/api/admin/ai/metrics`、`/api/admin/ai/test`
   - 练习与掌握度：`/api/practice/next`、`/api/practice/submit`、`/api/plan`、`/api/student/radar`
+  - 教材 RAG：`/api/library/index`、`/api/library/retrieve`
   - 错题复练：`/api/wrong-book`、`/api/wrong-book/review-queue`、`/api/wrong-book/review-result`
   - 教师预警：`/api/teacher/insights`、`/api/teacher/alerts`、`/api/teacher/alerts/[id]/ack`
   - 家长周报：`/api/report/weekly`、`/api/parent/assignments`
@@ -125,6 +128,8 @@ node scripts/seed-bulk.mjs
 - [x] 运营埋点与漏斗分析
 - [x] A/B 实验与灰度发布能力
 - [x] 管理端操作日志
+- [x] AI 多模型链路 + 任务级策略 + 调用指标
+- [x] 教材分块检索（RAG）+ 讲解/教案引用依据
 - [ ] 付费套餐与订阅
 
 ## 系统架构图（文字版）

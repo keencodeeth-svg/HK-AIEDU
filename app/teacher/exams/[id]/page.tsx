@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
@@ -32,6 +32,8 @@ type ExamDetail = {
     avgScore: number;
     totalBlurCount: number;
     totalVisibilityHiddenCount: number;
+    highRiskCount: number;
+    mediumRiskCount: number;
   };
   questions: Array<{
     id: string;
@@ -51,8 +53,22 @@ type ExamDetail = {
     blurCount: number;
     visibilityHiddenCount: number;
     lastExamEventAt: string | null;
+    riskScore: number;
+    riskLevel: "low" | "medium" | "high";
+    riskReasons: string[];
+    recommendedAction: string;
   }>;
 };
+
+function riskTone(level: "low" | "medium" | "high") {
+  if (level === "high") {
+    return { label: "高风险", color: "#b42318", bg: "#fee4e2" };
+  }
+  if (level === "medium") {
+    return { label: "中风险", color: "#b54708", bg: "#fffaeb" };
+  }
+  return { label: "低风险", color: "#027a48", bg: "#ecfdf3" };
+}
 
 export default function TeacherExamDetailPage({ params }: { params: { id: string } }) {
   const [data, setData] = useState<ExamDetail | null>(null);
@@ -91,6 +107,17 @@ export default function TeacherExamDetailPage({ params }: { params: { id: string
   useEffect(() => {
     load();
   }, [load]);
+
+  const rankedStudents = useMemo(() => {
+    if (!data?.students?.length) return [];
+    return [...data.students].sort((a, b) => {
+      if (b.riskScore !== a.riskScore) return b.riskScore - a.riskScore;
+      if ((a.status === "submitted") !== (b.status === "submitted")) {
+        return a.status === "submitted" ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name, "zh-CN");
+    });
+  }, [data?.students]);
 
   if (error) {
     return (
@@ -154,6 +181,8 @@ export default function TeacherExamDetailPage({ params }: { params: { id: string
               <span className="pill">平均分 {data.summary.avgScore}%</span>
               <span className="pill">离屏 {data.summary.totalVisibilityHiddenCount}</span>
               <span className="pill">切屏 {data.summary.totalBlurCount}</span>
+              <span className="pill">高风险 {data.summary.highRiskCount}</span>
+              <span className="pill">中风险 {data.summary.mediumRiskCount}</span>
             </div>
           </div>
         </div>
@@ -193,15 +222,30 @@ export default function TeacherExamDetailPage({ params }: { params: { id: string
       </Card>
 
       <Card title="学生进度" tag="提交">
-        {data.students.length === 0 ? (
+        {rankedStudents.length === 0 ? (
           <p>班级暂无学生。</p>
         ) : (
           <div className="grid" style={{ gap: 10 }}>
-            {data.students.map((student) => (
-              <div className="card" key={student.id}>
+            {rankedStudents.map((student) => {
+              const tone = riskTone(student.riskLevel ?? "low");
+              return (
+              <div className="card" key={student.id} style={{ borderColor: tone.bg }}>
                 <div className="card-header">
                   <div className="section-title">{student.name}</div>
-                  <span className="card-tag">{student.status === "submitted" ? "已提交" : "待提交"}</span>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span className="card-tag">{student.status === "submitted" ? "已提交" : "待提交"}</span>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        borderRadius: 999,
+                        padding: "3px 8px",
+                        background: tone.bg,
+                        color: tone.color
+                      }}
+                    >
+                      {tone.label} · {student.riskScore}
+                    </span>
+                  </div>
                 </div>
                 <div style={{ fontSize: 12, color: "var(--ink-1)" }}>{student.email}</div>
                 <div className="pill-list" style={{ marginTop: 8 }}>
@@ -223,8 +267,19 @@ export default function TeacherExamDetailPage({ params }: { params: { id: string
                     <span className="pill">最近异常 {new Date(student.lastExamEventAt).toLocaleString("zh-CN")}</span>
                   ) : null}
                 </div>
+                {student.riskReasons?.length ? (
+                  <div style={{ marginTop: 8, fontSize: 12, color: tone.color }}>
+                    风险原因：{student.riskReasons.join("；")}
+                  </div>
+                ) : (
+                  <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-1)" }}>风险原因：暂无明显异常。</div>
+                )}
+                <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-1)" }}>
+                  建议动作：{student.recommendedAction || "建议常规复盘。"}
+                </div>
               </div>
-            ))}
+            );
+            })}
           </div>
         )}
       </Card>

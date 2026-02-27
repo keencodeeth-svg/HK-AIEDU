@@ -1,6 +1,8 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getClassesByStudent } from "@/lib/classes";
 import { getQuestions } from "@/lib/content";
+import { getExamEventByPaperAndStudent } from "@/lib/exam-events";
+import { evaluateExamRisk } from "@/lib/exam-risk";
 import { getExamReviewPack } from "@/lib/exam-review-pack";
 import {
   ensureExamAssignment,
@@ -66,6 +68,19 @@ export const GET = withApi(async (_request, context) => {
       };
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const event = await getExamEventByPaperAndStudent(paper.id, user.id);
+  const risk = evaluateExamRisk({
+    antiCheatLevel: paper.antiCheatLevel,
+    blurCount: event?.blurCount ?? 0,
+    visibilityHiddenCount: event?.visibilityHiddenCount ?? 0,
+    startedAt: assignment.startedAt,
+    submittedAt: assignment.submittedAt ?? submission?.submittedAt,
+    durationMinutes: paper.durationMinutes,
+    answerCount: Object.values(submission?.answers ?? draft?.answers ?? {}).filter((value) => String(value ?? "").trim()).length,
+    questionCount: items.length,
+    score: submission?.score,
+    total: submission?.total
+  });
 
   return {
     exam: paper,
@@ -92,6 +107,7 @@ export const GET = withApi(async (_request, context) => {
           estimatedMinutes: reviewPack.data.summary.estimatedMinutes,
           topWeakKnowledgePoints: reviewPack.data.summary.topWeakKnowledgePoints
         }
-      : null
+      : null,
+    risk
   };
 });

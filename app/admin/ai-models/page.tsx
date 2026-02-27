@@ -32,6 +32,81 @@ type ProbeResponse = {
   results: ProbeResult[];
 };
 
+type TaskOption = {
+  taskType: string;
+  label: string;
+  description: string;
+};
+
+type TaskPolicy = {
+  taskType: string;
+  label: string;
+  description: string;
+  providerChain: string[];
+  timeoutMs: number;
+  maxRetries: number;
+  budgetLimit: number;
+  minQualityScore: number;
+  source: "default" | "runtime";
+  updatedAt?: string;
+  updatedBy?: string;
+};
+
+type PoliciesPayload = {
+  tasks: TaskOption[];
+  policies: TaskPolicy[];
+};
+
+type MetricsRow = {
+  key: string;
+  taskType: string;
+  provider: string;
+  calls: number;
+  successRate: number;
+  timeoutRate: number;
+  avgFallback: number;
+  avgLatencyMs: number;
+  p95LatencyMs: number;
+};
+
+type AiMetrics = {
+  generatedAt: string;
+  totalCalls: number;
+  successRate: number;
+  fallbackRate: number;
+  timeoutRate: number;
+  avgLatencyMs: number;
+  p95LatencyMs: number;
+  rows: MetricsRow[];
+};
+
+type PolicyDraft = {
+  providerChain: string;
+  timeoutMs: number;
+  maxRetries: number;
+  budgetLimit: number;
+  minQualityScore: number;
+};
+
+const EMPTY_DRAFT: PolicyDraft = {
+  providerChain: "",
+  timeoutMs: 8000,
+  maxRetries: 1,
+  budgetLimit: 1800,
+  minQualityScore: 70
+};
+
+function toChainInput(value: string[]) {
+  return value.join(", ");
+}
+
+function parseChainInput(value: string) {
+  return value
+    .split(/[\s,，|]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export default function AdminAiModelsPage() {
   const [config, setConfig] = useState<ConfigData | null>(null);
   const [draftChain, setDraftChain] = useState<string[]>([]);
@@ -42,6 +117,13 @@ export default function AdminAiModelsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [testCapability, setTestCapability] = useState<"chat" | "vision">("chat");
   const [probe, setProbe] = useState<ProbeResponse | null>(null);
+
+  const [taskOptions, setTaskOptions] = useState<TaskOption[]>([]);
+  const [policies, setPolicies] = useState<TaskPolicy[]>([]);
+  const [selectedTaskType, setSelectedTaskType] = useState("assist");
+  const [policyDraft, setPolicyDraft] = useState<PolicyDraft>(EMPTY_DRAFT);
+  const [metrics, setMetrics] = useState<AiMetrics | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
 
   async function loadConfig() {
     setLoading(true);
@@ -61,9 +143,57 @@ export default function AdminAiModelsPage() {
     }
   }
 
+  async function loadPolicies() {
+    const res = await fetch("/api/admin/ai/policies", { cache: "no-store" });
+    const payload = await res.json();
+    if (!res.ok) {
+      setError(payload?.error ?? "加载任务策略失败");
+      return;
+    }
+    const data: PoliciesPayload = payload?.data ?? { tasks: [], policies: [] };
+    setTaskOptions(data.tasks ?? []);
+    setPolicies(data.policies ?? []);
+    if (!selectedTaskType && data.tasks?.length) {
+      setSelectedTaskType(data.tasks[0].taskType);
+    }
+  }
+
+  async function loadMetrics() {
+    setMetricsLoading(true);
+    try {
+      const res = await fetch("/api/admin/ai/metrics?limit=12", { cache: "no-store" });
+      const payload = await res.json();
+      if (!res.ok) {
+        setError(payload?.error ?? "加载 AI 指标失败");
+        return;
+      }
+      setMetrics(payload?.data ?? null);
+    } finally {
+      setMetricsLoading(false);
+    }
+  }
+
   useEffect(() => {
-    loadConfig();
+    Promise.all([loadConfig(), loadPolicies(), loadMetrics()]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const target = policies.find((item) => item.taskType === selectedTaskType);
+    if (!target) return;
+    setPolicyDraft({
+      providerChain: toChainInput(target.providerChain ?? []),
+      timeoutMs: target.timeoutMs,
+      maxRetries: target.maxRetries,
+      budgetLimit: target.budgetLimit,
+      minQualityScore: target.minQualityScore
+    });
+  }, [policies, selectedTaskType]);
+
+  const selectedTaskPolicy = useMemo(
+    () => policies.find((item) => item.taskType === selectedTaskType) ?? null,
+    [policies, selectedTaskType]
+  );
 
   const effectivePreview = useMemo(() => {
     if (draftChain.length) return draftChain;
@@ -164,12 +294,72 @@ export default function AdminAiModelsPage() {
     }
   }
 
+  async function saveTaskPolicy() {
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/admin/ai/policies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskType: selectedTaskType,
+          providerChain: parseChainInput(policyDraft.providerChain),
+          timeoutMs: policyDraft.timeoutMs,
+          maxRetries: policyDraft.maxRetries,
+          budgetLimit: policyDraft.budgetLimit,
+          minQualityScore: policyDraft.minQualityScore
+        })
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        setError(payload?.error ?? "保存任务策略失败");
+        return;
+      }
+      const data: PoliciesPayload = payload?.data ?? { tasks: [], policies: [] };
+      setTaskOptions(data.tasks ?? []);
+      setPolicies(data.policies ?? []);
+      setMessage(`任务策略已保存：${selectedTaskType}`);
+      await loadMetrics();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function resetTaskPolicy() {
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/admin/ai/policies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskType: selectedTaskType,
+          reset: true
+        })
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        setError(payload?.error ?? "重置任务策略失败");
+        return;
+      }
+      const data: PoliciesPayload = payload?.data ?? { tasks: [], policies: [] };
+      setTaskOptions(data.tasks ?? []);
+      setPolicies(data.policies ?? []);
+      setMessage(`任务策略已重置：${selectedTaskType}`);
+      await loadMetrics();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <div className="grid" style={{ gap: 18 }}>
       <div className="section-head">
         <div>
           <h2>AI 模型路由中心</h2>
-          <div className="section-sub">统一配置全站 AI 功能的模型顺序、回退链与连通性检查。</div>
+          <div className="section-sub">模型链、任务级策略、调用指标与连通性统一管理。</div>
         </div>
         <span className="chip">管理端</span>
       </div>
@@ -200,7 +390,7 @@ export default function AdminAiModelsPage() {
       <Card title="模型链编辑" tag="切换">
         <div className="grid" style={{ gap: 10 }}>
           <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
-            选择并排序模型。系统会按顺序尝试调用，当前模型失败时自动降级到下一个模型。
+            选择并排序模型。系统会按顺序调用，失败后自动降级。
           </div>
           <div className="grid" style={{ gap: 8 }}>
             {(config?.availableProviders ?? []).map((provider) => {
@@ -276,6 +466,105 @@ export default function AdminAiModelsPage() {
         </div>
       </Card>
 
+      <Card title="任务策略" tag="Policy">
+        <div className="grid" style={{ gap: 10 }}>
+          <div className="grid grid-3">
+            <label>
+              <div className="section-title">任务类型</div>
+              <select
+                value={selectedTaskType}
+                onChange={(event) => setSelectedTaskType(event.target.value)}
+                style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+              >
+                {taskOptions.map((item) => (
+                  <option key={item.taskType} value={item.taskType}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <div className="section-title">超时(ms)</div>
+              <input
+                type="number"
+                min={500}
+                max={30000}
+                value={policyDraft.timeoutMs}
+                onChange={(event) =>
+                  setPolicyDraft((prev) => ({ ...prev, timeoutMs: Number(event.target.value || 0) }))
+                }
+                style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+              />
+            </label>
+            <label>
+              <div className="section-title">重试次数</div>
+              <input
+                type="number"
+                min={0}
+                max={5}
+                value={policyDraft.maxRetries}
+                onChange={(event) =>
+                  setPolicyDraft((prev) => ({ ...prev, maxRetries: Number(event.target.value || 0) }))
+                }
+                style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+              />
+            </label>
+          </div>
+          <div className="grid grid-2">
+            <label>
+              <div className="section-title">预算阈值（字符）</div>
+              <input
+                type="number"
+                min={100}
+                max={100000}
+                value={policyDraft.budgetLimit}
+                onChange={(event) =>
+                  setPolicyDraft((prev) => ({ ...prev, budgetLimit: Number(event.target.value || 0) }))
+                }
+                style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+              />
+            </label>
+            <label>
+              <div className="section-title">最低质量分</div>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={policyDraft.minQualityScore}
+                onChange={(event) =>
+                  setPolicyDraft((prev) => ({ ...prev, minQualityScore: Number(event.target.value || 0) }))
+                }
+                style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+              />
+            </label>
+          </div>
+          <label>
+            <div className="section-title">任务模型链（逗号分隔，空值=跟随全局模型链）</div>
+            <input
+              value={policyDraft.providerChain}
+              onChange={(event) => setPolicyDraft((prev) => ({ ...prev, providerChain: event.target.value }))}
+              placeholder="zhipu,deepseek,kimi"
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            />
+          </label>
+          {selectedTaskPolicy ? (
+            <div className="card" style={{ fontSize: 12, color: "var(--ink-1)" }}>
+              当前策略来源：{selectedTaskPolicy.source === "runtime" ? "运行时覆盖" : "默认策略"} · 生效链：
+              {selectedTaskPolicy.providerChain.join(" -> ")} · 更新时间：
+              {selectedTaskPolicy.updatedAt ? new Date(selectedTaskPolicy.updatedAt).toLocaleString("zh-CN") : "-"}
+            </div>
+          ) : null}
+          <div className="cta-row">
+            <button className="button primary" type="button" onClick={saveTaskPolicy} disabled={saving}>
+              保存任务策略
+            </button>
+            <button className="button ghost" type="button" onClick={resetTaskPolicy} disabled={saving}>
+              重置当前任务
+            </button>
+          </div>
+        </div>
+      </Card>
+
       <Card title="连通性测试" tag="诊断">
         <div className="cta-row" style={{ marginBottom: 10 }}>
           <label>
@@ -311,6 +600,44 @@ export default function AdminAiModelsPage() {
           </div>
         ) : (
           <p style={{ color: "var(--ink-1)" }}>尚未执行连通性测试。</p>
+        )}
+      </Card>
+
+      <Card title="AI 调用指标" tag="Metrics">
+        <div className="cta-row" style={{ marginBottom: 10 }}>
+          <button className="button secondary" type="button" onClick={loadMetrics} disabled={metricsLoading}>
+            {metricsLoading ? "刷新中..." : "刷新指标"}
+          </button>
+        </div>
+        {metrics ? (
+          <div className="grid" style={{ gap: 8 }}>
+            <div className="pill-list">
+              <span className="pill">调用量 {metrics.totalCalls}</span>
+              <span className="pill">成功率 {metrics.successRate}%</span>
+              <span className="pill">回退率 {metrics.fallbackRate}%</span>
+              <span className="pill">超时率 {metrics.timeoutRate}%</span>
+              <span className="pill">P95 {metrics.p95LatencyMs}ms</span>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+              更新时间：{new Date(metrics.generatedAt).toLocaleString("zh-CN")}
+            </div>
+            <div className="grid" style={{ gap: 8 }}>
+              {(metrics.rows ?? []).map((row) => (
+                <div className="card" key={row.key}>
+                  <div className="section-title">
+                    {row.taskType} · {row.provider}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                    调用 {row.calls} · 成功率 {row.successRate}% · 超时率 {row.timeoutRate}% · 平均回退{" "}
+                    {row.avgFallback} · 平均延迟 {row.avgLatencyMs}ms · P95 {row.p95LatencyMs}ms
+                  </div>
+                </div>
+              ))}
+              {!metrics.rows?.length ? <div style={{ color: "var(--ink-1)" }}>暂无调用日志。</div> : null}
+            </div>
+          </div>
+        ) : (
+          <p style={{ color: "var(--ink-1)" }}>暂无指标数据。</p>
         )}
       </Card>
     </div>
