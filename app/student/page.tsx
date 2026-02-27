@@ -506,7 +506,7 @@ export default function StudentPage() {
         <span className="chip">学期进行中</span>
       </div>
 
-      <div className="grid grid-2">
+      <div className="grid grid-2" style={{ alignItems: "start" }}>
         <Card title="今日任务" tag="队列">
           {todayTaskError ? <p>{todayTaskError}</p> : null}
           {topTodayTasks.length === 0 ? (
