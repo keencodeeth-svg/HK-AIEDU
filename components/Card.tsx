@@ -15,7 +15,7 @@ export default function Card({
           {tag ? <span className="card-tag">{tag}</span> : null}
         </div>
       ) : null}
-      {children}
+      <div className="card-body">{children}</div>
     </div>
   );
 }

@@ -157,7 +157,7 @@ a {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  min-width: 200px;
+  min-width: 260px;
   display: grid;
   gap: 6px;
   padding: 10px;
@@ -166,6 +166,22 @@ a {
   background: rgba(255, 255, 255, 0.98);
   box-shadow: var(--shadow-soft);
   z-index: 20;
+}
+
+.nav-more-group {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.nav-more-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-1);
+  letter-spacing: 0.2px;
+  padding: 2px 4px 4px;
 }
 
 .nav-more-menu a {
@@ -260,10 +276,16 @@ a {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed rgba(25, 22, 18, 0.12);
 }
 
 .card-header .section-title {
   margin: 0;
+}
+
+.card-body {
+  display: block;
 }
 
 .card-header .card-tag {
@@ -771,14 +793,31 @@ html[data-density="compact"] .main {
 
 @media (max-width: 640px) {
   .site-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
+    gap: 7px;
+    padding-top: 10px;
+    padding-bottom: 8px;
   }
 
   .nav-links {
-    flex-wrap: wrap;
-    gap: 12px;
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 2px;
+    scrollbar-width: thin;
+  }
+
+  .nav-links a,
+  .nav-more summary {
+    flex: 0 0 auto;
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+
+  .nav-more-menu {
+    right: auto;
+    left: 0;
+    min-width: min(86vw, 320px);
   }
 
   .role-grid {
@@ -786,7 +825,11 @@ html[data-density="compact"] .main {
   }
 
   .main {
-    padding: 20px 6vw 48px;
+    padding: 10px 4vw 28px;
+  }
+
+  .section-head h2 {
+    font-size: 20px;
   }
 }
 
