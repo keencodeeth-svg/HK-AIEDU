@@ -201,6 +201,17 @@ try {
         continue;
       }
 
+      if (contentType === "textbook" && sourceType !== "file") {
+        itemSummary.failed += 1;
+        summary.failed += 1;
+        failedDetails.push({
+          packPath: packFilePath,
+          index: Number(item.__index ?? -1),
+          reason: "textbook requires file source"
+        });
+        continue;
+      }
+
       if (sourceType === "link" && !linkUrl) {
         itemSummary.failed += 1;
         summary.failed += 1;

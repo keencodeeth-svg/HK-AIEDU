@@ -52,12 +52,14 @@ function buildBatchImportTemplate() {
     textbooks: [
       {
         title: "四年级数学 上册 第一单元",
-        description: "示例教材文本",
+        description: "教材导入示例（文件）",
         contentType: "textbook",
         subject: "math",
         grade: "4",
-        sourceType: "text",
-        textContent: "第一单元内容示例：四则运算...",
+        sourceType: "file",
+        fileName: "四年级数学-第一单元.txt",
+        mimeType: "text/plain",
+        contentBase64: "56ys5LiA5Y2V5YWD77ya5Zub5YiZ6L+Q566X56S65L6L5YaF5a65",
         accessScope: "global"
       }
     ],
@@ -118,7 +120,7 @@ export default function LibraryPage() {
     subject: "math",
     grade: "4",
     contentType: "textbook",
-    sourceType: "text",
+    sourceType: "file",
     textContent: "",
     linkUrl: ""
   });
@@ -177,6 +179,17 @@ export default function LibraryPage() {
     }
   }, [aiForm.classId, user?.role]);
 
+  useEffect(() => {
+    if (importForm.contentType === "textbook" && importForm.sourceType !== "file") {
+      setImportForm((prev) => ({
+        ...prev,
+        sourceType: "file",
+        textContent: "",
+        linkUrl: ""
+      }));
+    }
+  }, [importForm.contentType, importForm.sourceType]);
+
   const subjectList = useMemo(() => {
     const keys = Array.from(new Set(items.map((item) => item.subject)));
     return keys.sort((a, b) => {
@@ -226,6 +239,11 @@ export default function LibraryPage() {
     setMessage(null);
     setError(null);
     if (user?.role !== "admin") return;
+
+    if (importForm.contentType === "textbook" && importForm.sourceType !== "file") {
+      setError("教材资源仅支持文件导入");
+      return;
+    }
 
     const payload: any = {
       ...importForm
@@ -391,6 +409,10 @@ export default function LibraryPage() {
   }
 
   function downloadItem(item: LibraryItem) {
+    if (item.contentType === "textbook" && item.sourceType === "link") {
+      setError("教材资源只支持文件，当前外链已禁用");
+      return;
+    }
     if (item.sourceType === "text") {
       downloadText(item);
       return;
@@ -489,7 +511,21 @@ export default function LibraryPage() {
                 <div className="section-title">类型</div>
                 <select
                   value={importForm.contentType}
-                  onChange={(event) => setImportForm((prev) => ({ ...prev, contentType: event.target.value }))}
+                  onChange={(event) =>
+                    setImportForm((prev) => {
+                      const nextContentType = event.target.value;
+                      if (nextContentType === "textbook") {
+                        return {
+                          ...prev,
+                          contentType: nextContentType,
+                          sourceType: "file",
+                          textContent: "",
+                          linkUrl: ""
+                        };
+                      }
+                      return { ...prev, contentType: nextContentType };
+                    })
+                  }
                   style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
                 >
                   <option value="textbook">教材</option>
@@ -501,16 +537,26 @@ export default function LibraryPage() {
             <label>
               <div className="section-title">导入方式</div>
               <select
-                value={importForm.sourceType}
+                value={importForm.contentType === "textbook" ? "file" : importForm.sourceType}
                 onChange={(event) => setImportForm((prev) => ({ ...prev, sourceType: event.target.value }))}
+                disabled={importForm.contentType === "textbook"}
                 style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
               >
-                <option value="text">粘贴文本</option>
-                <option value="file">上传文件</option>
-                <option value="link">外部链接</option>
+                {importForm.contentType === "textbook" ? (
+                  <option value="file">上传文件（教材必选）</option>
+                ) : (
+                  <>
+                    <option value="text">粘贴文本</option>
+                    <option value="file">上传文件</option>
+                    <option value="link">外部链接</option>
+                  </>
+                )}
               </select>
             </label>
-            {importForm.sourceType === "text" ? (
+            {importForm.contentType === "textbook" ? (
+              <div style={{ fontSize: 12, color: "var(--ink-1)" }}>教材仅支持文件导入，已禁用外链和文本录入。</div>
+            ) : null}
+            {importForm.sourceType === "text" && importForm.contentType !== "textbook" ? (
               <label>
                 <div className="section-title">教材文本</div>
                 <textarea
@@ -527,7 +573,7 @@ export default function LibraryPage() {
                 <input type="file" onChange={(event) => setImportFile(event.target.files?.[0] ?? null)} />
               </label>
             ) : null}
-            {importForm.sourceType === "link" ? (
+            {importForm.sourceType === "link" && importForm.contentType !== "textbook" ? (
               <label>
                 <div className="section-title">链接地址</div>
                 <input
@@ -706,41 +752,51 @@ export default function LibraryPage() {
                   {group.label}（{group.list.length}）
                 </div>
                 <div className="grid" style={{ gap: 10, marginTop: 10 }}>
-                  {group.list.map((item) => (
-                    <div className="card" key={item.id}>
-                      <div className="section-title">
-                        {item.title} <span className="badge">{contentTypeLabel(item.contentType)}</span>
-                      </div>
-                      <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 6 }}>
-                        {item.grade} 年级 · 来源：
-                        {item.sourceType === "file"
-                          ? "文件上传"
-                          : item.sourceType === "link"
-                            ? "外部链接"
-                            : "文本录入"}{" "}
-                        · {item.generatedByAi ? "AI生成" : "人工上传"}
-                      </div>
-                      <div className="cta-row" style={{ marginTop: 10 }}>
-                        <Link className="button ghost" href={`/library/${item.id}`}>
-                          查看
-                        </Link>
-                        <button className="button secondary" type="button" onClick={() => downloadItem(item)}>
-                          {item.sourceType === "link" ? "打开链接" : "下载"}
-                        </button>
-                        {user?.role === "admin" ? (
+                  {group.list.map((item) => {
+                    const textbookLinkBlocked = item.contentType === "textbook" && item.sourceType === "link";
+                    return (
+                      <div className="card" key={item.id}>
+                        <div className="section-title">
+                          {item.title} <span className="badge">{contentTypeLabel(item.contentType)}</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 6 }}>
+                          {item.grade} 年级 · 来源：
+                          {item.sourceType === "file"
+                            ? "文件上传"
+                            : item.sourceType === "link"
+                              ? textbookLinkBlocked
+                                ? "外部链接（教材禁用）"
+                                : "外部链接"
+                              : "文本录入"}{" "}
+                          · {item.generatedByAi ? "AI生成" : "人工上传"}
+                        </div>
+                        <div className="cta-row" style={{ marginTop: 10 }}>
+                          <Link className="button ghost" href={`/library/${item.id}`}>
+                            查看
+                          </Link>
                           <button
-                            className="button ghost"
-                            style={{ borderColor: "#fecaca", color: "#b42318" }}
+                            className="button secondary"
                             type="button"
-                            onClick={() => removeItem(item)}
-                            disabled={deletingId === item.id}
+                            onClick={() => downloadItem(item)}
+                            disabled={textbookLinkBlocked}
                           >
-                            {deletingId === item.id ? "删除中..." : "删除"}
+                            {textbookLinkBlocked ? "外链禁用" : item.sourceType === "link" ? "打开链接" : "下载"}
                           </button>
-                        ) : null}
+                          {user?.role === "admin" ? (
+                            <button
+                              className="button ghost"
+                              style={{ borderColor: "#fecaca", color: "#b42318" }}
+                              type="button"
+                              onClick={() => removeItem(item)}
+                              disabled={deletingId === item.id}
+                            >
+                              {deletingId === item.id ? "删除中..." : "删除"}
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}

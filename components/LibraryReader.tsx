@@ -6,6 +6,7 @@ import Image from "next/image";
 type ReaderItem = {
   title: string;
   description?: string;
+  contentType?: "textbook" | "courseware" | "lesson_plan";
   sourceType: "file" | "link" | "text";
   fileName?: string;
   mimeType?: string;
@@ -95,6 +96,7 @@ export default function LibraryReader({ item, onTextSelection }: LibraryReaderPr
   const isImage = mimeType.startsWith("image/");
   const isVideo = mimeType.startsWith("video/");
   const isAudio = mimeType.startsWith("audio/");
+  const textbookLinkBlocked = item.contentType === "textbook" && item.sourceType === "link";
 
   return (
     <div className="grid" style={{ gap: 10 }}>
@@ -106,7 +108,13 @@ export default function LibraryReader({ item, onTextSelection }: LibraryReaderPr
         </div>
       ) : null}
 
-      {item.sourceType === "link" && item.linkUrl ? (
+      {textbookLinkBlocked ? (
+        <div className="card" style={{ fontSize: 13, color: "var(--ink-1)" }}>
+          教材资源仅支持文件，不支持跳转外部网页。请联系管理员改为文件上传后查看。
+        </div>
+      ) : null}
+
+      {!textbookLinkBlocked && item.sourceType === "link" && item.linkUrl ? (
         <div className="grid" style={{ gap: 10 }}>
           <div className="cta-row">
             <a className="button secondary" href={item.linkUrl} target="_blank" rel="noreferrer">

@@ -42,6 +42,20 @@ const bodySchema = v.object<{
   { allowUnknown: false }
 );
 
+function normalizeSourceType(value?: string) {
+  if (value === "file" || value === "link" || value === "text") {
+    return value;
+  }
+  return "text";
+}
+
+function normalizeContentType(value?: string) {
+  if (value === "textbook" || value === "courseware" || value === "lesson_plan") {
+    return value;
+  }
+  return "textbook";
+}
+
 export const GET = withApi(async () => {
   const user = await requireRole("admin");
   if (!user) {
@@ -68,7 +82,11 @@ export const POST = withApi(async (request) => {
     badRequest("missing fields");
   }
 
-  const sourceType = body.sourceType?.trim() ?? "text";
+  const contentType = normalizeContentType(body.contentType?.trim());
+  const sourceType = normalizeSourceType(body.sourceType?.trim());
+  if (contentType === "textbook" && sourceType !== "file") {
+    badRequest("textbook requires file source");
+  }
   if (sourceType === "file" && !body.contentBase64?.trim()) {
     badRequest("file content required");
   }
@@ -82,7 +100,7 @@ export const POST = withApi(async (request) => {
   const item = await createLearningLibraryItem({
     title,
     description: body.description?.trim() || undefined,
-    contentType: body.contentType?.trim() || "textbook",
+    contentType,
     subject,
     grade,
     ownerRole: "admin",

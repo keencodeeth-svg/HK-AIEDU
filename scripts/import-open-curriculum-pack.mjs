@@ -134,6 +134,10 @@ for (const [index, item] of textbooks.entries()) {
   const sourceType = normalizeSourceType(trim(item?.sourceType));
   const contentType = normalizeContentType(trim(item?.contentType));
 
+  if (contentType === "textbook" && sourceType !== "file") {
+    failed.push({ index, reason: "textbook requires file source" });
+    continue;
+  }
   if (sourceType === "link" && !trim(item?.linkUrl)) {
     failed.push({ index, reason: "missing link" });
     continue;

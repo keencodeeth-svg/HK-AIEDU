@@ -10,8 +10,10 @@
       "contentType": "textbook",
       "subject": "math",
       "grade": "4",
-      "sourceType": "text",
-      "textContent": "第一单元：四则运算...",
+      "sourceType": "file",
+      "fileName": "四年级数学-第一单元.txt",
+      "mimeType": "text/plain",
+      "contentBase64": "56ys5LiA5Y2V5YWD77ya5Zub5YiZ6L+Q566X56S65L6L5YaF5a65",
       "accessScope": "global"
     }
   ],

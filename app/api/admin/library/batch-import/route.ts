@@ -224,7 +224,12 @@ export const POST = withApi(async (request) => {
       continue;
     }
 
+    const contentType = normalizeContentType(item.contentType?.trim());
     const sourceType = normalizeSourceType(item.sourceType?.trim());
+    if (contentType === "textbook" && sourceType !== "file") {
+      textbookFailed.push({ index, reason: "textbook requires file source" });
+      continue;
+    }
     if (sourceType === "file" && !item.contentBase64?.trim()) {
       textbookFailed.push({ index, reason: "missing file content" });
       continue;
@@ -241,7 +246,7 @@ export const POST = withApi(async (request) => {
     const created = await createLearningLibraryItem({
       title,
       description: item.description?.trim() || undefined,
-      contentType: normalizeContentType(item.contentType?.trim()),
+      contentType,
       subject,
       grade,
       ownerRole: "admin",
