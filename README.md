@@ -169,6 +169,8 @@ DATABASE_URL=postgres://user:password@host:5432/dbname
 DB_SSL=false
 LIBRARY_OBJECT_STORAGE_ENABLED=true
 LIBRARY_INLINE_FILE_CONTENT=false
+FILE_OBJECT_STORAGE_ENABLED=true
+FILE_INLINE_CONTENT=false
 # OBJECT_STORAGE_ROOT=.runtime-data/objects
 ```
 

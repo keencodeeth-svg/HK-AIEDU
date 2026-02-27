@@ -436,9 +436,14 @@ CREATE TABLE IF NOT EXISTS module_resources (
   mime_type TEXT,
   size INT,
   content_base64 TEXT,
+  content_storage_provider TEXT,
+  content_storage_key TEXT,
   link_url TEXT,
   created_at TIMESTAMPTZ NOT NULL
 );
+
+ALTER TABLE module_resources ADD COLUMN IF NOT EXISTS content_storage_provider TEXT;
+ALTER TABLE module_resources ADD COLUMN IF NOT EXISTS content_storage_key TEXT;
 
 CREATE TABLE IF NOT EXISTS learning_library_items (
   id TEXT PRIMARY KEY,
@@ -540,10 +545,15 @@ CREATE TABLE IF NOT EXISTS course_files (
   mime_type TEXT,
   size INT,
   content_base64 TEXT,
+  content_storage_provider TEXT,
+  content_storage_key TEXT,
   link_url TEXT,
   created_at TIMESTAMPTZ NOT NULL,
   uploaded_by TEXT REFERENCES users(id) ON DELETE SET NULL
 );
+
+ALTER TABLE course_files ADD COLUMN IF NOT EXISTS content_storage_provider TEXT;
+ALTER TABLE course_files ADD COLUMN IF NOT EXISTS content_storage_key TEXT;
 
 CREATE TABLE IF NOT EXISTS inbox_threads (
   id TEXT PRIMARY KEY,
@@ -688,9 +698,15 @@ CREATE TABLE IF NOT EXISTS assignment_uploads (
   file_name TEXT NOT NULL,
   mime_type TEXT NOT NULL,
   size INT NOT NULL,
-  content_base64 TEXT NOT NULL,
+  content_base64 TEXT,
+  content_storage_provider TEXT,
+  content_storage_key TEXT,
   created_at TIMESTAMPTZ NOT NULL
 );
+
+ALTER TABLE assignment_uploads ADD COLUMN IF NOT EXISTS content_storage_provider TEXT;
+ALTER TABLE assignment_uploads ADD COLUMN IF NOT EXISTS content_storage_key TEXT;
+ALTER TABLE assignment_uploads ALTER COLUMN content_base64 DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS assignment_uploads_assignment_idx ON assignment_uploads (assignment_id);
 CREATE INDEX IF NOT EXISTS assignment_uploads_student_idx ON assignment_uploads (student_id);

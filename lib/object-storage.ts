@@ -14,6 +14,27 @@ type PutBase64ObjectInput = {
   keyHint?: string;
 };
 
+function parseBooleanEnvValue(value: string | undefined) {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") return true;
+  if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") return false;
+  return null;
+}
+
+export function shouldUseObjectStorage(envName: string, defaultValue: boolean) {
+  const parsed = parseBooleanEnvValue(process.env[envName]);
+  if (parsed === null) return defaultValue;
+  return parsed;
+}
+
+export function shouldKeepInlineContent(envName: string, defaultValue: boolean) {
+  const parsed = parseBooleanEnvValue(process.env[envName]);
+  if (parsed === null) return defaultValue;
+  return parsed;
+}
+
 function getObjectStorageRoot() {
   const configured = process.env.OBJECT_STORAGE_ROOT?.trim();
   if (configured) {

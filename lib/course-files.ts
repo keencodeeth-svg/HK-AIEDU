@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { readJson, writeJson } from "./storage";
 import { isDbEnabled, query, queryOne } from "./db";
+import { getBase64Object, putBase64Object, shouldKeepInlineContent, shouldUseObjectStorage } from "./object-storage";
 
 export type CourseFile = {
   id: string;
@@ -29,12 +30,19 @@ type DbCourseFile = {
   mime_type: string | null;
   size: number | null;
   content_base64: string | null;
+  content_storage_provider: string | null;
+  content_storage_key: string | null;
   link_url: string | null;
   created_at: string;
   uploaded_by: string | null;
 };
 
-function mapCourseFile(row: DbCourseFile): CourseFile {
+type CourseFileRecord = CourseFile & {
+  contentStorageProvider?: string;
+  contentStorageKey?: string;
+};
+
+function mapCourseFile(row: DbCourseFile): CourseFileRecord {
   return {
     id: row.id,
     classId: row.class_id,
@@ -45,18 +53,42 @@ function mapCourseFile(row: DbCourseFile): CourseFile {
     mimeType: row.mime_type ?? undefined,
     size: row.size ?? undefined,
     contentBase64: row.content_base64 ?? undefined,
+    contentStorageProvider: row.content_storage_provider ?? undefined,
+    contentStorageKey: row.content_storage_key ?? undefined,
     linkUrl: row.link_url ?? undefined,
     createdAt: row.created_at,
     uploadedBy: row.uploaded_by ?? undefined
   };
 }
 
+async function hydrateCourseFileContent(file: CourseFileRecord): Promise<CourseFile> {
+  if (file.resourceType !== "file") {
+    const { contentStorageProvider, contentStorageKey, ...publicFile } = file;
+    return publicFile;
+  }
+  if (file.contentBase64?.trim()) {
+    const { contentStorageProvider, contentStorageKey, ...publicFile } = file;
+    return publicFile;
+  }
+  if (!file.contentStorageKey?.trim()) {
+    const { contentStorageProvider, contentStorageKey, ...publicFile } = file;
+    return publicFile;
+  }
+  const contentBase64 = await getBase64Object(file.contentStorageKey);
+  const { contentStorageProvider, contentStorageKey, ...publicFile } = file;
+  return {
+    ...publicFile,
+    contentBase64: contentBase64 ?? undefined
+  };
+}
+
 export async function getCourseFiles(): Promise<CourseFile[]> {
   if (!isDbEnabled()) {
-    return readJson<CourseFile[]>(FILE, []);
+    const list = readJson<CourseFileRecord[]>(FILE, []);
+    return Promise.all(list.map((item) => hydrateCourseFileContent(item)));
   }
   const rows = await query<DbCourseFile>("SELECT * FROM course_files");
-  return rows.map(mapCourseFile);
+  return Promise.all(rows.map((row) => hydrateCourseFileContent(mapCourseFile(row))));
 }
 
 export async function getCourseFilesByClassIds(classIds: string[]): Promise<CourseFile[]> {
@@ -69,7 +101,7 @@ export async function getCourseFilesByClassIds(classIds: string[]): Promise<Cour
     "SELECT * FROM course_files WHERE class_id = ANY($1) ORDER BY created_at DESC",
     [classIds]
   );
-  return rows.map(mapCourseFile);
+  return Promise.all(rows.map((row) => hydrateCourseFileContent(mapCourseFile(row))));
 }
 
 export async function createCourseFile(input: {
@@ -85,32 +117,42 @@ export async function createCourseFile(input: {
   uploadedBy?: string;
 }): Promise<CourseFile> {
   const createdAt = new Date().toISOString();
-  const next: CourseFile = {
+  let contentBase64 = input.contentBase64;
+  let contentStorageProvider: string | undefined;
+  let contentStorageKey: string | undefined;
+  if (input.resourceType === "file" && contentBase64?.trim() && shouldUseObjectStorage("FILE_OBJECT_STORAGE_ENABLED", true)) {
+    const stored = await putBase64Object({
+      namespace: "course-files",
+      base64: contentBase64,
+      keyHint: input.fileName ?? input.title
+    });
+    contentStorageProvider = stored.provider;
+    contentStorageKey = stored.key;
+    if (!shouldKeepInlineContent("FILE_INLINE_CONTENT", false)) {
+      contentBase64 = undefined;
+    }
+  }
+  const next: CourseFileRecord = {
+    ...input,
     id: `file-${crypto.randomBytes(6).toString("hex")}`,
-    classId: input.classId,
-    folder: input.folder,
-    title: input.title,
-    resourceType: input.resourceType,
-    fileName: input.fileName,
-    mimeType: input.mimeType,
-    size: input.size,
-    contentBase64: input.contentBase64,
-    linkUrl: input.linkUrl,
+    contentBase64,
+    contentStorageProvider,
+    contentStorageKey,
     createdAt,
     uploadedBy: input.uploadedBy
   };
 
   if (!isDbEnabled()) {
-    const list = readJson<CourseFile[]>(FILE, []);
+    const list = readJson<CourseFileRecord[]>(FILE, []);
     list.push(next);
     writeJson(FILE, list);
-    return next;
+    return hydrateCourseFileContent(next);
   }
 
   const row = await queryOne<DbCourseFile>(
     `INSERT INTO course_files
-     (id, class_id, folder, title, resource_type, file_name, mime_type, size, content_base64, link_url, created_at, uploaded_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+     (id, class_id, folder, title, resource_type, file_name, mime_type, size, content_base64, content_storage_provider, content_storage_key, link_url, created_at, uploaded_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      RETURNING *`,
     [
       next.id,
@@ -122,10 +164,12 @@ export async function createCourseFile(input: {
       next.mimeType ?? null,
       next.size ?? null,
       next.contentBase64 ?? null,
+      next.contentStorageProvider ?? null,
+      next.contentStorageKey ?? null,
       next.linkUrl ?? null,
       createdAt,
       next.uploadedBy ?? null
     ]
   );
-  return row ? mapCourseFile(row) : next;
+  return row ? hydrateCourseFileContent(mapCourseFile(row)) : hydrateCourseFileContent(next);
 }
