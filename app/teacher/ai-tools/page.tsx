@@ -668,6 +668,39 @@ export default function TeacherAiToolsPage() {
         {reviewPackResult ? (
           <div className="grid" style={{ gap: 12, marginTop: 12 }}>
             <div className="card">
+              <div className="section-title">共性错因统计</div>
+              {(reviewPackResult.commonCauseStats ?? []).length ? (
+                <div className="grid" style={{ gap: 8, marginTop: 8 }}>
+                  {(reviewPackResult.commonCauseStats ?? []).map((item: any) => (
+                    <div className="card" key={item.causeKey}>
+                      <div className="section-title">
+                        {item.causeTitle} · {item.level}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                        错题 {item.count} 次，占比 {item.ratio}%
+                      </div>
+                      <div style={{ fontSize: 12, marginTop: 6 }}>
+                        关联知识点：
+                        {(item.linkedKnowledgePoints ?? []).length
+                          ? item.linkedKnowledgePoints
+                              .map((kp: any) => kp.title)
+                              .join("、")
+                          : "暂无"}
+                      </div>
+                      <div style={{ fontSize: 12, marginTop: 6 }}>
+                        讲评策略：{item.remediationTip}
+                      </div>
+                      <div style={{ fontSize: 12, marginTop: 4, color: "var(--ink-1)" }}>
+                        课堂动作：{item.classAction}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-1)" }}>暂无可统计的共性错因。</div>
+              )}
+            </div>
+            <div className="card">
               <div className="section-title">讲评顺序</div>
               <ol style={{ margin: "8px 0 0 16px" }}>
                 {(reviewPackResult.reviewOrder ?? []).map((item: any) => (

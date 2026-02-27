@@ -446,11 +446,21 @@ export async function runTeacherExamSuite(context) {
     Array.isArray(classReviewPack.body?.data?.afterClassReviewSheet),
     "Class review-pack should include afterClassReviewSheet"
   );
+  assert.ok(
+    Array.isArray(classReviewPack.body?.data?.commonCauseStats),
+    "Class review-pack should include commonCauseStats"
+  );
   assert.equal(
     typeof classReviewPack.body?.data?.quality?.confidenceScore,
     "number",
     "Class review-pack should include quality.confidenceScore"
   );
+  const firstCause = classReviewPack.body?.data?.commonCauseStats?.[0];
+  if (firstCause) {
+    assert.equal(typeof firstCause.causeKey, "string", "commonCauseStats item should include causeKey");
+    assert.equal(typeof firstCause.ratio, "number", "commonCauseStats item should include ratio");
+    assert.equal(typeof firstCause.classAction, "string", "commonCauseStats item should include classAction");
+  }
   const firstSheet = classReviewPack.body?.data?.afterClassReviewSheet?.[0];
   if (firstSheet) {
     assert.equal(
