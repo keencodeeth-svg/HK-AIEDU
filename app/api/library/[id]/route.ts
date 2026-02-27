@@ -2,7 +2,8 @@ import { getCurrentUser } from "@/lib/auth";
 import { canAccessLearningLibraryItem } from "@/lib/library-access";
 import {
   deleteLearningLibraryItem,
-  getLearningLibraryItemById
+  getLearningLibraryItemById,
+  hydrateLearningLibraryItemContent
 } from "@/lib/learning-library";
 import { addAdminLog } from "@/lib/admin-log";
 import { requireRole } from "@/lib/guard";
@@ -39,7 +40,9 @@ export const GET = withApi(async (_request, context) => {
     notFound("not found");
   }
 
-  return { data: item };
+  const hydrated = await hydrateLearningLibraryItemContent(item);
+  const { contentStorageProvider, contentStorageKey, ...publicItem } = hydrated ?? item;
+  return { data: publicItem };
 });
 
 export const DELETE = withApi(async (_request, context) => {

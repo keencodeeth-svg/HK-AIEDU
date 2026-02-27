@@ -1,4 +1,8 @@
-import { listLearningLibraryItems, type LearningLibraryItem } from "./learning-library";
+import {
+  listLearningLibraryItems,
+  resolveLearningLibraryFileContentBase64,
+  type LearningLibraryItem
+} from "./learning-library";
 import { readJson, writeJson } from "./storage";
 
 export type LibraryChunk = {
@@ -96,10 +100,11 @@ function decodeBase64Text(contentBase64?: string, mimeType?: string) {
   }
 }
 
-function extractItemText(item: LearningLibraryItem) {
+async function extractItemText(item: LearningLibraryItem) {
   const parts = [item.title, item.description ?? "", item.textContent ?? ""];
   if (item.sourceType === "file") {
-    parts.push(decodeBase64Text(item.contentBase64, item.mimeType));
+    const contentBase64 = await resolveLearningLibraryFileContentBase64(item);
+    parts.push(decodeBase64Text(contentBase64, item.mimeType));
   }
   return parts
     .filter(Boolean)
@@ -108,8 +113,8 @@ function extractItemText(item: LearningLibraryItem) {
     .slice(0, 22000);
 }
 
-function buildChunksForItem(item: LearningLibraryItem, indexedAt: string) {
-  const rawText = extractItemText(item);
+async function buildChunksForItem(item: LearningLibraryItem, indexedAt: string) {
+  const rawText = await extractItemText(item);
   if (!rawText.trim()) return [] as LibraryChunk[];
   const chunks = splitIntoChunks(rawText);
   return chunks.map((text, index) => ({
@@ -195,7 +200,7 @@ export async function indexLibraryChunks(input: {
     });
   }
 
-  const appended = targetItems.flatMap((item) => buildChunksForItem(item, indexedAt));
+  const appended = (await Promise.all(targetItems.map((item) => buildChunksForItem(item, indexedAt)))).flat();
   const merged = [...kept, ...appended];
   writeChunks(merged);
 

@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { extractKnowledgePointCandidates } from "./ai";
 import { getKnowledgePoints } from "./content";
 import { isDbEnabled, query, queryOne } from "./db";
+import { deleteObject, getBase64Object, putBase64Object } from "./object-storage";
 import { readJson, writeJson } from "./storage";
 
 export type LibraryContentType = "textbook" | "courseware" | "lesson_plan";
@@ -26,6 +27,8 @@ export type LearningLibraryItem = {
   mimeType?: string;
   size?: number;
   contentBase64?: string;
+  contentStorageProvider?: string;
+  contentStorageKey?: string;
   linkUrl?: string;
   textContent?: string;
   knowledgePointIds: string[];
@@ -65,6 +68,8 @@ type DbLibraryItem = {
   mime_type: string | null;
   size: number | null;
   content_base64: string | null;
+  content_storage_provider: string | null;
+  content_storage_key: string | null;
   link_url: string | null;
   text_content: string | null;
   knowledge_point_ids: string[] | null;
@@ -138,6 +143,8 @@ function mapDbItem(row: DbLibraryItem): LearningLibraryItem {
     mimeType: row.mime_type ?? undefined,
     size: row.size ?? undefined,
     contentBase64: row.content_base64 ?? undefined,
+    contentStorageProvider: row.content_storage_provider ?? undefined,
+    contentStorageKey: row.content_storage_key ?? undefined,
     linkUrl: row.link_url ?? undefined,
     textContent: row.text_content ?? undefined,
     knowledgePointIds: uniqueStrings(row.knowledge_point_ids ?? []),
@@ -181,6 +188,41 @@ function decodeTextFromBase64(contentBase64?: string, mimeType?: string) {
   } catch {
     return "";
   }
+}
+
+function shouldStoreLibraryFileInObjectStorage() {
+  if (process.env.LIBRARY_OBJECT_STORAGE_ENABLED === "false") return false;
+  if (process.env.LIBRARY_OBJECT_STORAGE_ENABLED === "true") return true;
+  return true;
+}
+
+function shouldKeepInlineLibraryFileContent() {
+  if (process.env.LIBRARY_INLINE_FILE_CONTENT === "true") return true;
+  if (process.env.LIBRARY_INLINE_FILE_CONTENT === "false") return false;
+  return false;
+}
+
+export async function resolveLearningLibraryFileContentBase64(item: {
+  sourceType: LibrarySourceType;
+  contentBase64?: string;
+  contentStorageKey?: string;
+}) {
+  if (item.sourceType !== "file") return undefined;
+  if (item.contentBase64?.trim()) return item.contentBase64;
+  if (!item.contentStorageKey?.trim()) return undefined;
+  const base64 = await getBase64Object(item.contentStorageKey);
+  return base64 ?? undefined;
+}
+
+export async function hydrateLearningLibraryItemContent(item: LearningLibraryItem | null) {
+  if (!item) return null;
+  if (item.sourceType !== "file") return item;
+  if (item.contentBase64?.trim()) return item;
+  const contentBase64 = await resolveLearningLibraryFileContentBase64(item);
+  return {
+    ...item,
+    contentBase64
+  };
 }
 
 export async function extractLibraryKnowledgePointIds(input: {
@@ -374,6 +416,23 @@ export async function createLearningLibraryItem(input: {
           seedKnowledgePointIds: input.knowledgePointIds
         });
 
+  let contentBase64 = input.contentBase64;
+  let contentStorageProvider: string | undefined;
+  let contentStorageKey: string | undefined;
+
+  if (sourceType === "file" && contentBase64?.trim() && shouldStoreLibraryFileInObjectStorage()) {
+    const stored = await putBase64Object({
+      namespace: "library",
+      base64: contentBase64,
+      keyHint: input.fileName ?? input.title
+    });
+    contentStorageProvider = stored.provider;
+    contentStorageKey = stored.key;
+    if (!shouldKeepInlineLibraryFileContent()) {
+      contentBase64 = undefined;
+    }
+  }
+
   const next: LearningLibraryItem = {
     id: `lib-${crypto.randomBytes(8).toString("hex")}`,
     title: input.title.trim(),
@@ -389,7 +448,9 @@ export async function createLearningLibraryItem(input: {
     fileName: input.fileName,
     mimeType: input.mimeType,
     size: input.size,
-    contentBase64: input.contentBase64,
+    contentBase64,
+    contentStorageProvider,
+    contentStorageKey,
     linkUrl: input.linkUrl,
     textContent: input.textContent,
     knowledgePointIds: extracted.knowledgePointIds,
@@ -411,12 +472,12 @@ export async function createLearningLibraryItem(input: {
   const row = await queryOne<DbLibraryItem>(
     `INSERT INTO learning_library_items
       (id, title, description, content_type, subject, grade, owner_role, owner_id, class_id, access_scope, source_type,
-       file_name, mime_type, size, content_base64, link_url, text_content, knowledge_point_ids,
+       file_name, mime_type, size, content_base64, content_storage_provider, content_storage_key, link_url, text_content, knowledge_point_ids,
        extracted_knowledge_points, generated_by_ai, status, share_token, created_at, updated_at)
      VALUES
       ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-       $12, $13, $14, $15, $16, $17, $18,
-       $19, $20, $21, $22, $23, $24)
+       $12, $13, $14, $15, $16, $17, $18, $19,
+       $20, $21, $22, $23, $24, $25)
      RETURNING *`,
     [
       next.id,
@@ -434,6 +495,8 @@ export async function createLearningLibraryItem(input: {
       next.mimeType ?? null,
       next.size ?? null,
       next.contentBase64 ?? null,
+      next.contentStorageProvider ?? null,
+      next.contentStorageKey ?? null,
       next.linkUrl ?? null,
       next.textContent ?? null,
       next.knowledgePointIds,
@@ -517,9 +580,11 @@ export async function issueLearningLibraryShareToken(id: string) {
 export async function deleteLearningLibraryItem(id: string) {
   if (!isDbEnabled()) {
     const items = readJson<LearningLibraryItem[]>(ITEM_FILE, []);
+    const target = items.find((item) => item.id === id);
     const nextItems = items.filter((item) => item.id !== id);
     if (nextItems.length === items.length) return false;
     writeJson(ITEM_FILE, nextItems);
+    await deleteObject(target?.contentStorageKey);
 
     // Keep local annotation store consistent in file mode.
     const annotations = readJson<LearningLibraryAnnotation[]>(ANNOTATION_FILE, []);
@@ -540,10 +605,14 @@ export async function deleteLearningLibraryItem(id: string) {
     }
   }
 
+  const target = await getLearningLibraryItemById(id);
   const rows = await query<{ id: string }>(
     "DELETE FROM learning_library_items WHERE id = $1 RETURNING id",
     [id]
   );
+  if (rows.length > 0) {
+    await deleteObject(target?.contentStorageKey);
+  }
   return rows.length > 0;
 }
 

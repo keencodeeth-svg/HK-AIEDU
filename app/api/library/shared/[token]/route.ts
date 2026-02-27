@@ -1,4 +1,4 @@
-import { getLearningLibraryItemByShareToken } from "@/lib/learning-library";
+import { getLearningLibraryItemByShareToken, hydrateLearningLibraryItemContent } from "@/lib/learning-library";
 import { notFound, withApi } from "@/lib/api/http";
 import { parseParams, v } from "@/lib/api/validation";
 
@@ -17,5 +17,7 @@ export const GET = withApi(async (_request, context) => {
   if (!item) {
     notFound("not found");
   }
-  return { data: item };
+  const hydrated = await hydrateLearningLibraryItemContent(item);
+  const { contentStorageProvider, contentStorageKey, ...publicItem } = hydrated ?? item;
+  return { data: publicItem };
 });

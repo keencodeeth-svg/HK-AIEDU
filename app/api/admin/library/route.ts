@@ -1,6 +1,7 @@
 import { requireRole } from "@/lib/guard";
 import {
   createLearningLibraryItem,
+  hydrateLearningLibraryItemContent,
   listLearningLibraryItems
 } from "@/lib/learning-library";
 import { badRequest, unauthorized, withApi } from "@/lib/api/http";
@@ -56,6 +57,11 @@ function normalizeContentType(value?: string) {
   return "textbook";
 }
 
+function toPublicLibraryItem<T extends { contentStorageProvider?: string; contentStorageKey?: string }>(item: T) {
+  const { contentStorageProvider, contentStorageKey, ...rest } = item;
+  return rest;
+}
+
 export const GET = withApi(async () => {
   const user = await requireRole("admin");
   if (!user) {
@@ -65,7 +71,7 @@ export const GET = withApi(async () => {
   const data = await listLearningLibraryItems({
     accessScope: "global"
   });
-  return { data };
+  return { data: data.map((item) => toPublicLibraryItem(item)) };
 });
 
 export const POST = withApi(async (request) => {
@@ -118,5 +124,6 @@ export const POST = withApi(async (request) => {
     status: "published"
   });
 
-  return { data: item };
+  const hydrated = await hydrateLearningLibraryItemContent(item);
+  return { data: toPublicLibraryItem(hydrated ?? item) };
 });

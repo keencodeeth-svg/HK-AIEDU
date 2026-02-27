@@ -456,6 +456,8 @@ CREATE TABLE IF NOT EXISTS learning_library_items (
   mime_type TEXT,
   size INT,
   content_base64 TEXT,
+  content_storage_provider TEXT,
+  content_storage_key TEXT,
   link_url TEXT,
   text_content TEXT,
   knowledge_point_ids TEXT[] NOT NULL DEFAULT '{}',
@@ -475,6 +477,8 @@ ALTER TABLE learning_library_items ADD COLUMN IF NOT EXISTS file_name TEXT;
 ALTER TABLE learning_library_items ADD COLUMN IF NOT EXISTS mime_type TEXT;
 ALTER TABLE learning_library_items ADD COLUMN IF NOT EXISTS size INT;
 ALTER TABLE learning_library_items ADD COLUMN IF NOT EXISTS content_base64 TEXT;
+ALTER TABLE learning_library_items ADD COLUMN IF NOT EXISTS content_storage_provider TEXT;
+ALTER TABLE learning_library_items ADD COLUMN IF NOT EXISTS content_storage_key TEXT;
 ALTER TABLE learning_library_items ADD COLUMN IF NOT EXISTS link_url TEXT;
 ALTER TABLE learning_library_items ADD COLUMN IF NOT EXISTS text_content TEXT;
 ALTER TABLE learning_library_items ADD COLUMN IF NOT EXISTS knowledge_point_ids TEXT[] NOT NULL DEFAULT '{}';
