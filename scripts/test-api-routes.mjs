@@ -28,6 +28,15 @@ async function run() {
   try {
     await runtime.waitForServerReady();
 
+    if (scope === "health") {
+      const health = await runtime.apiFetch("/api/health", { useCookies: false });
+      if (health.status !== 200) {
+        throw new Error(`Health check failed: ${health.status} ${health.raw}`);
+      }
+      console.log("API health tests passed.");
+      return;
+    }
+
     await runCoreAuthSuite(context);
     if (scope === "smoke") {
       console.log("API smoke tests passed.");

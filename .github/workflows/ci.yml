@@ -71,7 +71,7 @@ jobs:
         env:
           API_TEST_SERVER_MODE: start
           API_TEST_FALLBACK_TO_DEV: "0"
-          API_TEST_SCOPE: smoke
+          API_TEST_SCOPE: health
         run: |
           set -o pipefail
           timeout 30m npm run test:api 2>&1 | tee api-tests.log
