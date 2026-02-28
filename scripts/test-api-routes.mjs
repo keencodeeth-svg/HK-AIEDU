@@ -9,6 +9,7 @@ const runtime = createRuntime(port);
 
 async function run() {
   const { server, getServerLog } = runtime.startServer();
+  const scope = (process.env.API_TEST_SCOPE ?? "full").toLowerCase();
 
   const state = {
     email: "",
@@ -28,6 +29,10 @@ async function run() {
     await runtime.waitForServerReady();
 
     await runCoreAuthSuite(context);
+    if (scope === "smoke") {
+      console.log("API smoke tests passed.");
+      return;
+    }
     await runLearningSuite(context);
     await runTeacherExamSuite(context);
     await runAdminContentSuite(context);
