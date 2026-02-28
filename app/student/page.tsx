@@ -373,15 +373,21 @@ export default function StudentPage() {
   );
 
   const weakPlanCount = useMemo(() => plan.filter((item) => item.masteryLevel === "weak").length, [plan]);
-  const todayTaskPreview = useMemo(() => (todayTasks?.tasks ?? []).slice(0, 6), [todayTasks]);
   const topTodayTasks = useMemo(() => {
     if (!todayTasks) return [];
     if (todayTasks.topTasks?.length) return todayTasks.topTasks.slice(0, 3);
     return todayTasks.tasks.slice(0, 3);
   }, [todayTasks]);
+  const visiblePriorityTasks = useMemo(() => {
+    if (!todayTasks) return topTodayTasks;
+    if (todayTasks.groups?.mustDo?.length) {
+      return todayTasks.groups.mustDo.slice(0, 5);
+    }
+    return todayTasks.tasks.slice(0, 5);
+  }, [todayTasks, topTodayTasks]);
   const hiddenTodayTaskCount = useMemo(
-    () => Math.max(0, (todayTasks?.tasks?.length ?? 0) - todayTaskPreview.length),
-    [todayTasks, todayTaskPreview.length]
+    () => Math.max(0, (todayTasks?.tasks?.length ?? 0) - visiblePriorityTasks.length),
+    [todayTasks, visiblePriorityTasks.length]
   );
 
   useEffect(() => {
@@ -534,26 +540,60 @@ export default function StudentPage() {
       </div>
 
       <div className="student-overview-grid">
-        <Card title="今日任务" tag="队列">
+        <Card title="今日高优先任务" tag="队列">
           {todayTaskError ? <div className="status-note error">{todayTaskError}</div> : null}
-          {topTodayTasks.length === 0 ? (
+          {visiblePriorityTasks.length === 0 ? (
             <div className="empty-state">
               <p className="empty-state-title">当前暂无待处理任务</p>
               <p className="meta-text">保持节奏即可，建议先进入学习工具完成一次练习。</p>
             </div>
           ) : (
             <div className="stack-8">
-              {topTodayTasks.map((task, index) => (
-                <div className="card task-card" key={task.id}>
-                  <div className="card-header">
-                    <div className="section-title task-title">
+              {visiblePriorityTasks.map((task, index) => (
+                <div
+                  key={task.id}
+                  style={{
+                    border: "1px solid var(--stroke)",
+                    borderRadius: 12,
+                    background: "rgba(255,255,255,0.72)",
+                    padding: 10
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        display: "-webkit-box",
+                        WebkitLineClamp: 1,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden"
+                      }}
+                    >
                       TOP {index + 1} · {task.title}
                     </div>
                     <span className="card-tag">{getTodayTaskStatusLabel(task.status)}</span>
                   </div>
-                  <p className="meta-text">{task.description}</p>
-                  <p className="meta-text">推荐原因：{task.recommendedReason}</p>
-                  <div className="badge-row">
+                  <p
+                    className="meta-text"
+                    style={{
+                      marginTop: 6,
+                      display: "-webkit-box",
+                      WebkitLineClamp: 1,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden"
+                    }}
+                  >
+                    {task.description}
+                  </p>
+                  <div className="badge-row" style={{ marginTop: 6 }}>
                     {task.tags.slice(0, 2).map((tag) => (
                       <span className="badge" key={`${task.id}-${tag}`}>
                         {tag}
@@ -561,19 +601,18 @@ export default function StudentPage() {
                     ))}
                     <span className="badge">预计 {task.effortMinutes} 分钟</span>
                     <span className="badge">预期收益 {task.expectedGain}</span>
-                    {task.dueAt ? <span className="meta-text">截止 {new Date(task.dueAt).toLocaleString("zh-CN")}</span> : null}
+                    {task.dueAt ? (
+                      <span className="badge">截止 {new Date(task.dueAt).toLocaleDateString("zh-CN")}</span>
+                    ) : null}
                   </div>
-                  <div className="cta-row cta-row-tight">
-                    <Link className="button ghost" href={task.href} onClick={() => handleTaskEvent(task, "task_started")}>
+                  <div className="cta-row cta-row-tight" style={{ marginTop: 8 }}>
+                    <Link
+                      className="button secondary"
+                      href={task.href}
+                      onClick={() => handleTaskEvent(task, "task_started")}
+                    >
                       去完成
                     </Link>
-                    <button
-                      className="button secondary"
-                      type="button"
-                      onClick={() => handleTaskEvent(task, "task_completed")}
-                    >
-                      标记完成
-                    </button>
                     <button
                       className="button ghost"
                       type="button"
@@ -586,47 +625,60 @@ export default function StudentPage() {
               ))}
             </div>
           )}
-          <div className="badge-row summary-badges">
-            <span className="badge">必做 {todayTasks?.summary?.mustDo ?? 0}</span>
-            <span className="badge">逾期 {todayTasks?.summary?.overdue ?? 0}</span>
-            <span className="badge">今日到期 {todayTasks?.summary?.dueToday ?? 0}</span>
-            <span className="badge">计划题量 {totalPlanCount}</span>
-            <span className="badge">薄弱知识点 {weakPlanCount}</span>
-            <span className="badge">复练任务 {todayTasks?.summary?.bySource?.wrongReview ?? 0}</span>
-            <span className="badge">Top3 预计 {todayTasks?.summary?.top3EstimatedMinutes ?? 0} 分钟</span>
-          </div>
           {hiddenTodayTaskCount > 0 ? <p className="meta-note">还有 {hiddenTodayTaskCount} 项任务待处理。</p> : null}
-          <div className="cta-row">
-            <button className="button secondary" type="button" onClick={refreshPlan}>
-              {refreshing ? "刷新中..." : "刷新学习计划"}
-            </button>
-          </div>
         </Card>
 
-        <Card title="学习激励" tag="成长">
-          <div className="grid grid-2">
-            <div className="kpi">
-              <div className="section-title kpi-title">连续学习</div>
-              <div className="kpi-value">{motivation?.streak ?? 0} 天</div>
+        <div className="grid" style={{ gap: 10 }}>
+          <Card title="任务概览" tag="统计">
+            <div className="grid grid-2">
+              <div className="kpi">
+                <div className="section-title kpi-title">必做任务</div>
+                <div className="kpi-value">{todayTasks?.summary?.mustDo ?? 0}</div>
+              </div>
+              <div className="kpi">
+                <div className="section-title kpi-title">Top3 预计时长</div>
+                <div className="kpi-value">{todayTasks?.summary?.top3EstimatedMinutes ?? 0} 分钟</div>
+              </div>
             </div>
-            <div className="kpi">
-              <div className="section-title kpi-title">本周正确率</div>
-              <div className="kpi-value">{motivation?.weekly?.accuracy ?? 0}%</div>
+            <div className="badge-row summary-badges">
+              <span className="badge">逾期 {todayTasks?.summary?.overdue ?? 0}</span>
+              <span className="badge">今日到期 {todayTasks?.summary?.dueToday ?? 0}</span>
+              <span className="badge">计划题量 {totalPlanCount}</span>
+              <span className="badge">薄弱知识点 {weakPlanCount}</span>
+              <span className="badge">复练任务 {todayTasks?.summary?.bySource?.wrongReview ?? 0}</span>
             </div>
-          </div>
-          <div className="stack-8 panel-section">
-            <div className="badge">徽章</div>
-            {motivation?.badges?.length ? (
-              motivation.badges.map((badge) => (
-                <div className="meta-text" key={badge.id}>
-                  {badge.title} - {badge.description}
-                </div>
-              ))
-            ) : (
-              <div className="status-note info">完成一次练习即可获得首枚徽章。</div>
-            )}
-          </div>
-        </Card>
+            <div className="cta-row">
+              <button className="button secondary" type="button" onClick={refreshPlan}>
+                {refreshing ? "刷新中..." : "刷新学习计划"}
+              </button>
+            </div>
+          </Card>
+
+          <Card title="学习激励" tag="成长">
+            <div className="grid grid-2">
+              <div className="kpi">
+                <div className="section-title kpi-title">连续学习</div>
+                <div className="kpi-value">{motivation?.streak ?? 0} 天</div>
+              </div>
+              <div className="kpi">
+                <div className="section-title kpi-title">本周正确率</div>
+                <div className="kpi-value">{motivation?.weekly?.accuracy ?? 0}%</div>
+              </div>
+            </div>
+            <div className="stack-8 panel-section">
+              <div className="badge">徽章</div>
+              {motivation?.badges?.length ? (
+                motivation.badges.map((badge) => (
+                  <div className="meta-text" key={badge.id}>
+                    {badge.title} - {badge.description}
+                  </div>
+                ))
+              ) : (
+                <div className="status-note info">完成一次练习即可获得首枚徽章。</div>
+              )}
+            </div>
+          </Card>
+        </div>
       </div>
 
       <div className="section-head">
