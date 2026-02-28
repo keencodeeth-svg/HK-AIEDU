@@ -36,11 +36,27 @@ type ExplainPack = {
   visual: string;
   analogy: string;
   provider?: string;
+  manualReviewRule?: string;
+  citationGovernance?: {
+    total: number;
+    averageConfidence: number;
+    highTrustCount: number;
+    mediumTrustCount: number;
+    lowTrustCount: number;
+    riskLevel: "low" | "medium" | "high";
+    needsManualReview: boolean;
+    manualReviewReason: string;
+  };
   citations?: Array<{
     itemId: string;
     itemTitle: string;
     snippet: string;
     score: number;
+    confidence: number;
+    trustLevel: "high" | "medium" | "low";
+    riskLevel: "low" | "medium" | "high";
+    matchRatio: number;
+    reason: string[];
   }>;
 };
 
@@ -524,13 +540,39 @@ export default function PracticePage() {
               解析来源：{explainPack.provider}
             </div>
           ) : null}
+          {explainPack?.manualReviewRule ? (
+            <div style={{ marginTop: 8, fontSize: 12, color: "#b54708" }}>{explainPack.manualReviewRule}</div>
+          ) : null}
           {explainPack?.citations?.length ? (
             <div className="grid" style={{ gap: 6, marginTop: 10 }}>
               <div className="badge">教材依据</div>
+              {explainPack.citationGovernance ? (
+                <div className="card" style={{ fontSize: 12 }}>
+                  平均置信度 {explainPack.citationGovernance.averageConfidence} · 高可信{" "}
+                  {explainPack.citationGovernance.highTrustCount} 条 · 中可信{" "}
+                  {explainPack.citationGovernance.mediumTrustCount} 条 · 低可信{" "}
+                  {explainPack.citationGovernance.lowTrustCount} 条
+                </div>
+              ) : null}
               {explainPack.citations.map((item) => (
                 <div className="card" key={`${item.itemId}-${item.score}`} style={{ fontSize: 12 }}>
-                  <div style={{ fontWeight: 600 }}>{item.itemTitle}</div>
+                  <div style={{ fontWeight: 600 }}>
+                    {item.itemTitle}
+                    <span
+                      style={{
+                        marginLeft: 8,
+                        fontSize: 11,
+                        color: item.trustLevel === "high" ? "#027a48" : item.trustLevel === "medium" ? "#b54708" : "#b42318"
+                      }}
+                    >
+                      {item.trustLevel === "high" ? "高可信" : item.trustLevel === "medium" ? "中可信" : "低可信"} · 置信度{" "}
+                      {item.confidence}
+                    </span>
+                  </div>
                   <div style={{ color: "var(--ink-1)", marginTop: 4 }}>{item.snippet}</div>
+                  {item.reason?.length ? (
+                    <div style={{ marginTop: 4, color: "var(--ink-1)" }}>{item.reason.join("；")}</div>
+                  ) : null}
                 </div>
               ))}
             </div>

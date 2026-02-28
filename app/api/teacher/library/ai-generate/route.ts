@@ -4,7 +4,7 @@ import { getClassById } from "@/lib/classes";
 import { getKnowledgePoints } from "@/lib/content";
 import { createLearningLibraryItem, listLearningLibraryItems, type LearningLibraryItem } from "@/lib/learning-library";
 import { canAccessLearningLibraryItem } from "@/lib/library-access";
-import { retrieveLibraryCitations, toCitationPrompts } from "@/lib/library-rag";
+import { retrieveLibraryCitations, summarizeCitationGovernance, toCitationPrompts } from "@/lib/library-rag";
 import { assessAiQuality } from "@/lib/ai-quality-control";
 import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
@@ -111,6 +111,8 @@ export const POST = withApi(async (request) => {
     limit: 4,
     itemIds: accessibleItems.map((item) => item.id)
   });
+  const citationGovernance = summarizeCitationGovernance(citations);
+  const trustedCitations = citations.filter((item) => item.trustLevel !== "low");
 
   const outline =
     (await generateLessonOutline({
@@ -118,7 +120,7 @@ export const POST = withApi(async (request) => {
       grade: klass.grade,
       topic,
       knowledgePoints: kpTitles,
-      citations: toCitationPrompts(citations)
+      citations: toCitationPrompts(trustedCitations.length ? trustedCitations : citations)
     })) ?? {
       objectives: ["掌握核心概念", "会用标准步骤解题", "完成课堂巩固任务"],
       keyPoints: kpTitles.length ? kpTitles : ["关键概念", "易错点"],
@@ -177,14 +179,24 @@ export const POST = withApi(async (request) => {
     ],
     listCountHint: (outline.slides?.length ?? 0) + citations.length
   });
+  const manualReviewHints: string[] = [];
+  if (quality.needsHumanReview) {
+    manualReviewHints.push("内容质量分触发人工复核阈值");
+  }
+  if (citationGovernance.needsManualReview) {
+    manualReviewHints.push(`引用可信度风险（${citationGovernance.manualReviewReason}）`);
+  }
 
   return {
     data: {
       item,
       outline,
       citations,
+      citationGovernance,
       quality,
-      manualReviewRule: quality.needsHumanReview ? "建议教师抽检教材引用与关键教学结论后再下发。" : ""
+      manualReviewRule: manualReviewHints.length
+        ? `建议教师先人工复核后下发：${manualReviewHints.join("；")}。`
+        : ""
     }
   };
 });

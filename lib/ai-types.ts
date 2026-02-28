@@ -1,7 +1,18 @@
+export type AiQualityMeta = {
+  confidenceScore: number;
+  riskLevel: "low" | "medium" | "high";
+  needsHumanReview: boolean;
+  fallbackAction: string;
+  reasons: string[];
+  minQualityScore?: number;
+  policyViolated?: boolean;
+};
+
 export type AssistPayload = {
   question: string;
   subject?: string;
   grade?: string;
+  memoryContext?: string;
 };
 
 export type AssistResponse = {
@@ -10,6 +21,7 @@ export type AssistResponse = {
   hints: string[];
   sources: string[];
   provider: string;
+  quality?: AiQualityMeta;
 };
 
 export type QuestionDraft = {
@@ -58,6 +70,7 @@ export type WritingFeedback = {
   strengths: string[];
   improvements: string[];
   corrected?: string;
+  quality?: AiQualityMeta;
 };
 
 export type LessonOutline = {
@@ -78,6 +91,7 @@ export type ExplainVariants = {
   visual: string;
   analogy: string;
   provider: string;
+  quality?: AiQualityMeta;
 };
 
 export type HomeworkReview = {
@@ -95,17 +109,20 @@ export type HomeworkReview = {
     corrected?: string;
   };
   provider: string;
+  quality?: AiQualityMeta;
 };
 
 export type LearningReport = {
   report: string;
   highlights: string[];
   reminders: string[];
+  quality?: AiQualityMeta;
 };
 
 export type KnowledgePointExtraction = {
   points: string[];
   provider: string;
+  quality?: AiQualityMeta;
 };
 
 export type QuestionCheck = {

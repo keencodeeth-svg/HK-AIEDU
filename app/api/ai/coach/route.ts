@@ -1,5 +1,6 @@
 import { getCurrentUser } from "@/lib/auth";
 import { generateAssistAnswer } from "@/lib/ai";
+import { addHistoryItem, getHistoryByUser, type AiHistoryItem } from "@/lib/ai-history";
 import { assessAiQuality } from "@/lib/ai-quality-control";
 import { badRequest, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
@@ -21,6 +22,65 @@ const coachBodySchema = v.object<{
   { allowUnknown: false }
 );
 
+type CoachMemorySnapshot = {
+  recentSessionCount: number;
+  recentQuestions: string[];
+  patternHint: string;
+  contextPrompt: string;
+};
+
+function getTagValue(tags: string[], prefix: string) {
+  const found = tags.find((tag) => tag.startsWith(prefix));
+  if (!found) return "";
+  return found.slice(prefix.length).trim();
+}
+
+function toPreview(value: string, max = 24) {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}...`;
+}
+
+function buildCoachMemorySnapshot(params: {
+  history: AiHistoryItem[];
+  subject?: string;
+  grade?: string;
+}): CoachMemorySnapshot {
+  const scoped = params.history.filter((item) => {
+    if (!item.tags?.includes("coach_session")) return false;
+    const subjectTag = getTagValue(item.tags, "subject:");
+    const gradeTag = getTagValue(item.tags, "grade:");
+    if (params.subject && subjectTag !== params.subject) return false;
+    if (params.grade && gradeTag !== params.grade) return false;
+    return true;
+  });
+  const recent = scoped.slice(0, 5);
+  const recentQuestions = recent.map((item) => toPreview(item.question)).filter(Boolean);
+  const hasThinkingCount = recent.filter((item) => item.tags?.includes("with_thinking")).length;
+
+  const patternHint =
+    recent.length >= 4
+      ? `最近 ${recent.length} 次陪练已连续进行，${
+          hasThinkingCount >= Math.max(2, Math.floor(recent.length / 2))
+            ? "你有持续提交思路，建议继续保持“先说思路再求解”。"
+            : "建议每次先提交你的思路，再看分步提示，提分更稳定。"
+        }`
+      : recent.length >= 1
+        ? "已记录近期陪练轨迹，本次会延续你的学习节奏。"
+        : "这是你的首轮陪练记录，建议连续 3 天保持练习。";
+
+  const contextPrompt = recent.length
+    ? `最近陪练题目：${recentQuestions.join("；")}。${hasThinkingCount > 0 ? `其中 ${hasThinkingCount} 次提交了解题思路。` : "历史记录中暂未提交解题思路。"}`
+    : "";
+
+  return {
+    recentSessionCount: recent.length,
+    recentQuestions,
+    patternHint,
+    contextPrompt
+  };
+}
+
 export const POST = withApi(async (request) => {
   const user = await getCurrentUser();
   if (!user) {
@@ -32,10 +92,39 @@ export const POST = withApi(async (request) => {
     badRequest("missing question");
   }
 
+  const subject = body.subject?.trim();
+  const grade = body.grade?.trim();
+  let memorySnapshot: CoachMemorySnapshot;
+  if (user.role === "student") {
+    try {
+      const history = await getHistoryByUser(user.id);
+      memorySnapshot = buildCoachMemorySnapshot({
+        history,
+        subject,
+        grade
+      });
+    } catch {
+      memorySnapshot = {
+        recentSessionCount: 0,
+        recentQuestions: [],
+        patternHint: "陪练记录暂不可用，先按当前题目给出分步提示。",
+        contextPrompt: ""
+      };
+    }
+  } else {
+    memorySnapshot = {
+      recentSessionCount: 0,
+      recentQuestions: [],
+      patternHint: "当前角色不记录长期陪练记忆。",
+      contextPrompt: ""
+    };
+  }
+
   const assist = await generateAssistAnswer({
     question: body.question.trim(),
-    subject: body.subject,
-    grade: body.grade
+    subject,
+    grade,
+    memoryContext: memorySnapshot.contextPrompt
   });
 
   const checkpoints = [
@@ -55,6 +144,27 @@ export const POST = withApi(async (request) => {
     listCountHint: checkpoints.length + (assist.steps?.length ?? 0)
   });
 
+  if (user.role === "student") {
+    try {
+      const tags = [
+        "coach_session",
+        subject ? `subject:${subject}` : "",
+        grade ? `grade:${grade}` : "",
+        body.studentAnswer?.trim() ? "with_thinking" : "without_thinking"
+      ].filter(Boolean);
+      const answerSummary = [assist.answer, feedback ?? ""].filter(Boolean).join("\n").slice(0, 4000);
+      await addHistoryItem({
+        userId: user.id,
+        question: body.question.trim(),
+        answer: answerSummary,
+        favorite: false,
+        tags
+      });
+    } catch {
+      // ignore history write failure to keep coach path available
+    }
+  }
+
   return {
     data: {
       answer: assist.answer,
@@ -62,6 +172,11 @@ export const POST = withApi(async (request) => {
       hints: assist.hints,
       checkpoints,
       feedback,
+      memory: {
+        recentSessionCount: memorySnapshot.recentSessionCount,
+        recentQuestions: memorySnapshot.recentQuestions,
+        patternHint: memorySnapshot.patternHint
+      },
       provider: assist.provider,
       quality
     }

@@ -4,7 +4,7 @@ import { generateExplainVariants } from "@/lib/ai";
 import { assessAiQuality } from "@/lib/ai-quality-control";
 import { listLearningLibraryItems, type LearningLibraryItem } from "@/lib/learning-library";
 import { canAccessLearningLibraryItem } from "@/lib/library-access";
-import { retrieveLibraryCitations, toCitationPrompts } from "@/lib/library-rag";
+import { retrieveLibraryCitations, summarizeCitationGovernance, toCitationPrompts } from "@/lib/library-rag";
 import { notFound, unauthorized, withApi } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 
@@ -56,6 +56,8 @@ export const POST = withApi(async (request) => {
     limit: 3,
     itemIds: accessibleItems.map((item) => item.id)
   });
+  const citationGovernance = summarizeCitationGovernance(citations);
+  const trustedCitations = citations.filter((item) => item.trustLevel !== "low");
 
   const variants = await generateExplainVariants({
     subject: question.subject,
@@ -64,7 +66,7 @@ export const POST = withApi(async (request) => {
     answer: question.answer,
     explanation: question.explanation,
     knowledgePointTitle: kp?.title,
-    citations: toCitationPrompts(citations)
+    citations: toCitationPrompts(trustedCitations.length ? trustedCitations : citations)
   });
   const quality = assessAiQuality({
     kind: "explanation",
@@ -73,16 +75,29 @@ export const POST = withApi(async (request) => {
     textBlocks: [variants.text, variants.visual, variants.analogy],
     listCountHint: 3
   });
+  const manualReviewRule =
+    quality.needsHumanReview || citationGovernance.needsManualReview
+      ? `建议人工复核：${quality.needsHumanReview ? "AI 输出质量触发阈值；" : ""}${
+          citationGovernance.needsManualReview ? `引用可信度风险（${citationGovernance.manualReviewReason}）` : ""
+        }`
+      : "";
 
   return {
     data: {
       ...variants,
       quality,
+      citationGovernance,
+      manualReviewRule,
       citations: citations.map((item) => ({
         itemId: item.itemId,
         itemTitle: item.itemTitle,
         snippet: item.snippet,
-        score: item.score
+        score: item.score,
+        confidence: item.confidence,
+        trustLevel: item.trustLevel,
+        riskLevel: item.riskLevel,
+        matchRatio: item.matchRatio,
+        reason: item.reason
       }))
     }
   };

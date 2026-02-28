@@ -474,7 +474,16 @@ export default function LibraryPage() {
       return;
     }
     const citationCount = Array.isArray(data?.data?.citations) ? data.data.citations.length : 0;
-    setMessage(citationCount ? `AI 资料已生成并发布（引用教材片段 ${citationCount} 条）` : "AI 资料已生成并发布");
+    const governance = data?.data?.citationGovernance;
+    const needsManualReview = Boolean(governance?.needsManualReview);
+    const reviewHint = needsManualReview
+      ? `，建议复核（${String(governance?.manualReviewReason ?? "引用可信度风险")}）`
+      : "";
+    setMessage(
+      citationCount
+        ? `AI 资料已生成并发布（引用教材片段 ${citationCount} 条${reviewHint}）`
+        : `AI 资料已生成并发布${reviewHint}`
+    );
     setAiForm((prev) => ({ ...prev, topic: "" }));
     await loadItems();
   }

@@ -58,7 +58,7 @@ export async function generateExplainVariants(payload: {
   const visual = String((parsed as any).visual ?? "").trim();
   const analogy = String((parsed as any).analogy ?? "").trim();
   if (!textExplain || !visual || !analogy) return buildExplainFallback(payload);
-  return { text: textExplain, visual, analogy, provider: llm.provider };
+  return { text: textExplain, visual, analogy, provider: llm.provider, quality: llm.quality };
 }
 
 export async function generateHomeworkReview(payload: {
@@ -179,7 +179,8 @@ export async function generateHomeworkReview(payload: {
     suggestions: suggestions.slice(0, 5),
     rubric: rubric.slice(0, 5),
     writing: writingBlock,
-    provider: llm.provider
+    provider: llm.provider,
+    quality: llm.quality
   };
 }
 
@@ -231,7 +232,8 @@ export async function generateWritingFeedback(payload: {
     summary: summary || "已完成基础批改，请参考评分与建议进行修改。",
     strengths: strengths.slice(0, 3),
     improvements: improvements.slice(0, 3),
-    corrected: corrected || undefined
+    corrected: corrected || undefined,
+    quality: llm.quality
   } as WritingFeedback;
 }
 
@@ -272,7 +274,7 @@ export async function extractKnowledgePointCandidates(payload: {
 
   const parsed = extractJson(llm.text);
   if (!parsed || typeof parsed !== "object") {
-    return { points: [], provider: llm.provider } as KnowledgePointExtraction;
+    return { points: [], provider: llm.provider, quality: llm.quality } as KnowledgePointExtraction;
   }
 
   const pointsRaw = Array.isArray((parsed as any).points) ? (parsed as any).points : [];
@@ -285,7 +287,7 @@ export async function extractKnowledgePointCandidates(payload: {
     )
   );
 
-  return { points, provider: llm.provider } as KnowledgePointExtraction;
+  return { points, provider: llm.provider, quality: llm.quality } as KnowledgePointExtraction;
 }
 
 export async function generateLessonOutline(payload: {
@@ -414,7 +416,8 @@ export async function generateLearningReport(payload: {
   return {
     report,
     highlights: highlights.map((item: any) => String(item).trim()).filter(Boolean),
-    reminders: reminders.map((item: any) => String(item).trim()).filter(Boolean)
+    reminders: reminders.map((item: any) => String(item).trim()).filter(Boolean),
+    quality: llm.quality
   } as LearningReport;
 }
 
@@ -422,6 +425,7 @@ export async function generateAssistAnswer(payload: AssistPayload): Promise<Assi
   const question = payload.question.trim();
   const subject = payload.subject;
   const grade = payload.grade;
+  const memoryContext = payload.memoryContext?.trim();
 
   const relatedQuestion = await retrieveSimilarQuestion(question, subject, grade);
   const relatedKps = await retrieveKnowledgePoints(question, subject, grade);
@@ -433,6 +437,9 @@ export async function generateAssistAnswer(payload: AssistPayload): Promise<Assi
   }
   if (relatedKps.length) {
     contextLines.push(`相关知识点：${relatedKps.map((kp) => kp.title).join("、")}`);
+  }
+  if (memoryContext) {
+    contextLines.push(`学习记忆：${memoryContext}`);
   }
 
   const userPrompt = `问题：${question}\n${contextLines.join("\n")}\n请用 3-5 句话讲清楚思路。`;
@@ -451,7 +458,8 @@ export async function generateAssistAnswer(payload: AssistPayload): Promise<Assi
       steps: ["识别题干关键点", "匹配知识点", "给出清晰步骤"],
       hints: ["先理解题意", "注意单位一致"],
       sources: relatedKps.map((kp) => kp.title),
-      provider: llm.provider
+      provider: llm.provider,
+      quality: llm.quality
     };
   }
 

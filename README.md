@@ -29,6 +29,8 @@ HK-AI-EDU 不是单点工具，而是一个完整的学习运营系统：
 - 错题闭环：24h/72h/7d 间隔复练队列
 - 在线考试：老师发布、学生完成、自动入错题复练队列
 - AI 学习支持：错题讲解、变式训练、对话陪练、写作批改
+- AI 引用治理：讲解返回 citation 置信度、可信等级、风险等级与复核提示
+- AI 陪练记忆：基于历史陪练记录的长期上下文延续（学生端）
 - 成长可视化：能力雷达、成长档案、学习任务总览
 
 ### 2.2 教师端（教学闭环）
@@ -86,6 +88,8 @@ HK-AI-EDU 不是单点工具，而是一个完整的学习运营系统：
 - [x] AI 多模型路由（zhipu/deepseek/kimi/minimax/seedance/compatible/custom）
 - [x] AI 任务策略（providerChain、timeout、retries、budget、minQualityScore）
 - [x] AI 配置与日志 DB 优先存储（多实例一致）
+- [x] RAG 引用可信度治理（citation confidence/trust/risk + 人工复核提示）
+- [x] AI 陪练长期记忆 V1（历史会话上下文）
 - [x] 运营埋点漏斗 + A/B 灰度发布
 - [ ] 付费套餐与订阅
 

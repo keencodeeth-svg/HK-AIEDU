@@ -27,7 +27,23 @@ export type LibraryCitation = {
   contentType: "textbook" | "courseware" | "lesson_plan";
   snippet: string;
   score: number;
+  confidence: number;
+  trustLevel: "high" | "medium" | "low";
+  riskLevel: "low" | "medium" | "high";
+  matchRatio: number;
+  reason: string[];
   knowledgePointIds: string[];
+};
+
+export type CitationGovernanceSummary = {
+  total: number;
+  averageConfidence: number;
+  highTrustCount: number;
+  mediumTrustCount: number;
+  lowTrustCount: number;
+  riskLevel: "low" | "medium" | "high";
+  needsManualReview: boolean;
+  manualReviewReason: string;
 };
 
 const LIBRARY_CHUNKS_FILE = "library-chunks.json";
@@ -45,6 +61,10 @@ function normalizeSearchText(value: string) {
 
 function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)));
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, Math.round(value)));
 }
 
 function extractTokens(value: string) {
@@ -148,19 +168,30 @@ function buildChunkScore(params: {
   const { queryTokens, queryText, chunk, item } = params;
   const chunkText = normalizeSearchText(chunk.text);
   const titleText = normalizeSearchText(item.title);
-  if (!chunkText) return 0;
+  if (!chunkText) {
+    return {
+      score: 0,
+      matchedTokenCount: 0,
+      queryTokenCount: queryTokens.length,
+      exactMatch: false
+    };
+  }
 
   let score = 0;
+  const matchedTokens = new Set<string>();
   queryTokens.forEach((token) => {
     if (!token) return;
     if (chunkText.includes(token)) {
       score += token.length >= 4 ? 4 : token.length >= 2 ? 2 : 1;
+      matchedTokens.add(token);
     }
     if (titleText.includes(token)) {
       score += 1.4;
+      matchedTokens.add(token);
     }
   });
 
+  const exactMatch = Boolean(queryText && chunkText.includes(queryText));
   if (queryText && chunkText.includes(queryText)) {
     score += 6;
   }
@@ -169,7 +200,63 @@ function buildChunkScore(params: {
     score += 0.4;
   }
 
-  return Math.round(score * 100) / 100;
+  return {
+    score: Math.round(score * 100) / 100,
+    matchedTokenCount: matchedTokens.size,
+    queryTokenCount: queryTokens.length,
+    exactMatch
+  };
+}
+
+function resolveCitationTrustLevel(confidence: number): LibraryCitation["trustLevel"] {
+  if (confidence >= 78) return "high";
+  if (confidence >= 55) return "medium";
+  return "low";
+}
+
+function resolveCitationRiskLevel(confidence: number): LibraryCitation["riskLevel"] {
+  if (confidence >= 78) return "low";
+  if (confidence >= 55) return "medium";
+  return "high";
+}
+
+function calculateCitationConfidence(input: {
+  score: number;
+  maxScore: number;
+  matchedTokenCount: number;
+  queryTokenCount: number;
+  exactMatch: boolean;
+  contentType: LibraryCitation["contentType"];
+}) {
+  const scorePart = input.maxScore > 0 ? (input.score / input.maxScore) * 62 : 0;
+  const coveragePart =
+    input.queryTokenCount > 0 ? (input.matchedTokenCount / input.queryTokenCount) * 28 : 0;
+  const exactMatchBonus = input.exactMatch ? 8 : 0;
+  const sourceBonus = input.contentType === "textbook" ? 4 : 0;
+  return clamp(scorePart + coveragePart + exactMatchBonus + sourceBonus, 0, 100);
+}
+
+function buildCitationReason(input: {
+  confidence: number;
+  matchedTokenCount: number;
+  queryTokenCount: number;
+  exactMatch: boolean;
+  contentType: LibraryCitation["contentType"];
+}) {
+  const reasons: string[] = [];
+  if (input.exactMatch) {
+    reasons.push("命中完整问题语句");
+  }
+  if (input.queryTokenCount > 0) {
+    reasons.push(`关键词覆盖 ${input.matchedTokenCount}/${input.queryTokenCount}`);
+  }
+  if (input.contentType === "textbook") {
+    reasons.push("来源为教材正文");
+  }
+  if (input.confidence < 55) {
+    reasons.push("匹配置信度偏低，建议人工复核");
+  }
+  return reasons.slice(0, 4);
 }
 
 export async function indexLibraryChunks(input: {
@@ -266,15 +353,27 @@ export async function retrieveLibraryCitations(input: {
     .map((chunk) => {
       const item = itemMap.get(chunk.itemId);
       if (!item) return null;
-      const score = buildChunkScore({ queryTokens, queryText, chunk, item });
-      if (score <= 0) return null;
+      const metrics = buildChunkScore({ queryTokens, queryText, chunk, item });
+      if (metrics.score <= 0) return null;
       return {
         chunk,
         item,
-        score
+        score: metrics.score,
+        matchedTokenCount: metrics.matchedTokenCount,
+        queryTokenCount: metrics.queryTokenCount,
+        exactMatch: metrics.exactMatch
       };
     })
-    .filter(Boolean) as Array<{ chunk: LibraryChunk; item: LearningLibraryItem; score: number }>;
+    .filter(Boolean) as Array<{
+    chunk: LibraryChunk;
+    item: LearningLibraryItem;
+    score: number;
+    matchedTokenCount: number;
+    queryTokenCount: number;
+    exactMatch: boolean;
+  }>;
+
+  const maxScore = scored.reduce((max, item) => Math.max(max, item.score), 0);
 
   const deduped = new Map<string, LibraryCitation>();
   scored
@@ -282,8 +381,26 @@ export async function retrieveLibraryCitations(input: {
       if (b.score !== a.score) return b.score - a.score;
       return b.chunk.indexedAt.localeCompare(a.chunk.indexedAt);
     })
-    .forEach(({ chunk, item, score }) => {
+    .forEach(({ chunk, item, score, matchedTokenCount, queryTokenCount, exactMatch }) => {
       if (deduped.has(chunk.itemId)) return;
+      const confidence = calculateCitationConfidence({
+        score,
+        maxScore,
+        matchedTokenCount,
+        queryTokenCount,
+        exactMatch,
+        contentType: chunk.contentType
+      });
+      const trustLevel = resolveCitationTrustLevel(confidence);
+      const riskLevel = resolveCitationRiskLevel(confidence);
+      const matchRatio = queryTokenCount > 0 ? clamp((matchedTokenCount / queryTokenCount) * 100, 0, 100) / 100 : 0;
+      const reason = buildCitationReason({
+        confidence,
+        matchedTokenCount,
+        queryTokenCount,
+        exactMatch,
+        contentType: chunk.contentType
+      });
       deduped.set(chunk.itemId, {
         chunkId: chunk.id,
         itemId: chunk.itemId,
@@ -293,11 +410,64 @@ export async function retrieveLibraryCitations(input: {
         contentType: chunk.contentType,
         snippet: chunk.text.slice(0, 220),
         score,
+        confidence,
+        trustLevel,
+        riskLevel,
+        matchRatio,
+        reason,
         knowledgePointIds: chunk.knowledgePointIds ?? []
       });
     });
 
   return Array.from(deduped.values()).slice(0, Math.max(1, Math.min(12, input.limit ?? 4)));
+}
+
+export function summarizeCitationGovernance(citations: LibraryCitation[]): CitationGovernanceSummary {
+  if (!citations.length) {
+    return {
+      total: 0,
+      averageConfidence: 0,
+      highTrustCount: 0,
+      mediumTrustCount: 0,
+      lowTrustCount: 0,
+      riskLevel: "high",
+      needsManualReview: true,
+      manualReviewReason: "未检索到教材依据"
+    };
+  }
+
+  const highTrustCount = citations.filter((item) => item.trustLevel === "high").length;
+  const mediumTrustCount = citations.filter((item) => item.trustLevel === "medium").length;
+  const lowTrustCount = citations.filter((item) => item.trustLevel === "low").length;
+  const averageConfidence = clamp(
+    citations.reduce((sum, item) => sum + item.confidence, 0) / citations.length,
+    0,
+    100
+  );
+
+  const lowRatio = lowTrustCount / citations.length;
+  const riskLevel: CitationGovernanceSummary["riskLevel"] =
+    lowRatio >= 0.5 || averageConfidence < 55
+      ? "high"
+      : lowRatio >= 0.25 || averageConfidence < 72
+        ? "medium"
+        : "low";
+  const needsManualReview = riskLevel !== "low";
+  const manualReviewReason =
+    lowTrustCount > 0
+      ? `低可信引用 ${lowTrustCount} 条，平均置信度 ${averageConfidence}`
+      : `平均置信度 ${averageConfidence}`;
+
+  return {
+    total: citations.length,
+    averageConfidence,
+    highTrustCount,
+    mediumTrustCount,
+    lowTrustCount,
+    riskLevel,
+    needsManualReview,
+    manualReviewReason
+  };
 }
 
 export function toCitationPrompts(citations: LibraryCitation[]) {

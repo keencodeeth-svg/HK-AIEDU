@@ -11,6 +11,11 @@ type CoachResponse = {
   hints: string[];
   checkpoints: string[];
   feedback?: string | null;
+  memory?: {
+    recentSessionCount: number;
+    recentQuestions: string[];
+    patternHint: string;
+  };
   provider?: string;
 };
 
@@ -174,6 +179,18 @@ export default function CoachPage() {
               我卡住了
             </button>
           </div>
+          {data.memory ? (
+            <div className="grid" style={{ gap: 8, marginTop: 12 }}>
+              <div className="badge">长期记忆</div>
+              <div>{data.memory.patternHint}</div>
+              <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                最近陪练 {data.memory.recentSessionCount} 次
+                {data.memory.recentQuestions?.length
+                  ? ` · 最近题目：${data.memory.recentQuestions.slice(0, 3).join("；")}`
+                  : ""}
+              </div>
+            </div>
+          ) : null}
           {data.provider ? (
             <div style={{ marginTop: 10, fontSize: 12, color: "var(--ink-1)" }}>模型来源：{data.provider}</div>
           ) : null}

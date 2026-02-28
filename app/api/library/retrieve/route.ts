@@ -1,7 +1,11 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getLearningLibraryItemById } from "@/lib/learning-library";
 import { canAccessLearningLibraryItem } from "@/lib/library-access";
-import { retrieveLibraryCitations, type LibraryCitation } from "@/lib/library-rag";
+import {
+  retrieveLibraryCitations,
+  summarizeCitationGovernance,
+  type LibraryCitation
+} from "@/lib/library-rag";
 import { badRequest, unauthorized, withApi } from "@/lib/api/http";
 import { parseSearchParams, v } from "@/lib/api/validation";
 
@@ -57,6 +61,7 @@ export const GET = withApi(async (request) => {
   ).filter((item): item is LibraryCitation => Boolean(item));
 
   return {
-    data: accessible
+    data: accessible,
+    governance: summarizeCitationGovernance(accessible)
   };
 });
