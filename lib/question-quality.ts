@@ -173,6 +173,37 @@ function mapDbMetric(row: DbQuestionQualityMetric): QuestionQualityMetric {
   };
 }
 
+function readQualityMetricsFromFile() {
+  return readJson<QuestionQualityMetric[]>(QUALITY_FILE, []);
+}
+
+function upsertQualityMetricToFile(metric: QuestionQualityMetric) {
+  const list = readQualityMetricsFromFile();
+  const index = list.findIndex((item) => item.questionId === metric.questionId);
+  if (index >= 0) {
+    list[index] = metric;
+  } else {
+    list.push(metric);
+  }
+  try {
+    writeJson(QUALITY_FILE, list);
+  } catch {
+    // file persistence is best-effort when db storage is unavailable
+  }
+}
+
+function isRecoverableQualityStoreError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("question_quality_metrics") ||
+    lower.includes("relation") ||
+    lower.includes("db:migrate") ||
+    lower.includes("schema") ||
+    lower.includes("does not exist")
+  );
+}
+
 function evaluateDuplicateRisk(
   input: Pick<QuestionQualityInput, "questionId" | "knowledgePointId" | "stem" | "answer">,
   candidates: QuestionQualityCandidate[]
@@ -374,15 +405,23 @@ export function evaluateQuestionQuality(
 
 export async function getQuestionQualityMetric(questionId: string) {
   if (!isDbEnabled()) {
-    const list = readJson<QuestionQualityMetric[]>(QUALITY_FILE, []);
+    const list = readQualityMetricsFromFile();
     return list.find((item) => item.questionId === questionId) ?? null;
   }
 
-  const row = await queryOne<DbQuestionQualityMetric>(
-    "SELECT * FROM question_quality_metrics WHERE question_id = $1",
-    [questionId]
-  );
-  return row ? mapDbMetric(row) : null;
+  try {
+    const row = await queryOne<DbQuestionQualityMetric>(
+      "SELECT * FROM question_quality_metrics WHERE question_id = $1",
+      [questionId]
+    );
+    return row ? mapDbMetric(row) : null;
+  } catch (error) {
+    if (!isRecoverableQualityStoreError(error)) {
+      throw error;
+    }
+    const list = readQualityMetricsFromFile();
+    return list.find((item) => item.questionId === questionId) ?? null;
+  }
 }
 
 export async function listQuestionQualityMetrics(params: {
@@ -395,7 +434,7 @@ export async function listQuestionQualityMetrics(params: {
   }
 
   if (!isDbEnabled()) {
-    const list = readJson<QuestionQualityMetric[]>(QUALITY_FILE, []);
+    const list = readQualityMetricsFromFile();
     const filtered = list.filter((item) => {
       if (ids && !ids.includes(item.questionId)) return false;
       if (params.isolated !== undefined && Boolean(item.isolated) !== params.isolated) return false;
@@ -421,8 +460,21 @@ export async function listQuestionQualityMetrics(params: {
     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY checked_at DESC
   `;
-  const rows = await query<DbQuestionQualityMetric>(sql, values);
-  return rows.map(mapDbMetric);
+  try {
+    const rows = await query<DbQuestionQualityMetric>(sql, values);
+    return rows.map(mapDbMetric);
+  } catch (error) {
+    if (!isRecoverableQualityStoreError(error)) {
+      throw error;
+    }
+    const list = readQualityMetricsFromFile();
+    const filtered = list.filter((item) => {
+      if (ids && !ids.includes(item.questionId)) return false;
+      if (params.isolated !== undefined && Boolean(item.isolated) !== params.isolated) return false;
+      return true;
+    });
+    return filtered.sort((a, b) => b.checkedAt.localeCompare(a.checkedAt));
+  }
 }
 
 export async function upsertQuestionQualityMetric(
@@ -433,7 +485,7 @@ export async function upsertQuestionQualityMetric(
   const isolated = Boolean(input.isolated);
 
   if (!isDbEnabled()) {
-    const list = readJson<QuestionQualityMetric[]>(QUALITY_FILE, []);
+    const list = readQualityMetricsFromFile();
     const index = list.findIndex((item) => item.questionId === input.questionId);
     const next: QuestionQualityMetric = {
       id: index >= 0 ? list[index].id : `qqm-${crypto.randomBytes(6).toString("hex")}`,
@@ -450,55 +502,73 @@ export async function upsertQuestionQualityMetric(
       issues: Array.from(new Set(input.issues)),
       checkedAt
     };
-
-    if (index >= 0) {
-      list[index] = next;
-    } else {
-      list.push(next);
-    }
-    writeJson(QUALITY_FILE, list);
+    upsertQualityMetricToFile(next);
     return next;
   }
 
-  const existing = await queryOne<DbQuestionQualityMetric>(
-    "SELECT * FROM question_quality_metrics WHERE question_id = $1",
-    [input.questionId]
-  );
+  const fallbackMetric: QuestionQualityMetric = {
+    id: `qqm-${crypto.randomBytes(6).toString("hex")}`,
+    questionId: input.questionId,
+    qualityScore: clampInt(input.qualityScore),
+    duplicateRisk: normalizeRisk(input.duplicateRisk),
+    ambiguityRisk: normalizeRisk(input.ambiguityRisk),
+    answerConsistency: clampInt(input.answerConsistency),
+    duplicateClusterId: input.duplicateClusterId ?? null,
+    answerConflict: Boolean(input.answerConflict),
+    riskLevel: normalizedRiskLevel,
+    isolated,
+    isolationReason: Array.from(new Set(input.isolationReason ?? [])),
+    issues: Array.from(new Set(input.issues)),
+    checkedAt
+  };
 
-  const row = await queryOne<DbQuestionQualityMetric>(
-    `INSERT INTO question_quality_metrics
-      (id, question_id, quality_score, duplicate_risk, ambiguity_risk, answer_consistency, duplicate_cluster_id, answer_conflict, risk_level, isolated, isolation_reason, issues, checked_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-     ON CONFLICT (question_id) DO UPDATE SET
-       quality_score = EXCLUDED.quality_score,
-       duplicate_risk = EXCLUDED.duplicate_risk,
-       ambiguity_risk = EXCLUDED.ambiguity_risk,
-       answer_consistency = EXCLUDED.answer_consistency,
-       duplicate_cluster_id = EXCLUDED.duplicate_cluster_id,
-       answer_conflict = EXCLUDED.answer_conflict,
-       risk_level = EXCLUDED.risk_level,
-       isolated = EXCLUDED.isolated,
-       isolation_reason = EXCLUDED.isolation_reason,
-       issues = EXCLUDED.issues,
-       checked_at = EXCLUDED.checked_at
-     RETURNING *`,
-    [
-      existing?.id ?? `qqm-${crypto.randomBytes(6).toString("hex")}`,
-      input.questionId,
-      clampInt(input.qualityScore),
-      normalizeRisk(input.duplicateRisk),
-      normalizeRisk(input.ambiguityRisk),
-      clampInt(input.answerConsistency),
-      input.duplicateClusterId ?? null,
-      Boolean(input.answerConflict),
-      normalizedRiskLevel,
-      isolated,
-      Array.from(new Set(input.isolationReason ?? [])),
-      Array.from(new Set(input.issues)),
-      checkedAt
-    ]
-  );
-  return row ? mapDbMetric(row) : null;
+  try {
+    const existing = await queryOne<DbQuestionQualityMetric>(
+      "SELECT * FROM question_quality_metrics WHERE question_id = $1",
+      [input.questionId]
+    );
+
+    const row = await queryOne<DbQuestionQualityMetric>(
+      `INSERT INTO question_quality_metrics
+        (id, question_id, quality_score, duplicate_risk, ambiguity_risk, answer_consistency, duplicate_cluster_id, answer_conflict, risk_level, isolated, isolation_reason, issues, checked_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       ON CONFLICT (question_id) DO UPDATE SET
+         quality_score = EXCLUDED.quality_score,
+         duplicate_risk = EXCLUDED.duplicate_risk,
+         ambiguity_risk = EXCLUDED.ambiguity_risk,
+         answer_consistency = EXCLUDED.answer_consistency,
+         duplicate_cluster_id = EXCLUDED.duplicate_cluster_id,
+         answer_conflict = EXCLUDED.answer_conflict,
+         risk_level = EXCLUDED.risk_level,
+         isolated = EXCLUDED.isolated,
+         isolation_reason = EXCLUDED.isolation_reason,
+         issues = EXCLUDED.issues,
+         checked_at = EXCLUDED.checked_at
+       RETURNING *`,
+      [
+        existing?.id ?? fallbackMetric.id,
+        input.questionId,
+        fallbackMetric.qualityScore,
+        fallbackMetric.duplicateRisk,
+        fallbackMetric.ambiguityRisk,
+        fallbackMetric.answerConsistency,
+        fallbackMetric.duplicateClusterId,
+        fallbackMetric.answerConflict,
+        fallbackMetric.riskLevel,
+        fallbackMetric.isolated,
+        fallbackMetric.isolationReason,
+        fallbackMetric.issues,
+        checkedAt
+      ]
+    );
+    return row ? mapDbMetric(row) : fallbackMetric;
+  } catch (error) {
+    if (!isRecoverableQualityStoreError(error)) {
+      throw error;
+    }
+    upsertQualityMetricToFile(fallbackMetric);
+    return fallbackMetric;
+  }
 }
 
 export async function evaluateAndUpsertQuestionQuality(params: {
@@ -558,17 +628,35 @@ export async function setQuestionIsolation(input: {
 
 export async function deleteQuestionQualityMetric(questionId: string) {
   if (!isDbEnabled()) {
-    const list = readJson<QuestionQualityMetric[]>(QUALITY_FILE, []);
+    const list = readQualityMetricsFromFile();
     const next = list.filter((item) => item.questionId !== questionId);
-    writeJson(QUALITY_FILE, next);
+    try {
+      writeJson(QUALITY_FILE, next);
+    } catch {
+      // best effort
+    }
     return list.length !== next.length;
   }
 
-  const rows = await query<{ id: string }>(
-    "DELETE FROM question_quality_metrics WHERE question_id = $1 RETURNING id",
-    [questionId]
-  );
-  return rows.length > 0;
+  try {
+    const rows = await query<{ id: string }>(
+      "DELETE FROM question_quality_metrics WHERE question_id = $1 RETURNING id",
+      [questionId]
+    );
+    return rows.length > 0;
+  } catch (error) {
+    if (!isRecoverableQualityStoreError(error)) {
+      throw error;
+    }
+    const list = readQualityMetricsFromFile();
+    const next = list.filter((item) => item.questionId !== questionId);
+    try {
+      writeJson(QUALITY_FILE, next);
+    } catch {
+      // best effort
+    }
+    return list.length !== next.length;
+  }
 }
 
 export function attachQualityFields<T extends { id: string }>(

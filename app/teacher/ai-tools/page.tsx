@@ -66,9 +66,12 @@ export default function TeacherAiToolsPage() {
   const [paperError, setPaperError] = useState<string | null>(null);
   const [outlineForm, setOutlineForm] = useState({ classId: "", topic: "", knowledgePointIds: [] as string[] });
   const [outlineResult, setOutlineResult] = useState<any>(null);
+  const [outlineError, setOutlineError] = useState<string | null>(null);
   const [wrongForm, setWrongForm] = useState({ classId: "", rangeDays: 7 });
   const [wrongResult, setWrongResult] = useState<any>(null);
+  const [wrongError, setWrongError] = useState<string | null>(null);
   const [reviewPackResult, setReviewPackResult] = useState<any>(null);
+  const [reviewPackError, setReviewPackError] = useState<string | null>(null);
   const [reviewPackAssigningId, setReviewPackAssigningId] = useState<string | null>(null);
   const [reviewPackAssigningAll, setReviewPackAssigningAll] = useState(false);
   const [reviewPackAssignMessage, setReviewPackAssignMessage] = useState<string | null>(null);
@@ -91,6 +94,7 @@ export default function TeacherAiToolsPage() {
     explanation: ""
   });
   const [checkResult, setCheckResult] = useState<any>(null);
+  const [checkError, setCheckError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -157,12 +161,19 @@ export default function TeacherAiToolsPage() {
     event.preventDefault();
     if (!outlineForm.classId || !outlineForm.topic) return;
     setLoading(true);
+    setOutlineError(null);
     const res = await fetch("/api/teacher/lesson/outline", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(outlineForm)
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setOutlineResult(null);
+      setOutlineError(data?.error ?? data?.message ?? "生成讲稿失败，请稍后重试");
+      setLoading(false);
+      return;
+    }
     setOutlineResult(data?.data ?? null);
     setLoading(false);
   }
@@ -171,12 +182,19 @@ export default function TeacherAiToolsPage() {
     event.preventDefault();
     if (!wrongForm.classId) return;
     setLoading(true);
+    setWrongError(null);
     const res = await fetch("/api/teacher/lesson/wrong-review", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(wrongForm)
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setWrongResult(null);
+      setWrongError(data?.error ?? data?.message ?? "生成讲评脚本失败，请稍后重试");
+      setLoading(false);
+      return;
+    }
     setWrongResult(data?.data ?? null);
     setLoading(false);
   }
@@ -184,6 +202,7 @@ export default function TeacherAiToolsPage() {
   async function handleReviewPack(event: React.FormEvent) {
     event.preventDefault();
     if (!wrongForm.classId) return;
+    setReviewPackError(null);
     setReviewPackAssignMessage(null);
     setReviewPackAssignError(null);
     setReviewPackDispatchQuality(null);
@@ -195,7 +214,13 @@ export default function TeacherAiToolsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(wrongForm)
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setReviewPackResult(null);
+      setReviewPackError(data?.error ?? data?.message ?? "生成讲评包失败，请稍后重试");
+      setLoading(false);
+      return;
+    }
     setReviewPackResult(data?.data ?? null);
     setLoading(false);
   }
@@ -203,6 +228,7 @@ export default function TeacherAiToolsPage() {
   async function handleCheckQuestion(event: React.FormEvent) {
     event.preventDefault();
     setLoading(true);
+    setCheckError(null);
     const res = await fetch("/api/teacher/questions/check", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -214,7 +240,13 @@ export default function TeacherAiToolsPage() {
         explanation: checkForm.explanation
       })
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setCheckResult(null);
+      setCheckError(data?.error ?? data?.message ?? "题目纠错失败，请稍后重试");
+      setLoading(false);
+      return;
+    }
     setCheckResult(data?.data ?? null);
     setLoading(false);
   }
@@ -646,6 +678,7 @@ export default function TeacherAiToolsPage() {
             {loading ? "生成中..." : "生成讲稿"}
           </button>
         </form>
+        {outlineError ? <div className="status-note error" style={{ marginTop: 8 }}>{outlineError}</div> : null}
 
         {outlineResult?.outline ? (
           <div className="grid" style={{ gap: 12, marginTop: 12 }}>
@@ -724,6 +757,7 @@ export default function TeacherAiToolsPage() {
             {loading ? "生成中..." : "生成讲评脚本"}
           </button>
         </form>
+        {wrongError ? <div className="status-note error" style={{ marginTop: 8 }}>{wrongError}</div> : null}
 
         {wrongResult?.script ? (
           <div className="grid" style={{ gap: 12, marginTop: 12 }}>
@@ -797,6 +831,7 @@ export default function TeacherAiToolsPage() {
             {loading ? "生成中..." : "生成讲评包"}
           </button>
         </form>
+        {reviewPackError ? <div className="status-note error" style={{ marginTop: 8 }}>{reviewPackError}</div> : null}
 
         {reviewPackResult ? (
           <div className="grid" style={{ gap: 12, marginTop: 12 }}>
@@ -1047,6 +1082,7 @@ export default function TeacherAiToolsPage() {
             {loading ? "检查中..." : "开始纠错"}
           </button>
         </form>
+        {checkError ? <div className="status-note error" style={{ marginTop: 8 }}>{checkError}</div> : null}
 
         {checkResult ? (
           <div className="grid" style={{ gap: 8, marginTop: 12 }}>

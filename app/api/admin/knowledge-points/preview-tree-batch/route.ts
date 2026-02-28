@@ -1,15 +1,18 @@
 import { requireRole } from "@/lib/guard";
 import { generateKnowledgeTreeDraft } from "@/lib/ai";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { isAllowedSubject, previewTreeBatchBodySchema } from "@/lib/api/schemas/admin";
 import { parseJson } from "@/lib/api/validation";
+import { createAdminRoute } from "@/lib/api/domains";
 export const dynamic = "force-dynamic";
 
-export const POST = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
+export const POST = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
 
   const body = await parseJson(request, previewTreeBatchBodySchema);
 
@@ -73,5 +76,14 @@ export const POST = withApi(async (request) => {
     items.push({ subject: combo.subject, grade: combo.grade, units: draft.units });
   }
 
-  return { items, failed, summary: { requested: combos.length, generated: items.length, failed: failed.length } };
+  if (!items.length && failed.length) {
+    const brief = failed
+      .slice(0, 3)
+      .map((item) => `${item.subject}-${item.grade}：${item.reason}`)
+      .join("；");
+    badRequest(brief ? `批量预览失败：${brief}` : "批量预览失败，请检查模型配置");
+  }
+
+    return { items, failed, summary: { requested: combos.length, generated: items.length, failed: failed.length } };
+  }
 });

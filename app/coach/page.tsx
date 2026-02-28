@@ -29,16 +29,24 @@ export default function CoachPage() {
   const [hintIndex, setHintIndex] = useState(0);
   const [checkpointIndex, setCheckpointIndex] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function startCoach() {
     if (!question.trim()) return;
     setLoading(true);
+    setError(null);
     const res = await fetch("/api/ai/coach", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, subject, grade })
     });
-    const payload = await res.json();
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setData(null);
+      setError(payload?.error ?? payload?.message ?? "陪练生成失败，请稍后重试");
+      setLoading(false);
+      return;
+    }
     setData(payload?.data ?? null);
     setStepIndex(1);
     setHintIndex(0);
@@ -49,12 +57,18 @@ export default function CoachPage() {
   async function submitThinking() {
     if (!question.trim() || !studentAnswer.trim()) return;
     setLoading(true);
+    setError(null);
     const res = await fetch("/api/ai/coach", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, subject, grade, studentAnswer })
     });
-    const payload = await res.json();
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(payload?.error ?? payload?.message ?? "思路反馈失败，请稍后重试");
+      setLoading(false);
+      return;
+    }
     setData(payload?.data ?? null);
     setLoading(false);
   }
@@ -131,6 +145,7 @@ export default function CoachPage() {
             提交我的思路
           </button>
         </div>
+        {error ? <div className="status-note error" style={{ marginTop: 8 }}>{error}</div> : null}
       </Card>
 
       {data ? (

@@ -235,7 +235,13 @@ export default function PracticePage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ questionId })
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setExplainPack(null);
+      setError(data?.error ?? data?.message ?? "AI 讲解生成失败");
+      setExplainLoading(false);
+      return;
+    }
     setExplainPack(data?.data ?? null);
     setExplainLoading(false);
   }, []);
@@ -289,16 +295,19 @@ export default function PracticePage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ questionId: question.id, studentAnswer: answer })
     });
-    const data = await res.json();
-    if (res.ok) {
-      setVariantPack({
-        analysis: data?.data?.explanation?.analysis ?? "",
-        hints: data?.data?.explanation?.hints ?? [],
-        variants: data?.data?.variants ?? []
-      });
-      setVariantAnswers({});
-      setVariantResults({});
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(data?.error ?? data?.message ?? "变式生成失败，请稍后重试");
+      setLoadingVariants(false);
+      return;
     }
+    setVariantPack({
+      analysis: data?.data?.explanation?.analysis ?? "",
+      hints: data?.data?.explanation?.hints ?? [],
+      variants: data?.data?.variants ?? []
+    });
+    setVariantAnswers({});
+    setVariantResults({});
     setLoadingVariants(false);
   }
 

@@ -2,7 +2,7 @@ import { requireRole } from "@/lib/guard";
 import { createQuestion, getKnowledgePoints, getQuestions } from "@/lib/content";
 import { generateQuestionDraft } from "@/lib/ai";
 import { addAdminLog } from "@/lib/admin-log";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { evaluateAndUpsertQuestionQuality } from "@/lib/question-quality";
 import {
   generateBatchBodySchema,
@@ -10,6 +10,7 @@ import {
   normalizeDifficulty
 } from "@/lib/api/schemas/admin";
 import { parseJson } from "@/lib/api/validation";
+import { createAdminRoute } from "@/lib/api/domains";
 export const dynamic = "force-dynamic";
 
 function normalizeStem(text: string) {
@@ -28,11 +29,13 @@ function shuffle<T>(arr: T[]) {
   return copy;
 }
 
-export const POST = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
+export const POST = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
 
   const body = await parseJson(request, generateBatchBodySchema);
   const subject = body.subject?.trim();
@@ -147,13 +150,22 @@ export const POST = withApi(async (request) => {
     });
   }
 
-  await addAdminLog({
-    adminId: user.id,
-    action: "ai_generate_batch",
-    entityType: "question",
-    entityId: null,
-    detail: `count=${total}, created=${created.length}, failed=${failed.length}`
-  });
+  if (!created.length) {
+    const brief = failed
+      .slice(0, 3)
+      .map((item) => `第 ${item.index + 1} 题：${item.reason}`)
+      .join("；");
+    badRequest(brief ? `AI 批量生成失败：${brief}` : "AI 批量生成失败，请检查模型配置");
+  }
 
-  return { created, failed };
+    await addAdminLog({
+      adminId: user.id,
+      action: "ai_generate_batch",
+      entityType: "question",
+      entityId: null,
+      detail: `count=${total}, created=${created.length}, failed=${failed.length}`
+    });
+
+    return { created, failed };
+  }
 });

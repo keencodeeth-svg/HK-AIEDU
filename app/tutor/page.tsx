@@ -18,16 +18,25 @@ export default function TutorPage() {
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [showFavorites, setShowFavorites] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleAsk() {
     if (!question) return;
     setLoading(true);
+    setError(null);
     const res = await fetch("/api/ai/assist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, subject: "math", grade: "4" })
     });
-    const data = await res.json();
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setAnswer(null);
+      setError(payload?.error ?? payload?.message ?? "AI 辅导暂不可用，请稍后重试");
+      setLoading(false);
+      return;
+    }
+    const data = payload?.data ?? payload;
     setAnswer(data);
     if (data?.answer) {
       const historyRes = await fetch("/api/ai/history", {
@@ -35,8 +44,8 @@ export default function TutorPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question, answer: data.answer })
       });
-      const historyData = await historyRes.json();
-      if (historyData?.data) {
+      const historyData = await historyRes.json().catch(() => ({}));
+      if (historyRes.ok && historyData?.data) {
         setHistory((prev) => [historyData.data, ...prev]);
       }
     }
@@ -105,6 +114,7 @@ export default function TutorPage() {
         <button className="button primary" style={{ marginTop: 12 }} onClick={handleAsk}>
           {loading ? "思考中..." : "提问"}
         </button>
+        {error ? <div className="status-note error" style={{ marginTop: 8 }}>{error}</div> : null}
       </Card>
 
       {answer ? (
