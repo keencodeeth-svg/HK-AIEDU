@@ -45,46 +45,6 @@ jobs:
       - name: Lint
         run: npm run lint
 
-  api-tests:
-    if: ${{ false }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    env:
-      LLM_PROVIDER_CHAIN: mock
-      LLM_PROVIDER: mock
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build for API tests
-        run: npm run build
-
-      - name: API integration tests
-        env:
-          API_TEST_SERVER_MODE: start
-          API_TEST_FALLBACK_TO_DEV: "0"
-          API_TEST_SCOPE: health
-        run: |
-          set -o pipefail
-          timeout 30m npm run test:api 2>&1 | tee api-tests.log
-
-      - name: Upload API test log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: api-tests-log-${{ github.run_id }}-${{ github.run_attempt }}
-          path: api-tests.log
-          if-no-files-found: ignore
-
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
