@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Card from "@/components/Card";
 
 export default function AdminRegisterPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
@@ -27,8 +25,7 @@ export default function AdminRegisterPage() {
       if (!res.ok) {
         throw new Error(data?.error ?? "注册失败");
       }
-      router.replace("/admin");
-      router.refresh();
+      window.location.assign("/admin");
     } catch (err) {
       setError((err as Error).message);
     } finally {

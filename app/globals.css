@@ -464,6 +464,17 @@ a {
   align-items: start;
 }
 
+.student-overview-grid {
+  display: grid;
+  gap: var(--grid-gap);
+  align-items: start;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+}
+
+.student-overview-grid > .card {
+  align-self: start;
+}
+
 .stack-8 {
   display: grid;
   gap: 8px;
@@ -1469,6 +1480,10 @@ html[data-density="compact"] .main {
 
 @media (max-width: 1080px) {
   .app-shell.with-side-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .student-overview-grid {
     grid-template-columns: 1fr;
   }
 

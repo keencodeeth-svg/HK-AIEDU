@@ -2,12 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import Card from "@/components/Card";
 import { trackEvent } from "@/lib/analytics-client";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [role, setRole] = useState<"student" | "teacher" | "parent" | "admin">("student");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -69,8 +67,7 @@ export default function LoginPage() {
             : data.role === "parent"
               ? "/parent"
               : "/student";
-      router.replace(target);
-      router.refresh();
+      window.location.assign(target);
     } catch (err) {
       setError((err as Error).message);
     } finally {
