@@ -13,7 +13,7 @@ import { getWrongReviewItemsByUser } from "@/lib/wrong-review";
 
 export const dynamic = "force-dynamic";
 
-type AlertActionType = "assign_review" | "notify_student" | "mark_done";
+type AlertActionType = "assign_review" | "notify_student" | "auto_chain" | "mark_done";
 
 const actionParamsSchema = v.object<{ id: string }>(
   {
@@ -31,7 +31,7 @@ const actionBodySchema = v.object<{ actionType?: string; note?: string }>(
 );
 
 function parseActionType(value: string | undefined): AlertActionType {
-  if (value === "assign_review" || value === "notify_student" || value === "mark_done") {
+  if (value === "assign_review" || value === "notify_student" || value === "auto_chain" || value === "mark_done") {
     return value;
   }
   badRequest("invalid actionType");
@@ -57,6 +57,9 @@ function summarizeActionResult(params: {
   }
   if (actionType === "notify_student") {
     return `发送提醒：通知 ${notifications} 人。`;
+  }
+  if (actionType === "auto_chain") {
+    return `闭环动作：影响 ${affectedStudents} 人，创建 ${createdTasks} 条修复任务，跳过 ${skippedTasks} 条，累计通知 ${notifications} 人。`;
   }
   return `预警已确认，影响 ${affectedStudents} 人。`;
 }
@@ -98,19 +101,22 @@ export const POST = withApi(async (request, context) => {
   let skippedTasks = 0;
   let notifications = 0;
 
-  if (actionType === "mark_done") {
+  const acknowledgeAction = async () => {
     const ack = await acknowledgeTeacherAlert({
       teacherId: user.id,
       alertId: target.id,
       note: body.note ?? "一键动作已处理"
     });
-    status = "acknowledged";
-    acknowledgedAt = ack?.createdAt ?? new Date().toISOString();
-  } else if (actionType === "notify_student") {
+
+    return ack?.createdAt ?? new Date().toISOString();
+  };
+
+  const sendReminderNotifications = async () => {
     const title = target.type === "student-risk" ? "学习风险提醒" : "知识点修复提醒";
-    const content = target.type === "student-risk"
-      ? `老师提醒：${target.riskReason}。建议动作：${target.recommendedAction}`
-      : `班级提醒：知识点「${target.knowledgePoint?.title ?? "重点知识点"}」需重点修复。${target.recommendedAction}`;
+    const content =
+      target.type === "student-risk"
+        ? `老师提醒：${target.riskReason}。建议动作：${target.recommendedAction}`
+        : `班级提醒：知识点「${target.knowledgePoint?.title ?? "重点知识点"}」需重点修复。${target.recommendedAction}`;
 
     for (const studentId of studentIds.slice(0, 60)) {
       await createNotification({
@@ -121,7 +127,9 @@ export const POST = withApi(async (request, context) => {
       });
       notifications += 1;
     }
-  } else if (actionType === "assign_review") {
+  };
+
+  const assignReviewTasks = async () => {
     const allQuestions = await getQuestions();
 
     const defaultQuestionIds = allQuestions
@@ -134,7 +142,7 @@ export const POST = withApi(async (request, context) => {
       .slice(0, 3)
       .map((question) => question.id);
 
-    for (const studentId of studentIds.slice(0, 20)) {
+    for (const studentId of studentIds.slice(0, 30)) {
       let questionIds = defaultQuestionIds;
       const reviewItems = await getWrongReviewItemsByUser(studentId, false);
       const targetedReviewIds = reviewItems
@@ -175,6 +183,20 @@ export const POST = withApi(async (request, context) => {
         notifications += 1;
       }
     }
+  };
+
+  if (actionType === "mark_done") {
+    acknowledgedAt = await acknowledgeAction();
+    status = "acknowledged";
+  } else if (actionType === "notify_student") {
+    await sendReminderNotifications();
+  } else if (actionType === "assign_review") {
+    await assignReviewTasks();
+  } else if (actionType === "auto_chain") {
+    await assignReviewTasks();
+    await sendReminderNotifications();
+    acknowledgedAt = await acknowledgeAction();
+    status = "acknowledged";
   }
 
   const actionDetail = summarizeActionResult({
@@ -240,7 +262,7 @@ export const POST = withApi(async (request, context) => {
         createdTasks,
         skippedTasks,
         notifications,
-        dueDate: actionType === "assign_review" ? dueDate : null,
+        dueDate: actionType === "assign_review" || actionType === "auto_chain" ? dueDate : null,
         message: actionDetail
       }
     }

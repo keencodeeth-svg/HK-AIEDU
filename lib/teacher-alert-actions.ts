@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { readJson, writeJson } from "./storage";
 import { isDbEnabled, query, queryOne } from "./db";
 
-export type TeacherAlertActionType = "assign_review" | "notify_student" | "mark_done";
+export type TeacherAlertActionType = "assign_review" | "notify_student" | "auto_chain" | "mark_done";
 
 export type TeacherAlertAction = {
   id: string;
@@ -27,6 +27,7 @@ type DbAlertAction = {
 function toActionType(value: string): TeacherAlertActionType {
   if (value === "assign_review") return value;
   if (value === "notify_student") return value;
+  if (value === "auto_chain") return value;
   return "mark_done";
 }
 

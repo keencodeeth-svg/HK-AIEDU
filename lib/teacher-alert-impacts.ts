@@ -7,7 +7,7 @@ export type TeacherAlertImpactBaseline = {
   status: "active" | "acknowledged";
   metrics: Record<string, number | string | null>;
   recommendedAction?: string | null;
-  actionType?: "assign_review" | "notify_student" | "mark_done" | null;
+  actionType?: "assign_review" | "notify_student" | "auto_chain" | "mark_done" | null;
 };
 
 export type TeacherAlertImpactRecord = {
@@ -137,6 +137,7 @@ function parseBaseline(input: unknown): TeacherAlertImpactBaseline {
     actionType:
       data.actionType === "assign_review" ||
       data.actionType === "notify_student" ||
+      data.actionType === "auto_chain" ||
       data.actionType === "mark_done"
         ? data.actionType
         : null

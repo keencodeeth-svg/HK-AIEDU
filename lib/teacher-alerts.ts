@@ -25,7 +25,7 @@ export type TeacherAlert = {
   status: "active" | "acknowledged";
   acknowledgedAt?: string | null;
   ackNote?: string | null;
-  lastActionType?: "assign_review" | "notify_student" | "mark_done" | null;
+  lastActionType?: "assign_review" | "notify_student" | "auto_chain" | "mark_done" | null;
   lastActionAt?: string | null;
   lastActionBy?: string | null;
   student?: {

@@ -268,7 +268,7 @@ export default function TeacherPage() {
     setAcknowledgingAlertId(null);
   }
 
-  async function runAlertAction(alertId: string, actionType: "assign_review" | "notify_student") {
+  async function runAlertAction(alertId: string, actionType: "assign_review" | "notify_student" | "auto_chain") {
     const actionKey = `${alertId}:${actionType}`;
     setActingAlertKey(actionKey);
     setError(null);
@@ -441,6 +441,13 @@ export default function TeacherPage() {
                     </p>
                   ) : null}
                   <div className="cta-row">
+                    <button
+                      className="button primary"
+                      onClick={() => runAlertAction(item.id, "auto_chain")}
+                      disabled={actingAlertKey === `${item.id}:auto_chain`}
+                    >
+                      {actingAlertKey === `${item.id}:auto_chain` ? "执行中..." : "一键闭环执行"}
+                    </button>
                     <button
                       className="button ghost"
                       onClick={() => runAlertAction(item.id, "assign_review")}

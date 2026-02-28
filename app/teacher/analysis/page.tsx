@@ -50,7 +50,7 @@ type AlertItem = {
   riskReason: string;
   recommendedAction: string;
   status: "active" | "acknowledged";
-  lastActionType?: "assign_review" | "notify_student" | "mark_done" | null;
+  lastActionType?: "assign_review" | "notify_student" | "auto_chain" | "mark_done" | null;
   lastActionAt?: string | null;
 };
 
@@ -155,7 +155,7 @@ export default function TeacherAnalysisPage() {
     setAcknowledgingAlertId(null);
   }
 
-  async function runAlertAction(alertId: string, actionType: "assign_review" | "notify_student") {
+  async function runAlertAction(alertId: string, actionType: "assign_review" | "notify_student" | "auto_chain") {
     const actionKey = `${alertId}:${actionType}`;
     setActingAlertKey(actionKey);
     setAlertActionMessage(null);
@@ -315,6 +315,13 @@ export default function TeacherAnalysisPage() {
                 </div>
               ) : null}
               <div className="cta-row">
+                <button
+                  className="button primary"
+                  onClick={() => runAlertAction(item.id, "auto_chain")}
+                  disabled={actingAlertKey === `${item.id}:auto_chain`}
+                >
+                  {actingAlertKey === `${item.id}:auto_chain` ? "执行中..." : "一键闭环执行"}
+                </button>
                 <button
                   className="button ghost"
                   onClick={() => runAlertAction(item.id, "assign_review")}
