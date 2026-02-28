@@ -57,18 +57,13 @@ function evaluateTaskOutputQuality(params: {
   provider: string;
   text: string;
 }) {
-  const quality = assessAiQuality({
+  return assessAiQuality({
     kind: resolveQualityKindByTask(params.taskType),
     taskType: params.taskType,
     provider: params.provider,
     textBlocks: [params.text],
     listCountHint: 1
   });
-  return {
-    confidenceScore: quality.confidenceScore,
-    minQualityScore: quality.minQualityScore ?? 0,
-    policyViolated: Boolean(quality.policyViolated)
-  };
 }
 
 async function runWithTimeout<T>(runner: () => Promise<T>, timeoutMs: number) {
@@ -157,6 +152,7 @@ type RoutedLlmResult = {
   provider: string;
   qualityScore?: number;
   policyHit: boolean;
+  quality?: ReturnType<typeof assessAiQuality>;
 };
 
 function recordAiCallLogSafe(input: Parameters<typeof recordAiCallLog>[0]) {
@@ -214,7 +210,8 @@ async function runCustomProviderAttempt(params: {
         text,
         provider: params.provider,
         qualityScore: quality?.confidenceScore,
-        policyHit: false
+        policyHit: false,
+        quality
       },
       stopProvider: false
     } as ProviderAttemptResult;
@@ -298,7 +295,8 @@ async function runConfiguredProviderAttempt(params: {
         text,
         provider: config.provider,
         qualityScore: quality?.confidenceScore,
-        policyHit: false
+        policyHit: false,
+        quality
       },
       stopProvider: false
     } as ProviderAttemptResult;
