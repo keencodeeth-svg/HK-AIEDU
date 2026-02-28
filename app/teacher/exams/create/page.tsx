@@ -57,7 +57,8 @@ export default function CreateTeacherExamPage() {
     questionCount: 10,
     knowledgePointId: "",
     difficulty: "medium",
-    questionType: "choice"
+    questionType: "choice",
+    includeIsolated: false
   });
 
   useEffect(() => {
@@ -127,7 +128,8 @@ export default function CreateTeacherExamPage() {
         questionCount: form.questionCount,
         knowledgePointId: form.knowledgePointId || undefined,
         difficulty: form.difficulty || undefined,
-        questionType: form.questionType || undefined
+        questionType: form.questionType || undefined,
+        includeIsolated: form.includeIsolated
       })
     });
     const payload = await res.json();
@@ -341,6 +343,14 @@ export default function CreateTeacherExamPage() {
             <EduIcon name="chart" />
             <p>考试发布后会自动分配给班级内学生，并支持自动保存与提交统计。</p>
           </div>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={form.includeIsolated}
+              onChange={(event) => setForm((prev) => ({ ...prev, includeIsolated: event.target.checked }))}
+            />
+            <span>允许使用隔离池高风险题（默认关闭）</span>
+          </label>
 
           {message ? <div className="status-note success">{message}</div> : null}
           {error ? <div className="status-note error">{error}</div> : null}

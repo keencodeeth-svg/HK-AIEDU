@@ -61,6 +61,7 @@ export function apiSuccess<T>(
     requestId?: string;
     traceId?: string;
     legacyRoot?: boolean;
+    headers?: HeadersInit;
   } = {}
 ) {
   const requestId = options.requestId ?? getRequestId(options.request);
@@ -92,9 +93,13 @@ export function apiSuccess<T>(
     }
   }
 
+  const headers = new Headers(options.headers);
+  headers.set("x-request-id", requestId);
+  headers.set("x-trace-id", traceId);
+
   return NextResponse.json(payload as ApiSuccessEnvelope<T>, {
     status: options.status ?? 200,
-    headers: { "x-request-id": requestId, "x-trace-id": traceId }
+    headers
   });
 }
 
@@ -106,6 +111,7 @@ export function apiError(
     request?: Request;
     requestId?: string;
     traceId?: string;
+    headers?: HeadersInit;
   } = {}
 ) {
   const requestId = options.requestId ?? getRequestId(options.request);
@@ -120,9 +126,12 @@ export function apiError(
     timestamp: getTimestamp(),
     details: options.details
   };
+  const headers = new Headers(options.headers);
+  headers.set("x-request-id", requestId);
+  headers.set("x-trace-id", traceId);
   return NextResponse.json(payload, {
     status,
-    headers: { "x-request-id": requestId, "x-trace-id": traceId }
+    headers
   });
 }
 

@@ -1,10 +1,12 @@
-import { withApi } from "@/lib/api/http";
-export const dynamic = "force-dynamic";
+import { createAdminRoute } from "@/lib/api/domains";
 
-export const GET = withApi(async () => {
-  return {
-    ok: true,
-    service: "k12-ai-tutor",
-    ts: new Date().toISOString()
-  };
+export const GET = createAdminRoute({
+  cache: "public-short",
+  handler: async () => {
+    return {
+      ok: true,
+      service: "k12-ai-tutor",
+      ts: new Date().toISOString()
+    };
+  }
 });

@@ -54,6 +54,13 @@ type ExamDetail = {
       wrongCount: number;
     }>;
   } | null;
+  access: {
+    stage: "upcoming" | "open" | "ended" | "closed";
+    canEnter: boolean;
+    canSubmit: boolean;
+    lockReason: string | null;
+    serverNow: string;
+  };
 };
 
 type SubmitResult = {
@@ -265,6 +272,9 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
 
   const lockedByTime = !submitted && remainingSeconds !== null && remainingSeconds <= 0;
   const lockedByStatus = !submitted && data?.exam.status === "closed";
+  const lockedByAccess = !submitted && !data?.access?.canSubmit;
+  const lockedByServer = lockedByStatus || lockedByAccess;
+  const lockReason = data?.access?.lockReason ?? (lockedByStatus ? "考试已关闭" : null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -380,7 +390,7 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
   }, [load]);
 
   const saveDraft = useCallback(async () => {
-    if (!data || submitted || saving || lockedByTime || lockedByStatus) return;
+    if (!data || submitted || saving || lockedByTime || lockedByServer) return;
 
     setSaving(true);
     try {
@@ -435,7 +445,7 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
     clearLocalDraft,
     clientStartedAt,
     data,
-    lockedByStatus,
+    lockedByServer,
     lockedByTime,
     online,
     params.id,
@@ -445,21 +455,21 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
   ]);
 
   useEffect(() => {
-    if (!dirty || submitted || lockedByTime || lockedByStatus) return;
+    if (!dirty || submitted || lockedByTime || lockedByServer) return;
     const timer = setTimeout(() => {
       saveDraft();
     }, 1200);
     return () => clearTimeout(timer);
-  }, [dirty, lockedByStatus, lockedByTime, saveDraft, submitted]);
+  }, [dirty, lockedByServer, lockedByTime, saveDraft, submitted]);
 
   useEffect(() => {
-    if (!online || !pendingLocalSync || submitted || saving || lockedByTime || lockedByStatus) return;
+    if (!online || !pendingLocalSync || submitted || saving || lockedByTime || lockedByServer) return;
     saveDraft();
-  }, [lockedByStatus, lockedByTime, online, pendingLocalSync, saveDraft, saving, submitted]);
+  }, [lockedByServer, lockedByTime, online, pendingLocalSync, saveDraft, saving, submitted]);
 
   const submitExam = useCallback(
     async (trigger: "manual" | "timeout") => {
-      if (!data || submitted || submitting || lockedByStatus) return;
+      if (!data || submitted || submitting || lockedByServer) return;
 
       if (!online) {
         const nextStartedAt = clientStartedAt ?? new Date().toISOString();
@@ -545,7 +555,7 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
       clientStartedAt,
       data,
       flushExamEvents,
-      lockedByStatus,
+      lockedByServer,
       online,
       params.id,
       submitted,
@@ -557,10 +567,12 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
 
   useEffect(() => {
     if (submitted || submitting || lockedByTime === false) return;
+    if (!startedAt) return;
+    if (data?.access && !data.access.canSubmit) return;
     if (timeupTriggered) return;
     setTimeupTriggered(true);
     submitExam("timeout");
-  }, [lockedByTime, submitExam, submitted, submitting, timeupTriggered]);
+  }, [data?.access, lockedByTime, startedAt, submitExam, submitted, submitting, timeupTriggered]);
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -601,7 +613,15 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
             {data.class.name} · {SUBJECT_LABELS[data.class.subject] ?? data.class.subject} · {data.class.grade} 年级
           </div>
         </div>
-        <span className="chip">{submitted ? "已提交" : lockedByStatus ? "考试已关闭" : "考试进行中"}</span>
+        <span className="chip">
+          {submitted
+            ? "已提交"
+            : data.access.stage === "upcoming"
+              ? "待开始"
+              : data.access.stage === "open"
+                ? "考试进行中"
+                : "不可作答"}
+        </span>
       </div>
 
       <Card title="考试信息" tag="概览">
@@ -648,9 +668,9 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
               </div>
             )}
             {syncNotice ? <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-1)" }}>{syncNotice}</div> : null}
-            {lockedByStatus ? (
+            {lockReason ? (
               <div style={{ marginTop: 8, fontSize: 12, color: "#b42318" }}>
-                教师已关闭本场考试，当前仅可查看作答记录。
+                {lockReason}，当前仅可查看作答记录。
               </div>
             ) : null}
           </div>
@@ -664,7 +684,7 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
               className="button secondary"
               type="button"
               onClick={saveDraft}
-              disabled={saving || submitting || lockedByTime || lockedByStatus}
+              disabled={saving || submitting || lockedByTime || lockedByServer}
             >
               {saving ? "保存中..." : "保存进度"}
             </button>
@@ -687,7 +707,7 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
                       name={question.id}
                       value={option}
                       checked={answers[question.id] === option}
-                      disabled={submitted || lockedByTime || lockedByStatus || submitting}
+                      disabled={submitted || lockedByTime || lockedByServer || submitting}
                       onChange={(event) => {
                         if (!startedAt) {
                           setClientStartedAt(new Date().toISOString());
@@ -720,13 +740,13 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
               ) : null}
             </div>
           ) : (
-            <button className="button primary" type="submit" disabled={submitting || !online || lockedByStatus}>
+            <button className="button primary" type="submit" disabled={submitting || !online || lockedByServer}>
               {submitting
                 ? "提交中..."
                 : !online
                   ? "离线状态不可提交"
-                  : lockedByStatus
-                    ? "考试已关闭"
+                  : lockedByServer
+                    ? lockReason ?? "当前不可提交"
                     : lockedByTime
                       ? "时间已结束，立即提交"
                       : "提交考试"}

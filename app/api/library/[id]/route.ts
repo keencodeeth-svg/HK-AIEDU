@@ -7,10 +7,9 @@ import {
 } from "@/lib/learning-library";
 import { addAdminLog } from "@/lib/admin-log";
 import { requireRole } from "@/lib/guard";
-import { notFound, unauthorized, withApi } from "@/lib/api/http";
+import { notFound, unauthorized } from "@/lib/api/http";
 import { parseParams, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const paramsSchema = v.object<{ id: string }>(
   {
@@ -19,64 +18,70 @@ const paramsSchema = v.object<{ id: string }>(
   { allowUnknown: true }
 );
 
-export const GET = withApi(async (_request, context) => {
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
-  }
+export const GET = createLearningRoute({
+  cache: "private-short",
+  handler: async ({ params }) => {
+    const user = await getCurrentUser();
+    if (!user) {
+      unauthorized();
+    }
 
-  const params = parseParams(context.params, paramsSchema);
-  const item = await getLearningLibraryItemById(params.id);
-  if (!item) {
-    notFound("not found");
-  }
+    const parsed = parseParams(params, paramsSchema);
+    const item = await getLearningLibraryItemById(parsed.id);
+    if (!item) {
+      notFound("not found");
+    }
 
-  const allowed = await canAccessLearningLibraryItem(user, item);
-  if (!allowed) {
-    notFound("not found");
-  }
+    const allowed = await canAccessLearningLibraryItem(user, item);
+    if (!allowed) {
+      notFound("not found");
+    }
 
-  if (item.status !== "published" && user.role !== "admin" && item.ownerId !== user.id) {
-    notFound("not found");
-  }
+    if (item.status !== "published" && user.role !== "admin" && item.ownerId !== user.id) {
+      notFound("not found");
+    }
 
-  const hydrated = await hydrateLearningLibraryItemContent(item);
-  const { contentStorageProvider, contentStorageKey, ...publicItem } = hydrated ?? item;
-  return { data: publicItem };
+    const hydrated = await hydrateLearningLibraryItemContent(item);
+    const { contentStorageProvider, contentStorageKey, ...publicItem } = hydrated ?? item;
+    return { data: publicItem };
+  }
 });
 
-export const DELETE = withApi(async (_request, context) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
-
-  const params = parseParams(context.params, paramsSchema);
-  const item = await getLearningLibraryItemById(params.id);
-  if (!item) {
-    notFound("not found");
-  }
-
-  const deleted = await deleteLearningLibraryItem(params.id);
-  if (!deleted) {
-    notFound("not found");
-  }
-
-  try {
-    await addAdminLog({
-      adminId: user.id,
-      action: "delete_library_item",
-      entityType: "library",
-      entityId: params.id,
-      detail: item.title
-    });
-  } catch {
-    // Logging failure should not block a completed delete operation.
-  }
-
-  return {
-    data: {
-      id: params.id
+export const DELETE = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ params }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
     }
-  };
+
+    const parsed = parseParams(params, paramsSchema);
+    const item = await getLearningLibraryItemById(parsed.id);
+    if (!item) {
+      notFound("not found");
+    }
+
+    const deleted = await deleteLearningLibraryItem(parsed.id);
+    if (!deleted) {
+      notFound("not found");
+    }
+
+    try {
+      await addAdminLog({
+        adminId: user.id,
+        action: "delete_library_item",
+        entityType: "library",
+        entityId: parsed.id,
+        detail: item.title
+      });
+    } catch {
+      // Logging failure should not block a completed delete operation.
+    }
+
+    return {
+      data: {
+        id: parsed.id
+      }
+    };
+  }
 });

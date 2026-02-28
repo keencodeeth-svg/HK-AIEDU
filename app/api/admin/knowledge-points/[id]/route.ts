@@ -2,24 +2,27 @@ import { deleteKnowledgePoint, updateKnowledgePoint } from "@/lib/content";
 import { requireRole } from "@/lib/guard";
 import { addAdminLog } from "@/lib/admin-log";
 import type { KnowledgePoint } from "@/lib/types";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import {
   adminIdParamsSchema,
   isAllowedSubject,
   updateKnowledgePointBodySchema
 } from "@/lib/api/schemas/admin";
 import { parseJson, parseParams } from "@/lib/api/validation";
+import { createAdminRoute } from "@/lib/api/domains";
 export const dynamic = "force-dynamic";
 
-export const PATCH = withApi(async (request, context) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
-  const params = parseParams(context.params, adminIdParamsSchema);
-  const body = await parseJson(request, updateKnowledgePointBodySchema);
+export const PATCH = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request, params: rawParams }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
+    const params = parseParams(rawParams, adminIdParamsSchema);
+    const body = await parseJson(request, updateKnowledgePointBodySchema);
 
-  const updates: Partial<KnowledgePoint> = {};
+    const updates: Partial<KnowledgePoint> = {};
 
   if (body.subject !== undefined) {
     const subject = body.subject.trim();
@@ -58,41 +61,45 @@ export const PATCH = withApi(async (request, context) => {
     updates.unit = unit || "未分单元";
   }
 
-  const next = await updateKnowledgePoint(params.id, updates);
-  if (!next) {
-    notFound("not found");
+    const next = await updateKnowledgePoint(params.id, updates);
+    if (!next) {
+      notFound("not found");
+    }
+
+    await addAdminLog({
+      adminId: user.id,
+      action: "update_knowledge_point",
+      entityType: "knowledge_point",
+      entityId: next.id,
+      detail: `${next.subject} ${next.grade} ${next.unit ?? "未分单元"} ${next.title}`
+    });
+
+    return { data: next };
   }
-
-  await addAdminLog({
-    adminId: user.id,
-    action: "update_knowledge_point",
-    entityType: "knowledge_point",
-    entityId: next.id,
-    detail: `${next.subject} ${next.grade} ${next.unit ?? "未分单元"} ${next.title}`
-  });
-
-  return { data: next };
 });
 
-export const DELETE = withApi(async (_request, context) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
+export const DELETE = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ params: rawParams }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
+    const params = parseParams(rawParams, adminIdParamsSchema);
+
+    const ok = await deleteKnowledgePoint(params.id);
+    if (!ok) {
+      notFound("not found");
+    }
+
+    await addAdminLog({
+      adminId: user.id,
+      action: "delete_knowledge_point",
+      entityType: "knowledge_point",
+      entityId: params.id,
+      detail: ""
+    });
+
+    return { ok: true };
   }
-  const params = parseParams(context.params, adminIdParamsSchema);
-
-  const ok = await deleteKnowledgePoint(params.id);
-  if (!ok) {
-    notFound("not found");
-  }
-
-  await addAdminLog({
-    adminId: user.id,
-    action: "delete_knowledge_point",
-    entityType: "knowledge_point",
-    entityId: params.id,
-    detail: ""
-  });
-
-  return { ok: true };
 });

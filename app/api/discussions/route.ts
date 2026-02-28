@@ -2,10 +2,9 @@ import { getCurrentUser, getUsers } from "@/lib/auth";
 import { getClassesByStudent, getClassesByTeacher } from "@/lib/classes";
 import { getStudentContext } from "@/lib/user-context";
 import { createDiscussionTopic, getDiscussionTopicsByClassIds } from "@/lib/discussions";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, parseSearchParams, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const discussionsQuerySchema = v.object<{ classId?: string }>(
   {
@@ -47,57 +46,63 @@ async function getAccessibleClassIds(role: string, userId: string) {
   return [];
 }
 
-export const GET = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
-  }
+export const GET = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user) {
+      unauthorized();
+    }
 
-  const query = parseSearchParams(request, discussionsQuerySchema);
-  const classId = query.classId;
-  const accessible = await getAccessibleClassIds(user.role, user.id);
-  if (!accessible.length) {
-    return { data: [] };
-  }
+    const query = parseSearchParams(request, discussionsQuerySchema);
+    const classId = query.classId;
+    const accessible = await getAccessibleClassIds(user.role, user.id);
+    if (!accessible.length) {
+      return { data: [] };
+    }
 
-  const classIds = classId && accessible.includes(classId) ? [classId] : accessible;
-  const topics = await getDiscussionTopicsByClassIds(classIds);
-  const users = await getUsers();
-  const userMap = new Map(users.map((item) => [item.id, item]));
-  const data = topics.map((topic) => ({
-    ...topic,
-    authorName: topic.authorId ? userMap.get(topic.authorId)?.name ?? "老师" : "老师"
-  }));
-  return { data };
+    const classIds = classId && accessible.includes(classId) ? [classId] : accessible;
+    const topics = await getDiscussionTopicsByClassIds(classIds);
+    const users = await getUsers();
+    const userMap = new Map(users.map((item) => [item.id, item]));
+    const data = topics.map((topic) => ({
+      ...topic,
+      authorName: topic.authorId ? userMap.get(topic.authorId)?.name ?? "老师" : "老师"
+    }));
+    return { data };
+  }
 });
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "teacher") {
-    unauthorized();
+export const POST = createLearningRoute({
+  role: "teacher",
+  cache: "private-realtime",
+  handler: async ({ request, user }) => {
+    if (!user || user.role !== "teacher") {
+      unauthorized();
+    }
+
+    const body = await parseJson(request, createTopicBodySchema);
+    const classId = body.classId?.trim();
+    const title = body.title?.trim();
+    const content = body.content?.trim();
+
+    if (!classId || !title || !content) {
+      badRequest("missing fields");
+    }
+
+    const accessible = await getAccessibleClassIds(user.role, user.id);
+    if (!accessible.includes(classId)) {
+      notFound("class not found");
+    }
+
+    const topic = await createDiscussionTopic({
+      classId,
+      authorId: user.id,
+      title,
+      content,
+      pinned: body.pinned
+    });
+
+    return { data: topic };
   }
-
-  const body = await parseJson(request, createTopicBodySchema);
-  const classId = body.classId?.trim();
-  const title = body.title?.trim();
-  const content = body.content?.trim();
-
-  if (!classId || !title || !content) {
-    badRequest("missing fields");
-  }
-
-  const accessible = await getAccessibleClassIds(user.role, user.id);
-  if (!accessible.includes(classId)) {
-    notFound("class not found");
-  }
-
-  const topic = await createDiscussionTopic({
-    classId,
-    authorId: user.id,
-    title,
-    content,
-    pinned: body.pinned
-  });
-
-  return { data: topic };
 });

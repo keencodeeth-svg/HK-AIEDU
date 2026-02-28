@@ -4,10 +4,9 @@ import {
   getLearningLibraryItemById,
   issueLearningLibraryShareToken
 } from "@/lib/learning-library";
-import { notFound, unauthorized, withApi } from "@/lib/api/http";
+import { notFound, unauthorized } from "@/lib/api/http";
 import { parseParams, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const paramsSchema = v.object<{ id: string }>(
   {
@@ -16,32 +15,35 @@ const paramsSchema = v.object<{ id: string }>(
   { allowUnknown: true }
 );
 
-export const POST = withApi(async (request, context) => {
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
-  }
-
-  const params = parseParams(context.params, paramsSchema);
-  const item = await getLearningLibraryItemById(params.id);
-  if (!item) {
-    notFound("not found");
-  }
-  const allowed = await canAccessLearningLibraryItem(user, item);
-  if (!allowed) {
-    notFound("not found");
-  }
-
-  const shared = await issueLearningLibraryShareToken(item.id);
-  if (!shared?.shareToken) {
-    notFound("not found");
-  }
-
-  const origin = new URL(request.url).origin;
-  return {
-    data: {
-      shareToken: shared.shareToken,
-      shareUrl: `${origin}/library/shared/${shared.shareToken}`
+export const POST = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request, params }) => {
+    const user = await getCurrentUser();
+    if (!user) {
+      unauthorized();
     }
-  };
+
+    const parsed = parseParams(params, paramsSchema);
+    const item = await getLearningLibraryItemById(parsed.id);
+    if (!item) {
+      notFound("not found");
+    }
+    const allowed = await canAccessLearningLibraryItem(user, item);
+    if (!allowed) {
+      notFound("not found");
+    }
+
+    const shared = await issueLearningLibraryShareToken(item.id);
+    if (!shared?.shareToken) {
+      notFound("not found");
+    }
+
+    const origin = new URL(request.url).origin;
+    return {
+      data: {
+        shareToken: shared.shareToken,
+        shareUrl: `${origin}/library/shared/${shared.shareToken}`
+      }
+    };
+  }
 });

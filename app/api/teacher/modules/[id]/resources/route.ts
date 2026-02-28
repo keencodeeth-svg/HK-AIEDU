@@ -1,9 +1,8 @@
 import { addModuleResource, deleteModuleResource, getModuleResources } from "@/lib/modules";
-import { badRequest, withApi } from "@/lib/api/http";
+import { badRequest } from "@/lib/api/http";
+import { createLearningRoute } from "@/lib/api/domains";
 import { requireTeacherModule } from "@/lib/guard";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
 
 const moduleResourceBodySchema = v.object<{
   title: string;
@@ -33,42 +32,51 @@ const deleteResourceBodySchema = v.object<{ resourceId: string }>(
   { allowUnknown: false }
 );
 
-export const GET = withApi(async (_request, context) => {
-  const moduleId = context.params.id;
-  await requireTeacherModule(moduleId);
-  const resources = await getModuleResources(moduleId);
-  return { data: resources };
+export const GET = createLearningRoute({
+  cache: "private-short",
+  handler: async ({ params }) => {
+    const moduleId = params.id;
+    await requireTeacherModule(moduleId);
+    const resources = await getModuleResources(moduleId);
+    return { data: resources };
+  }
 });
 
-export const POST = withApi(async (request, context) => {
-  const moduleId = context.params.id;
-  await requireTeacherModule(moduleId);
+export const POST = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request, params }) => {
+    const moduleId = params.id;
+    await requireTeacherModule(moduleId);
 
-  const body = await parseJson(request, moduleResourceBodySchema);
-  if (body.resourceType === "file" && !body.contentBase64) {
-    badRequest("missing file");
-  }
-  if (body.resourceType === "link" && !body.linkUrl) {
-    badRequest("missing link");
-  }
+    const body = await parseJson(request, moduleResourceBodySchema);
+    if (body.resourceType === "file" && !body.contentBase64) {
+      badRequest("missing file");
+    }
+    if (body.resourceType === "link" && !body.linkUrl) {
+      badRequest("missing link");
+    }
 
-  const created = await addModuleResource({
-    moduleId,
-    title: body.title,
-    resourceType: body.resourceType,
-    fileName: body.fileName,
-    mimeType: body.mimeType,
-    size: body.size,
-    contentBase64: body.contentBase64,
-    linkUrl: body.linkUrl
-  });
-  return { data: created };
+    const created = await addModuleResource({
+      moduleId,
+      title: body.title,
+      resourceType: body.resourceType,
+      fileName: body.fileName,
+      mimeType: body.mimeType,
+      size: body.size,
+      contentBase64: body.contentBase64,
+      linkUrl: body.linkUrl
+    });
+    return { data: created };
+  }
 });
 
-export const DELETE = withApi(async (request, context) => {
-  const moduleId = context.params.id;
-  await requireTeacherModule(moduleId);
-  const body = await parseJson(request, deleteResourceBodySchema);
-  await deleteModuleResource(body.resourceId);
-  return { ok: true };
+export const DELETE = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request, params }) => {
+    const moduleId = params.id;
+    await requireTeacherModule(moduleId);
+    const body = await parseJson(request, deleteResourceBodySchema);
+    await deleteModuleResource(body.resourceId);
+    return { ok: true };
+  }
 });

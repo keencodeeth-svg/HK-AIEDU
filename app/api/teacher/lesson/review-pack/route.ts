@@ -3,11 +3,11 @@ import { getClassById, getClassStudentIds } from "@/lib/classes";
 import { getKnowledgePoints, getQuestions } from "@/lib/content";
 import { generateWrongReviewScript } from "@/lib/ai";
 import { assessAiQuality } from "@/lib/ai-quality-control";
+import { listQuestionQualityMetrics } from "@/lib/question-quality";
 import { getAttemptsByUsers } from "@/lib/progress";
-import { notFound, unauthorized, withApi } from "@/lib/api/http";
+import { notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const bodySchema = v.object<{ classId: string; rangeDays?: number }>(
   {
@@ -119,7 +119,9 @@ function detectCommonCause(input: {
   return "strategy";
 }
 
-export const POST = withApi(async (request) => {
+export const POST = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
   const user = await getCurrentUser();
   if (!user || user.role !== "teacher") {
     unauthorized();
@@ -148,6 +150,11 @@ export const POST = withApi(async (request) => {
     kpWrongCount.set(item.knowledgePointId, (kpWrongCount.get(item.knowledgePointId) ?? 0) + 1);
     questionWrongCount.set(item.questionId, (questionWrongCount.get(item.questionId) ?? 0) + 1);
   });
+  const wrongQuestionIds = Array.from(questionWrongCount.keys());
+  const qualityMetrics = wrongQuestionIds.length
+    ? await listQuestionQualityMetrics({ questionIds: wrongQuestionIds })
+    : [];
+  const qualityByQuestionId = new Map(qualityMetrics.map((item) => [item.questionId, item]));
 
   const totalWrong = wrongAttempts.length || 1;
   const wrongPoints = Array.from(kpWrongCount.entries())
@@ -185,7 +192,9 @@ export const POST = withApi(async (request) => {
       title: item.title,
       questionId: matched?.questionId ?? null,
       stem: matched?.question?.stem ?? "请从班级错题本中挑选该知识点典型题。",
-      wrongCount: matched?.count ?? 0
+      wrongCount: matched?.count ?? 0,
+      qualityRiskLevel: matched?.questionId ? qualityByQuestionId.get(matched.questionId)?.riskLevel ?? null : null,
+      isolated: matched?.questionId ? qualityByQuestionId.get(matched.questionId)?.isolated ?? false : false
     };
   });
 
@@ -291,6 +300,20 @@ export const POST = withApi(async (request) => {
       (script.script?.length ?? 0) +
       (script.reminders?.length ?? 0)
   });
+  const highRiskWrongCount = qualityMetrics.filter((item) => item.riskLevel === "high").length;
+  const isolatedWrongCount = qualityMetrics.filter((item) => item.isolated).length;
+  const qualityGovernance = {
+    trackedWrongQuestionCount: qualityMetrics.length,
+    totalWrongQuestionCount: wrongQuestionIds.length,
+    highRiskWrongCount,
+    isolatedWrongCount,
+    recommendedAction:
+      isolatedWrongCount > 0
+        ? `检测到 ${isolatedWrongCount} 道隔离池高风险错题，建议优先使用低风险变式题做课堂示范。`
+        : highRiskWrongCount > 0
+          ? `检测到 ${highRiskWrongCount} 道高风险错题，建议教师先人工复核后再纳入讲评。`
+          : ""
+  };
 
   return {
     data: {
@@ -309,9 +332,11 @@ export const POST = withApi(async (request) => {
       exemplarQuestions,
       classTasks,
       afterClassReviewSheet,
+      qualityGovernance,
       script,
       quality,
       manualReviewRule: quality.needsHumanReview ? "建议教师先人工核查讲评顺序与示例题后再下发。" : ""
     }
   };
+  }
 });

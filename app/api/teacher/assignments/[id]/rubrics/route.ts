@@ -2,10 +2,9 @@ import { getCurrentUser } from "@/lib/auth";
 import { getAssignmentById } from "@/lib/assignments";
 import { getClassById } from "@/lib/classes";
 import { getAssignmentRubrics, replaceAssignmentRubrics } from "@/lib/rubrics";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const rubricLevelSchema = v.object<{
   label: string;
@@ -68,30 +67,38 @@ async function assertTeacherAccess(assignmentId: string) {
   return assignment;
 }
 
-export const GET = withApi(async (_request, context) => {
-  const assignment = await assertTeacherAccess(context.params.id);
-  const rubrics = await getAssignmentRubrics(assignment.id);
-  return { data: rubrics };
+export const GET = createLearningRoute({
+  role: "teacher",
+  cache: "private-realtime",
+  handler: async ({ params }) => {
+    const assignment = await assertTeacherAccess(params.id);
+    const rubrics = await getAssignmentRubrics(assignment.id);
+    return { data: rubrics };
+  }
 });
 
-export const POST = withApi(async (request, context) => {
-  const assignment = await assertTeacherAccess(context.params.id);
-  const body = await parseJson(request, rubricBodySchema);
+export const POST = createLearningRoute({
+  role: "teacher",
+  cache: "private-realtime",
+  handler: async ({ request, params }) => {
+    const assignment = await assertTeacherAccess(params.id);
+    const body = await parseJson(request, rubricBodySchema);
 
-  const cleaned = body.items
-    .map((item) => ({
-      title: item.title.trim(),
-      description: item.description?.trim() ?? "",
-      maxScore: Number(item.maxScore ?? 5),
-      weight: Number(item.weight ?? 1),
-      levels: item.levels?.filter((level) => level.label && level.description) ?? []
-    }))
-    .filter((item) => item.title);
+    const cleaned = body.items
+      .map((item) => ({
+        title: item.title.trim(),
+        description: item.description?.trim() ?? "",
+        maxScore: Number(item.maxScore ?? 5),
+        weight: Number(item.weight ?? 1),
+        levels: item.levels?.filter((level) => level.label && level.description) ?? []
+      }))
+      .filter((item) => item.title);
 
-  if (!cleaned.length) {
-    badRequest("missing items");
+    if (!cleaned.length) {
+      badRequest("missing items");
+    }
+
+    const saved = await replaceAssignmentRubrics({ assignmentId: assignment.id, items: cleaned });
+    return { data: saved };
   }
-
-  const saved = await replaceAssignmentRubrics({ assignmentId: assignment.id, items: cleaned });
-  return { data: saved };
 });

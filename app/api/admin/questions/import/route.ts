@@ -1,7 +1,7 @@
 import { createQuestion, getQuestions } from "@/lib/content";
 import { requireRole } from "@/lib/guard";
 import { addAdminLog } from "@/lib/admin-log";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { evaluateAndUpsertQuestionQuality } from "@/lib/question-quality";
 import {
   importQuestionBodySchema,
@@ -10,13 +10,16 @@ import {
   trimStringArray
 } from "@/lib/api/schemas/admin";
 import { parseJson } from "@/lib/api/validation";
+import { createAdminRoute } from "@/lib/api/domains";
 export const dynamic = "force-dynamic";
 
-export const POST = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
+export const POST = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
 
   const body = await parseJson(request, importQuestionBodySchema);
 
@@ -94,13 +97,14 @@ export const POST = withApi(async (request) => {
     });
   }
 
-  await addAdminLog({
-    adminId: user.id,
-    action: "import_questions",
-    entityType: "question",
-    entityId: null,
-    detail: `created=${created.length}, failed=${failed.length}`
-  });
+    await addAdminLog({
+      adminId: user.id,
+      action: "import_questions",
+      entityType: "question",
+      entityId: null,
+      detail: `created=${created.length}, failed=${failed.length}`
+    });
 
-  return { created: created.length, failed, items: created };
+    return { created: created.length, failed, items: created };
+  }
 });

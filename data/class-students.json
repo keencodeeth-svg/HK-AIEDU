@@ -142,5 +142,23 @@
     "classId": "class-bulk-004",
     "studentId": "u-student-bulk-024",
     "joinedAt": "2026-02-24T17:18:39.618Z"
+  },
+  {
+    "id": "class-student-5519aef59e20",
+    "classId": "class-15f51b1e74e8",
+    "studentId": "u-e223738228b7",
+    "joinedAt": "2026-02-26T10:35:07.003Z"
+  },
+  {
+    "id": "class-student-83cabca723c9",
+    "classId": "class-15f51b1e74e8",
+    "studentId": "u-1fc0fd6f084e",
+    "joinedAt": "2026-02-26T11:16:39.791Z"
+  },
+  {
+    "id": "class-student-44e0be64488a",
+    "classId": "class-15f51b1e74e8",
+    "studentId": "u-0591e777e503",
+    "joinedAt": "2026-02-26T11:18:11.211Z"
   }
 ]

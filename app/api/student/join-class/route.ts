@@ -8,10 +8,9 @@ import {
 } from "@/lib/classes";
 import { createAssignmentProgress, getAssignmentsByClass } from "@/lib/assignments";
 import { createNotification } from "@/lib/notifications";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const joinClassBodySchema = v.object<{ code?: string }>(
   {
@@ -20,64 +19,67 @@ const joinClassBodySchema = v.object<{ code?: string }>(
   { allowUnknown: false }
 );
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "student") {
-    unauthorized();
-  }
-
-  const body = await parseJson(request, joinClassBodySchema);
-  const code = body.code?.trim().toUpperCase();
-  if (!code) {
-    badRequest("missing code");
-  }
-
-  const klass = await getClassByJoinCode(code);
-  if (!klass) {
-    notFound("邀请码无效");
-  }
-
-  const memberIds = await getClassStudentIds(klass.id);
-  if (memberIds.includes(user.id)) {
-    return { status: "joined", message: "你已在班级中" };
-  }
-
-  if (klass.joinMode === "auto") {
-    await addStudentToClass(klass.id, user.id);
-    const assignments = await getAssignmentsByClass(klass.id);
-    for (const assignment of assignments) {
-      await createAssignmentProgress(assignment.id, user.id);
+export const POST = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "student") {
+      unauthorized();
     }
+
+    const body = await parseJson(request, joinClassBodySchema);
+    const code = body.code?.trim().toUpperCase();
+    if (!code) {
+      badRequest("missing code");
+    }
+
+    const klass = await getClassByJoinCode(code);
+    if (!klass) {
+      notFound("邀请码无效");
+    }
+
+    const memberIds = await getClassStudentIds(klass.id);
+    if (memberIds.includes(user.id)) {
+      return { status: "joined", message: "你已在班级中" };
+    }
+
+    if (klass.joinMode === "auto") {
+      await addStudentToClass(klass.id, user.id);
+      const assignments = await getAssignmentsByClass(klass.id);
+      for (const assignment of assignments) {
+        await createAssignmentProgress(assignment.id, user.id);
+      }
+      await createNotification({
+        userId: user.id,
+        title: "加入班级成功",
+        content: `你已加入班级「${klass.name}」`,
+        type: "class"
+      });
+      return { status: "joined", message: "已加入班级" };
+    }
+
+    const existing = await getJoinRequestsByStudent(user.id);
+    const pending = existing.find((item) => item.classId === klass.id && item.status === "pending");
+    if (pending) {
+      return { status: "pending", message: "已提交加入申请" };
+    }
+
+    const requestRecord = await createJoinRequest(klass.id, user.id);
     await createNotification({
       userId: user.id,
-      title: "加入班级成功",
-      content: `你已加入班级「${klass.name}」`,
+      title: "已提交加入申请",
+      content: `已向班级「${klass.name}」提交加入申请，请等待老师审核。`,
       type: "class"
     });
-    return { status: "joined", message: "已加入班级" };
-  }
+    if (klass.teacherId) {
+      await createNotification({
+        userId: klass.teacherId,
+        title: "新的加入申请",
+        content: `${user.name} 申请加入班级「${klass.name}」。`,
+        type: "class"
+      });
+    }
 
-  const existing = await getJoinRequestsByStudent(user.id);
-  const pending = existing.find((item) => item.classId === klass.id && item.status === "pending");
-  if (pending) {
-    return { status: "pending", message: "已提交加入申请" };
+    return { status: requestRecord.status, message: "已提交加入申请" };
   }
-
-  const requestRecord = await createJoinRequest(klass.id, user.id);
-  await createNotification({
-    userId: user.id,
-    title: "已提交加入申请",
-    content: `已向班级「${klass.name}」提交加入申请，请等待老师审核。`,
-    type: "class"
-  });
-  if (klass.teacherId) {
-    await createNotification({
-      userId: klass.teacherId,
-      title: "新的加入申请",
-      content: `${user.name} 申请加入班级「${klass.name}」。`,
-      type: "class"
-    });
-  }
-
-  return { status: requestRecord.status, message: "已提交加入申请" };
 });

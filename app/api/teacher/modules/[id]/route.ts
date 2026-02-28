@@ -1,9 +1,7 @@
 import { updateModule } from "@/lib/modules";
-import { withApi } from "@/lib/api/http";
+import { createLearningRoute } from "@/lib/api/domains";
 import { requireTeacherModule } from "@/lib/guard";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
 
 const updateModuleBodySchema = v.object<{
   title?: string;
@@ -20,18 +18,21 @@ const updateModuleBodySchema = v.object<{
   { allowUnknown: false }
 );
 
-export const PUT = withApi(async (request, context) => {
-  const moduleId = context.params.id;
-  await requireTeacherModule(moduleId);
+export const PUT = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request, params }) => {
+    const moduleId = params.id;
+    await requireTeacherModule(moduleId);
 
-  const body = await parseJson(request, updateModuleBodySchema);
+    const body = await parseJson(request, updateModuleBodySchema);
 
-  const updated = await updateModule({
-    id: moduleId,
-    title: body.title,
-    description: body.description,
-    parentId: body.parentId,
-    orderIndex: body.orderIndex
-  });
-  return { data: updated };
+    const updated = await updateModule({
+      id: moduleId,
+      title: body.title,
+      description: body.description,
+      parentId: body.parentId,
+      orderIndex: body.orderIndex
+    });
+    return { data: updated };
+  }
 });

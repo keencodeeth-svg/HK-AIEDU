@@ -1,6 +1,6 @@
 import { requireRole } from "@/lib/guard";
 import { addAdminLog } from "@/lib/admin-log";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 import { getLlmProviderHealth } from "@/lib/ai";
 import {
@@ -11,6 +11,7 @@ import {
   refreshRuntimeAiProviderConfig,
   saveRuntimeAiProviderConfig
 } from "@/lib/ai-config";
+import { createAdminRoute } from "@/lib/api/domains";
 
 export const dynamic = "force-dynamic";
 
@@ -42,37 +43,43 @@ async function buildPayload() {
   };
 }
 
-export const GET = withApi(async () => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
+export const GET = createAdminRoute({
+  cache: "private-realtime",
+  handler: async () => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
+    return { data: await buildPayload() };
   }
-  return { data: await buildPayload() };
 });
 
-export const POST = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
+export const POST = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
+
+    const body = await parseJson(request, updateBodySchema);
+    if (!body.reset && body.providerChain === undefined) {
+      badRequest("missing providerChain");
+    }
+
+    const next = await saveRuntimeAiProviderConfig({
+      providerChain: body.reset ? [] : body.providerChain ?? [],
+      updatedBy: user.id
+    });
+
+    await addAdminLog({
+      adminId: user.id,
+      action: "update_ai_provider_chain",
+      entityType: "ai_config",
+      entityId: "provider_chain",
+      detail: next.providerChain.join(",") || "env_fallback"
+    });
+
+    return { data: await buildPayload() };
   }
-
-  const body = await parseJson(request, updateBodySchema);
-  if (!body.reset && body.providerChain === undefined) {
-    badRequest("missing providerChain");
-  }
-
-  const next = await saveRuntimeAiProviderConfig({
-    providerChain: body.reset ? [] : body.providerChain ?? [],
-    updatedBy: user.id
-  });
-
-  await addAdminLog({
-    adminId: user.id,
-    action: "update_ai_provider_chain",
-    entityType: "ai_config",
-    entityId: "provider_chain",
-    detail: next.providerChain.join(",") || "env_fallback"
-  });
-
-  return { data: await buildPayload() };
 });

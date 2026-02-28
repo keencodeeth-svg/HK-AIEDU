@@ -10,6 +10,7 @@
     "test:api": "API_TEST_SCOPE=full API_TEST_SERVER_MODE=start API_TEST_FALLBACK_TO_DEV=0 node scripts/test-api-routes.mjs",
     "test": "npm run test:api",
     "import:open-curriculum": "node scripts/import-open-curriculum-pack.mjs",
+    "import:gaokao-bench": "node scripts/import-gaokao-bench-objective.mjs",
     "seed:library-db": "node scripts/seed-library-db.mjs",
     "db:init": "node scripts/init-db.mjs",
     "db:migrate": "node scripts/init-db.mjs",

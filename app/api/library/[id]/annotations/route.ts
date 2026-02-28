@@ -5,10 +5,9 @@ import {
   getLearningLibraryItemById,
   listLearningLibraryAnnotations
 } from "@/lib/learning-library";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, parseParams, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const paramsSchema = v.object<{ id: string }>(
   {
@@ -34,57 +33,63 @@ const bodySchema = v.object<{
   { allowUnknown: false }
 );
 
-export const GET = withApi(async (_request, context) => {
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
-  }
+export const GET = createLearningRoute({
+  cache: "private-short",
+  handler: async ({ params }) => {
+    const user = await getCurrentUser();
+    if (!user) {
+      unauthorized();
+    }
 
-  const params = parseParams(context.params, paramsSchema);
-  const item = await getLearningLibraryItemById(params.id);
-  if (!item) {
-    notFound("not found");
-  }
-  const allowed = await canAccessLearningLibraryItem(user, item);
-  if (!allowed) {
-    notFound("not found");
-  }
+    const parsed = parseParams(params, paramsSchema);
+    const item = await getLearningLibraryItemById(parsed.id);
+    if (!item) {
+      notFound("not found");
+    }
+    const allowed = await canAccessLearningLibraryItem(user, item);
+    if (!allowed) {
+      notFound("not found");
+    }
 
-  const data = await listLearningLibraryAnnotations(item.id);
-  return { data };
+    const data = await listLearningLibraryAnnotations(item.id);
+    return { data };
+  }
 });
 
-export const POST = withApi(async (request, context) => {
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
-  }
+export const POST = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request, params }) => {
+    const user = await getCurrentUser();
+    if (!user) {
+      unauthorized();
+    }
 
-  const params = parseParams(context.params, paramsSchema);
-  const item = await getLearningLibraryItemById(params.id);
-  if (!item) {
-    notFound("not found");
-  }
-  const allowed = await canAccessLearningLibraryItem(user, item);
-  if (!allowed) {
-    notFound("not found");
-  }
+    const parsed = parseParams(params, paramsSchema);
+    const item = await getLearningLibraryItemById(parsed.id);
+    if (!item) {
+      notFound("not found");
+    }
+    const allowed = await canAccessLearningLibraryItem(user, item);
+    if (!allowed) {
+      notFound("not found");
+    }
 
-  const body = await parseJson(request, bodySchema);
-  const quote = body.quote?.trim();
-  if (!quote) {
-    badRequest("quote required");
+    const body = await parseJson(request, bodySchema);
+    const quote = body.quote?.trim();
+    if (!quote) {
+      badRequest("quote required");
+    }
+
+    const annotation = await addLearningLibraryAnnotation({
+      itemId: item.id,
+      userId: user.id,
+      quote,
+      startOffset: body.startOffset,
+      endOffset: body.endOffset,
+      color: body.color?.trim() || undefined,
+      note: body.note?.trim() || undefined
+    });
+
+    return { data: annotation };
   }
-
-  const annotation = await addLearningLibraryAnnotation({
-    itemId: item.id,
-    userId: user.id,
-    quote,
-    startOffset: body.startOffset,
-    endOffset: body.endOffset,
-    color: body.color?.trim() || undefined,
-    note: body.note?.trim() || undefined
-  });
-
-  return { data: annotation };
 });

@@ -1,9 +1,8 @@
 import { getCurrentUser } from "@/lib/auth";
 import { acknowledgeTeacherAlert, getTeacherAlerts } from "@/lib/teacher-alerts";
-import { notFound, unauthorized, withApi } from "@/lib/api/http";
+import { notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, parseParams, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const ackParamsSchema = v.object<{ id: string }>(
   {
@@ -19,37 +18,39 @@ const ackBodySchema = v.object<{ note?: string }>(
   { allowUnknown: false }
 );
 
-export const POST = withApi(async (request, context) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "teacher") {
-    unauthorized();
-  }
-
-  const params = parseParams(context.params, ackParamsSchema);
-  const body = await parseJson(request, ackBodySchema);
-
-  const overview = await getTeacherAlerts({
-    teacherId: user.id,
-    includeAcknowledged: true
-  });
-  const target = overview.alerts.find((item) => item.id === params.id);
-  if (!target) {
-    notFound("not found");
-  }
-
-  const ack = await acknowledgeTeacherAlert({
-    teacherId: user.id,
-    alertId: params.id,
-    note: body.note
-  });
-
-  return {
-    data: {
-      id: params.id,
-      status: "acknowledged",
-      acknowledgedAt: ack?.createdAt ?? new Date().toISOString(),
-      note: ack?.note ?? null
+export const POST = createLearningRoute({
+  role: "teacher",
+  cache: "private-realtime",
+  handler: async ({ request, params, user }) => {
+    if (!user || user.role !== "teacher") {
+      unauthorized();
     }
-  };
-});
 
+    const parsed = parseParams(params, ackParamsSchema);
+    const body = await parseJson(request, ackBodySchema);
+
+    const overview = await getTeacherAlerts({
+      teacherId: user.id,
+      includeAcknowledged: true
+    });
+    const target = overview.alerts.find((item) => item.id === parsed.id);
+    if (!target) {
+      notFound("not found");
+    }
+
+    const ack = await acknowledgeTeacherAlert({
+      teacherId: user.id,
+      alertId: parsed.id,
+      note: body.note
+    });
+
+    return {
+      data: {
+        id: parsed.id,
+        status: "acknowledged",
+        acknowledgedAt: ack?.createdAt ?? new Date().toISOString(),
+        note: ack?.note ?? null
+      }
+    };
+  }
+});

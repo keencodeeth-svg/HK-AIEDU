@@ -2,10 +2,9 @@ import { getCurrentUser } from "@/lib/auth";
 import { getClassesByStudent, getClassesByTeacher } from "@/lib/classes";
 import { getStudentContext } from "@/lib/user-context";
 import { createCourseFile, getCourseFilesByClassIds } from "@/lib/course-files";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, parseSearchParams, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const MAX_SIZE_MB = 5;
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp", "application/pdf"];
@@ -52,99 +51,105 @@ async function getAccessibleClassIds(role: string, userId: string) {
   return [];
 }
 
-export const GET = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
-  }
+export const GET = createLearningRoute({
+  cache: "private-short",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user) {
+      unauthorized();
+    }
 
-  const query = parseSearchParams(request, filesQuerySchema);
-  const classId = query.classId;
-  const accessible = await getAccessibleClassIds(user.role, user.id);
-  if (!accessible.length) {
-    return { data: [] };
-  }
+    const query = parseSearchParams(request, filesQuerySchema);
+    const classId = query.classId;
+    const accessible = await getAccessibleClassIds(user.role, user.id);
+    if (!accessible.length) {
+      return { data: [] };
+    }
 
-  const classIds = classId && accessible.includes(classId) ? [classId] : accessible;
-  const data = await getCourseFilesByClassIds(classIds);
-  return { data };
+    const classIds = classId && accessible.includes(classId) ? [classId] : accessible;
+    const data = await getCourseFilesByClassIds(classIds);
+    return { data };
+  }
 });
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "teacher") {
-    unauthorized();
-  }
+export const POST = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "teacher") {
+      unauthorized();
+    }
 
-  const contentType = request.headers.get("content-type") ?? "";
-  const accessible = await getAccessibleClassIds(user.role, user.id);
+    const contentType = request.headers.get("content-type") ?? "";
+    const accessible = await getAccessibleClassIds(user.role, user.id);
 
-  if (contentType.includes("multipart/form-data")) {
-    const formData = await request.formData();
-    const classId = String(formData.get("classId") ?? "");
-    const folder = String(formData.get("folder") ?? "");
-    const title = String(formData.get("title") ?? "");
-    if (!classId) {
-      badRequest("missing classId");
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await request.formData();
+      const classId = String(formData.get("classId") ?? "");
+      const folder = String(formData.get("folder") ?? "");
+      const title = String(formData.get("title") ?? "");
+      if (!classId) {
+        badRequest("missing classId");
+      }
+      if (!accessible.includes(classId)) {
+        notFound("class not found");
+      }
+
+      const files = formData.getAll("files");
+      const picked = files.length ? files : [formData.get("file")].filter(Boolean);
+      if (!picked.length) {
+        badRequest("missing file");
+      }
+
+      const saved = [];
+      for (const entry of picked) {
+        if (!(entry instanceof File)) continue;
+        if (!ALLOWED_TYPES.includes(entry.type)) {
+          badRequest(`不支持的文件类型：${entry.type}`);
+        }
+        const sizeMb = entry.size / (1024 * 1024);
+        if (sizeMb > MAX_SIZE_MB) {
+          badRequest(`单个文件不能超过 ${MAX_SIZE_MB}MB`);
+        }
+        const buffer = Buffer.from(await entry.arrayBuffer());
+        const base64 = buffer.toString("base64");
+        const record = await createCourseFile({
+          classId,
+          folder: folder || undefined,
+          title: title || entry.name,
+          resourceType: "file",
+          fileName: entry.name,
+          mimeType: entry.type,
+          size: entry.size,
+          contentBase64: base64,
+          uploadedBy: user.id
+        });
+        saved.push(record);
+      }
+      return { data: saved };
+    }
+
+    const body = await parseJson(request, createLinkBodySchema);
+    const classId = body.classId?.trim();
+    const title = body.title?.trim();
+    if (!classId || !title) {
+      badRequest("missing fields");
     }
     if (!accessible.includes(classId)) {
       notFound("class not found");
     }
-
-    const files = formData.getAll("files");
-    const picked = files.length ? files : [formData.get("file")].filter(Boolean);
-    if (!picked.length) {
-      badRequest("missing file");
+    if (body.resourceType === "link" && !body.linkUrl?.trim()) {
+      badRequest("missing link");
     }
 
-    const saved = [];
-    for (const entry of picked) {
-      if (!(entry instanceof File)) continue;
-      if (!ALLOWED_TYPES.includes(entry.type)) {
-        badRequest(`不支持的文件类型：${entry.type}`);
-      }
-      const sizeMb = entry.size / (1024 * 1024);
-      if (sizeMb > MAX_SIZE_MB) {
-        badRequest(`单个文件不能超过 ${MAX_SIZE_MB}MB`);
-      }
-      const buffer = Buffer.from(await entry.arrayBuffer());
-      const base64 = buffer.toString("base64");
-      const record = await createCourseFile({
-        classId,
-        folder: folder || undefined,
-        title: title || entry.name,
-        resourceType: "file",
-        fileName: entry.name,
-        mimeType: entry.type,
-        size: entry.size,
-        contentBase64: base64,
-        uploadedBy: user.id
-      });
-      saved.push(record);
-    }
-    return { data: saved };
+    const record = await createCourseFile({
+      classId,
+      folder: body.folder,
+      title,
+      resourceType: body.resourceType === "link" ? "link" : "file",
+      linkUrl: body.linkUrl,
+      uploadedBy: user.id
+    });
+    return { data: record };
   }
-
-  const body = await parseJson(request, createLinkBodySchema);
-  const classId = body.classId?.trim();
-  const title = body.title?.trim();
-  if (!classId || !title) {
-    badRequest("missing fields");
-  }
-  if (!accessible.includes(classId)) {
-    notFound("class not found");
-  }
-  if (body.resourceType === "link" && !body.linkUrl?.trim()) {
-    badRequest("missing link");
-  }
-
-  const record = await createCourseFile({
-    classId,
-    folder: body.folder,
-    title,
-    resourceType: body.resourceType === "link" ? "link" : "file",
-    linkUrl: body.linkUrl,
-    uploadedBy: user.id
-  });
-  return { data: record };
 });

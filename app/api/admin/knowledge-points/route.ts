@@ -1,9 +1,10 @@
 import { createKnowledgePoint, getKnowledgePoints } from "@/lib/content";
 import { requireRole } from "@/lib/guard";
 import { addAdminLog } from "@/lib/admin-log";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { createKnowledgePointBodySchema, isAllowedSubject } from "@/lib/api/schemas/admin";
 import { parseJson, parseSearchParams, v } from "@/lib/api/validation";
+import { createAdminRoute } from "@/lib/api/domains";
 export const dynamic = "force-dynamic";
 
 const listKnowledgePointsQuerySchema = v.object<{
@@ -58,11 +59,13 @@ type KnowledgePointTreeNode = {
   }>;
 };
 
-export const GET = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
+export const GET = createAdminRoute({
+  cache: "private-short",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
 
   const query = parseSearchParams(request, listKnowledgePointsQuerySchema);
   const subject = normalizeQueryString(query.subject);
@@ -170,38 +173,41 @@ export const GET = withApi(async (request) => {
         }))
     }));
 
-  return {
-    data,
-    meta: {
-      total,
-      page: safePage,
-      pageSize: shouldPaginate ? pageSize : total,
-      totalPages
-    },
-    facets: {
-      subjects: subjectFacet,
-      grades: gradeFacet,
-      units: unitFacet,
-      chapters: chapterFacet
-    },
-    tree,
-    filters: {
-      subject: subject ?? null,
-      grade: grade ?? null,
-      unit: unit ?? null,
-      chapter: chapter ?? null,
-      search: search ?? null,
-      sortBy,
-      sortDir
-    }
-  };
+    return {
+      data,
+      meta: {
+        total,
+        page: safePage,
+        pageSize: shouldPaginate ? pageSize : total,
+        totalPages
+      },
+      facets: {
+        subjects: subjectFacet,
+        grades: gradeFacet,
+        units: unitFacet,
+        chapters: chapterFacet
+      },
+      tree,
+      filters: {
+        subject: subject ?? null,
+        grade: grade ?? null,
+        unit: unit ?? null,
+        chapter: chapter ?? null,
+        search: search ?? null,
+        sortBy,
+        sortDir
+      }
+    };
+  }
 });
 
-export const POST = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
+export const POST = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
 
   const body = await parseJson(request, createKnowledgePointBodySchema);
   const subject = body.subject?.trim();
@@ -225,15 +231,16 @@ export const POST = withApi(async (request) => {
     unit: unit ? unit : "未分单元"
   });
 
-  if (next) {
-    await addAdminLog({
-      adminId: user.id,
-      action: "create_knowledge_point",
-      entityType: "knowledge_point",
-      entityId: next.id,
-      detail: `${next.subject} ${next.grade} ${next.unit ?? "未分单元"} ${next.title}`
-    });
-  }
+    if (next) {
+      await addAdminLog({
+        adminId: user.id,
+        action: "create_knowledge_point",
+        entityType: "knowledge_point",
+        entityId: next.id,
+        detail: `${next.subject} ${next.grade} ${next.unit ?? "未分单元"} ${next.title}`
+      });
+    }
 
-  return { data: next };
+    return { data: next };
+  }
 });

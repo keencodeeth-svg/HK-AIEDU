@@ -1,0 +1,11 @@
+[
+  {
+    "id": "exp-dc0bed91337c",
+    "key": "challenge_learning_loop_v2",
+    "name": "挑战学习闭环 V2",
+    "description": "挑战任务从纯打卡升级为薄弱点修复闭环，支持灰度放量。",
+    "enabled": true,
+    "rollout": 50,
+    "updatedAt": "2026-02-26T11:18:12.400Z"
+  }
+]

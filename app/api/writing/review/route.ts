@@ -2,10 +2,9 @@ import { getCurrentUser } from "@/lib/auth";
 import { generateWritingFeedback, getPrimaryLlmProvider } from "@/lib/ai";
 import { addWritingSubmission } from "@/lib/writing";
 import { assessAiQuality } from "@/lib/ai-quality-control";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const writingReviewBodySchema = v.object<{
   subject?: string;
@@ -38,63 +37,66 @@ function fallbackFeedback(content: string) {
   };
 }
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "student") {
-    unauthorized();
-  }
-
-  const body = await parseJson(request, writingReviewBodySchema);
-  const subject = body.subject?.trim();
-  const grade = body.grade?.trim();
-  const title = body.title?.trim() || undefined;
-  const content = body.content?.trim();
-
-  if (!content || !subject || !grade) {
-    badRequest("missing fields");
-  }
-
-  const generated = await generateWritingFeedback({
-    subject,
-    grade,
-    title,
-    content
-  });
-  const feedback = generated ?? fallbackFeedback(content);
-  const provider = generated ? getPrimaryLlmProvider() : "rule";
-
-  const quality = assessAiQuality({
-    kind: "writing",
-    taskType: "writing_feedback",
-    provider,
-    textBlocks: [
-      feedback.summary,
-      ...(feedback.strengths ?? []),
-      ...(feedback.improvements ?? []),
-      feedback.corrected ?? ""
-    ],
-    listCountHint: (feedback.strengths?.length ?? 0) + (feedback.improvements?.length ?? 0)
-  });
-
-  const feedbackWithQuality = {
-    ...feedback,
-    quality
-  };
-
-  const submission = await addWritingSubmission({
-    userId: user.id,
-    subject,
-    grade,
-    title,
-    content,
-    feedback: feedbackWithQuality
-  });
-
-  return {
-    data: {
-      ...submission,
-      quality,
-      manualReviewRule: quality.needsHumanReview ? "建议教师/家长抽检关键结论后再采用。" : ""
+export const POST = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "student") {
+      unauthorized();
     }
-  };
+
+    const body = await parseJson(request, writingReviewBodySchema);
+    const subject = body.subject?.trim();
+    const grade = body.grade?.trim();
+    const title = body.title?.trim() || undefined;
+    const content = body.content?.trim();
+
+    if (!content || !subject || !grade) {
+      badRequest("missing fields");
+    }
+
+    const generated = await generateWritingFeedback({
+      subject,
+      grade,
+      title,
+      content
+    });
+    const feedback = generated ?? fallbackFeedback(content);
+    const provider = generated ? getPrimaryLlmProvider() : "rule";
+
+    const quality = assessAiQuality({
+      kind: "writing",
+      taskType: "writing_feedback",
+      provider,
+      textBlocks: [
+        feedback.summary,
+        ...(feedback.strengths ?? []),
+        ...(feedback.improvements ?? []),
+        feedback.corrected ?? ""
+      ],
+      listCountHint: (feedback.strengths?.length ?? 0) + (feedback.improvements?.length ?? 0)
+    });
+
+    const feedbackWithQuality = {
+      ...feedback,
+      quality
+    };
+
+    const submission = await addWritingSubmission({
+      userId: user.id,
+      subject,
+      grade,
+      title,
+      content,
+      feedback: feedbackWithQuality
+    });
+
+    return {
+      data: {
+        ...submission,
+        quality,
+        manualReviewRule: quality.needsHumanReview ? "建议教师/家长抽检关键结论后再采用。" : ""
+      }
+    };
+  }
 });

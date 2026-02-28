@@ -1,0 +1,35 @@
+[
+  {
+    "id": "exam-sub-cedfe9c1cc09",
+    "paperId": "exam-paper-42e1e4956291",
+    "studentId": "u-e223738228b7",
+    "answers": {
+      "q-math-4-kp-math-4-3-4": "A. 选项一"
+    },
+    "score": 0,
+    "total": 1,
+    "submittedAt": "2026-02-26T10:35:08.165Z"
+  },
+  {
+    "id": "exam-sub-bda0af676645",
+    "paperId": "exam-paper-0323af3ea018",
+    "studentId": "u-1fc0fd6f084e",
+    "answers": {
+      "q-math-4-kp-math-4-2-2": "A. 选项一"
+    },
+    "score": 0,
+    "total": 1,
+    "submittedAt": "2026-02-26T11:16:41.361Z"
+  },
+  {
+    "id": "exam-sub-409a07855a5e",
+    "paperId": "exam-paper-c265b2f6a452",
+    "studentId": "u-0591e777e503",
+    "answers": {
+      "q-math-4-kp-math-4-2-2": "A. 选项一"
+    },
+    "score": 0,
+    "total": 1,
+    "submittedAt": "2026-02-26T11:18:12.288Z"
+  }
+]

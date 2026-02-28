@@ -8,9 +8,8 @@ import { ensureExamAssignment, getExamAssignment, getExamPapersByClassIds } from
 import { generateStudyPlans, getStudyPlans } from "@/lib/progress";
 import { getStudentProfile } from "@/lib/profiles";
 import { getIntervalLabel, getWrongReviewQueue } from "@/lib/wrong-review";
-import { unauthorized, withApi } from "@/lib/api/http";
-
-export const dynamic = "force-dynamic";
+import { unauthorized } from "@/lib/api/http";
+import { createLearningRoute } from "@/lib/api/domains";
 
 type TodayTaskSource = "assignment" | "exam" | "wrong_review" | "plan" | "challenge";
 type TodayTaskStatus = "overdue" | "due_today" | "in_progress" | "pending" | "upcoming" | "optional";
@@ -193,7 +192,9 @@ function compareTasks(a: TodayTask, b: TodayTask) {
   return a.title.localeCompare(b.title, "zh-CN");
 }
 
-export const GET = withApi(async () => {
+export const GET = createLearningRoute({
+  cache: "private-short",
+  handler: async () => {
   const user = await getCurrentUser();
   if (!user || user.role !== "student") {
     unauthorized();
@@ -469,4 +470,5 @@ export const GET = withApi(async () => {
       tasks: sortedTasks
     }
   };
+  }
 });

@@ -3,10 +3,9 @@ import { getClassesByTeacher, getClassStudentIds } from "@/lib/classes";
 import { getAssignmentsByClass, getAssignmentProgress } from "@/lib/assignments";
 import { getRulesByClassIds } from "@/lib/notification-rules";
 import { createNotification } from "@/lib/notifications";
-import { notFound, unauthorized, withApi } from "@/lib/api/http";
+import { notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const runNotificationBodySchema = v.object<{ classId?: string }>(
   {
@@ -15,70 +14,73 @@ const runNotificationBodySchema = v.object<{ classId?: string }>(
   { allowUnknown: false }
 );
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "teacher") {
-    unauthorized();
-  }
+export const POST = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "teacher") {
+      unauthorized();
+    }
 
-  const body = await parseJson(request, runNotificationBodySchema);
-  const classes = await getClassesByTeacher(user.id);
-  const targetClasses = body.classId ? classes.filter((item) => item.id === body.classId) : classes;
-  if (!targetClasses.length) {
-    notFound("class not found");
-  }
+    const body = await parseJson(request, runNotificationBodySchema);
+    const classes = await getClassesByTeacher(user.id);
+    const targetClasses = body.classId ? classes.filter((item) => item.id === body.classId) : classes;
+    if (!targetClasses.length) {
+      notFound("class not found");
+    }
 
-  const rules = await getRulesByClassIds(targetClasses.map((item) => item.id));
-  const ruleMap = new Map(rules.map((rule) => [rule.classId, rule]));
-  const now = Date.now();
-  let sentStudents = 0;
-  let sentParents = 0;
+    const rules = await getRulesByClassIds(targetClasses.map((item) => item.id));
+    const ruleMap = new Map(rules.map((rule) => [rule.classId, rule]));
+    const now = Date.now();
+    let sentStudents = 0;
+    let sentParents = 0;
 
-  for (const klass of targetClasses) {
-    const rule = ruleMap.get(klass.id) ?? {
-      enabled: true,
-      dueDays: 2,
-      overdueDays: 0,
-      includeParents: true
-    };
-    if (!rule.enabled) continue;
-    const assignments = await getAssignmentsByClass(klass.id);
-    const studentIds = await getClassStudentIds(klass.id);
+    for (const klass of targetClasses) {
+      const rule = ruleMap.get(klass.id) ?? {
+        enabled: true,
+        dueDays: 2,
+        overdueDays: 0,
+        includeParents: true
+      };
+      if (!rule.enabled) continue;
+      const assignments = await getAssignmentsByClass(klass.id);
+      const studentIds = await getClassStudentIds(klass.id);
 
-    for (const assignment of assignments) {
-      const progress = await getAssignmentProgress(assignment.id);
-      const progressMap = new Map(progress.map((item) => [item.studentId, item]));
-      const dueAt = new Date(assignment.dueDate).getTime();
-      const dueDiffDays = Math.ceil((dueAt - now) / (24 * 60 * 60 * 1000));
-      const overdueDiffDays = Math.max(0, Math.ceil((now - dueAt) / (24 * 60 * 60 * 1000)));
-      const isDueSoon = dueDiffDays >= 0 && dueDiffDays <= (rule.dueDays ?? 2);
-      const isOverdue = dueAt < now;
-      const withinOverdueWindow =
-        rule.overdueDays && rule.overdueDays > 0 ? overdueDiffDays <= rule.overdueDays : true;
-      if (!isDueSoon && !(isOverdue && withinOverdueWindow)) continue;
+      for (const assignment of assignments) {
+        const progress = await getAssignmentProgress(assignment.id);
+        const progressMap = new Map(progress.map((item) => [item.studentId, item]));
+        const dueAt = new Date(assignment.dueDate).getTime();
+        const dueDiffDays = Math.ceil((dueAt - now) / (24 * 60 * 60 * 1000));
+        const overdueDiffDays = Math.max(0, Math.ceil((now - dueAt) / (24 * 60 * 60 * 1000)));
+        const isDueSoon = dueDiffDays >= 0 && dueDiffDays <= (rule.dueDays ?? 2);
+        const isOverdue = dueAt < now;
+        const withinOverdueWindow =
+          rule.overdueDays && rule.overdueDays > 0 ? overdueDiffDays <= rule.overdueDays : true;
+        if (!isDueSoon && !(isOverdue && withinOverdueWindow)) continue;
 
-      for (const studentId of studentIds) {
-        const status = progressMap.get(studentId)?.status ?? "pending";
-        if (status === "completed") continue;
+        for (const studentId of studentIds) {
+          const status = progressMap.get(studentId)?.status ?? "pending";
+          if (status === "completed") continue;
 
-        const type = isOverdue ? "assignment_overdue" : "assignment_due";
-        const title = isOverdue ? "作业已逾期" : "作业即将到期";
-        const content = `${klass.name} · ${assignment.title}（截止 ${new Date(assignment.dueDate).toLocaleDateString(
-          "zh-CN"
-        )}）`;
-        await createNotification({ userId: studentId, title, content, type });
-        sentStudents += 1;
+          const type = isOverdue ? "assignment_overdue" : "assignment_due";
+          const title = isOverdue ? "作业已逾期" : "作业即将到期";
+          const content = `${klass.name} · ${assignment.title}（截止 ${new Date(assignment.dueDate).toLocaleDateString(
+            "zh-CN"
+          )}）`;
+          await createNotification({ userId: studentId, title, content, type });
+          sentStudents += 1;
 
-        if (rule.includeParents) {
-          const parents = await getParentsByStudentId(studentId);
-          for (const parent of parents) {
-            await createNotification({ userId: parent.id, title, content, type });
-            sentParents += 1;
+          if (rule.includeParents) {
+            const parents = await getParentsByStudentId(studentId);
+            for (const parent of parents) {
+              await createNotification({ userId: parent.id, title, content, type });
+              sentParents += 1;
+            }
           }
         }
       }
     }
-  }
 
-  return { data: { students: sentStudents, parents: sentParents } };
+    return { data: { students: sentStudents, parents: sentParents } };
+  }
 });

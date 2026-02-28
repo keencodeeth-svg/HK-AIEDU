@@ -1,8 +1,7 @@
 import { getLearningLibraryItemByShareToken, hydrateLearningLibraryItemContent } from "@/lib/learning-library";
-import { notFound, withApi } from "@/lib/api/http";
+import { notFound } from "@/lib/api/http";
 import { parseParams, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const paramsSchema = v.object<{ token: string }>(
   {
@@ -11,13 +10,16 @@ const paramsSchema = v.object<{ token: string }>(
   { allowUnknown: true }
 );
 
-export const GET = withApi(async (_request, context) => {
-  const params = parseParams(context.params, paramsSchema);
-  const item = await getLearningLibraryItemByShareToken(params.token);
-  if (!item) {
-    notFound("not found");
+export const GET = createLearningRoute({
+  cache: "public-short",
+  handler: async ({ params }) => {
+    const parsed = parseParams(params, paramsSchema);
+    const item = await getLearningLibraryItemByShareToken(parsed.token);
+    if (!item) {
+      notFound("not found");
+    }
+    const hydrated = await hydrateLearningLibraryItemContent(item);
+    const { contentStorageProvider, contentStorageKey, ...publicItem } = hydrated ?? item;
+    return { data: publicItem };
   }
-  const hydrated = await hydrateLearningLibraryItemContent(item);
-  const { contentStorageProvider, contentStorageKey, ...publicItem } = hydrated ?? item;
-  return { data: publicItem };
 });

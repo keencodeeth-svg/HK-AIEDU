@@ -125,16 +125,36 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     admin: {
       primary: [
         { href: "/admin", label: "管理端" },
+        { href: "/library", label: "教材课件" },
         { href: "/admin/questions", label: "题库管理" },
         { href: "/admin/knowledge-points", label: "知识点管理" },
-        { href: "/library", label: "教材课件" }
+        { href: "/admin/knowledge-tree", label: "知识点树" },
+        { href: "/admin/experiments", label: "实验中心" },
+        { href: "/admin/ai-models", label: "AI模型中心" },
+        { href: "/admin/logs", label: "操作日志" }
       ],
       groups: [
         {
-          title: "治理与审计",
+          title: "内容治理",
           links: [
+            { href: "/admin/questions", label: "题库管理" },
+            { href: "/admin/knowledge-points", label: "知识点管理" },
             { href: "/admin/knowledge-tree", label: "知识点树" },
-            { href: "/admin/logs", label: "操作日志" }
+            { href: "/library", label: "教材课件" }
+          ]
+        },
+        {
+          title: "实验与模型",
+          links: [
+            { href: "/admin/experiments", label: "A/B与灰度" },
+            { href: "/admin/ai-models", label: "模型路由策略" }
+          ]
+        },
+        {
+          title: "审计运维",
+          links: [
+            { href: "/admin/logs", label: "操作日志" },
+            { href: "/admin", label: "控制台总览" }
           ]
         }
       ]

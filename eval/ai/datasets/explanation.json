@@ -1,0 +1,66 @@
+[
+  {
+    "id": "explain-good-1",
+    "input": {
+      "kind": "explanation",
+      "provider": "deepseek",
+      "taskType": "explanation",
+      "textBlocks": [
+        "先把分母通分为 12，再比较分子大小。3/4 等于 9/12，2/3 等于 8/12，所以 3/4 更大。最后再用数轴验证一次。"
+      ],
+      "listCountHint": 2
+    },
+    "expected": {
+      "minScore": 75,
+      "riskLevel": "low"
+    }
+  },
+  {
+    "id": "explain-good-2",
+    "input": {
+      "kind": "explanation",
+      "provider": "moonshot",
+      "taskType": "explanation",
+      "textBlocks": [
+        "先列已知条件，再写等量关系式，最后代入求解。每一步都对应题干信息，避免跳步。"
+      ],
+      "listCountHint": 2
+    },
+    "expected": {
+      "minScore": 72
+    }
+  },
+  {
+    "id": "explain-bad-empty",
+    "input": {
+      "kind": "explanation",
+      "provider": "zhipu",
+      "taskType": "explanation",
+      "textBlocks": [
+        ""
+      ],
+      "listCountHint": 0
+    },
+    "expected": {
+      "maxScore": 40,
+      "riskLevel": "high"
+    }
+  },
+  {
+    "id": "explain-bad-uncertain",
+    "input": {
+      "kind": "explanation",
+      "provider": "deepseek",
+      "taskType": "explanation",
+      "textBlocks": [
+        "可能是先约分，大概再计算，不确定是否需要通分。仅供参考。"
+      ],
+      "listCountHint": 0
+    },
+    "expected": {
+      "maxScore": 65,
+      "riskLevel": "medium"
+    }
+  }
+]
+

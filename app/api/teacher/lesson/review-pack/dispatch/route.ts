@@ -4,10 +4,9 @@ import { getClassById, getClassStudentIds } from "@/lib/classes";
 import { getQuestions, getKnowledgePoints } from "@/lib/content";
 import { createNotification } from "@/lib/notifications";
 import { listQuestionQualityMetrics } from "@/lib/question-quality";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 type DispatchItem = {
   id?: string;
@@ -64,7 +63,9 @@ function normalizeDueDate(days: number) {
   return due.toISOString();
 }
 
-export const POST = withApi(async (request) => {
+export const POST = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
   const user = await getCurrentUser();
   if (!user || user.role !== "teacher") {
     unauthorized();
@@ -296,4 +297,5 @@ export const POST = withApi(async (request) => {
       }
     }
   };
+  }
 });

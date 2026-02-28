@@ -1,10 +1,8 @@
 import { getClassesByTeacher } from "@/lib/classes";
 import { createModule, getModulesByClass } from "@/lib/modules";
-import { withApi } from "@/lib/api/http";
+import { createLearningRoute } from "@/lib/api/domains";
 import { requireRoleOrThrow, requireTeacherClass } from "@/lib/guard";
 import { parseJson, parseSearchParams, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
 
 const modulesQuerySchema = v.object<{ classId?: string }>(
   {
@@ -30,29 +28,35 @@ const createModuleBodySchema = v.object<{
   { allowUnknown: false }
 );
 
-export const GET = withApi(async (request) => {
-  const user = await requireRoleOrThrow("teacher");
-  const query = parseSearchParams(request, modulesQuerySchema);
-  const classId = query.classId ?? "";
-  if (!classId) {
-    const classes = await getClassesByTeacher(user.id);
-    return { data: [], classes };
+export const GET = createLearningRoute({
+  cache: "private-short",
+  handler: async ({ request }) => {
+    const user = await requireRoleOrThrow("teacher");
+    const query = parseSearchParams(request, modulesQuerySchema);
+    const classId = query.classId ?? "";
+    if (!classId) {
+      const classes = await getClassesByTeacher(user.id);
+      return { data: [], classes };
+    }
+    await requireTeacherClass(classId);
+    const modules = await getModulesByClass(classId);
+    return { data: modules };
   }
-  await requireTeacherClass(classId);
-  const modules = await getModulesByClass(classId);
-  return { data: modules };
 });
 
-export const POST = withApi(async (request) => {
-  await requireRoleOrThrow("teacher");
-  const body = await parseJson(request, createModuleBodySchema);
-  await requireTeacherClass(body.classId);
-  const created = await createModule({
-    classId: body.classId,
-    title: body.title,
-    description: body.description,
-    parentId: body.parentId,
-    orderIndex: body.orderIndex
-  });
-  return { data: created };
+export const POST = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    await requireRoleOrThrow("teacher");
+    const body = await parseJson(request, createModuleBodySchema);
+    await requireTeacherClass(body.classId);
+    const created = await createModule({
+      classId: body.classId,
+      title: body.title,
+      description: body.description,
+      parentId: body.parentId,
+      orderIndex: body.orderIndex
+    });
+    return { data: created };
+  }
 });

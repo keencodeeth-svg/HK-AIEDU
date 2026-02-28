@@ -1,17 +1,20 @@
 import { getQuestions } from "@/lib/content";
 import { requireRole } from "@/lib/guard";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson } from "@/lib/api/validation";
 import { questionQualityCheckBodySchema, trimStringArray } from "@/lib/api/schemas/admin";
 import { evaluateQuestionQuality, upsertQuestionQualityMetric } from "@/lib/question-quality";
+import { createAdminRoute } from "@/lib/api/domains";
 
 export const dynamic = "force-dynamic";
 
-export const POST = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
+export const POST = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
 
   const body = await parseJson(request, questionQualityCheckBodySchema);
   const allQuestions = await getQuestions();
@@ -76,12 +79,13 @@ export const POST = withApi(async (request) => {
     allQuestions
   );
 
-  return {
-    data: {
-      questionId: null,
-      ...snapshot,
-      checkedAt: new Date().toISOString()
-    },
-    saved: false
-  };
+    return {
+      data: {
+        questionId: null,
+        ...snapshot,
+        checkedAt: new Date().toISOString()
+      },
+      saved: false
+    };
+  }
 });

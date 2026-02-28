@@ -1,7 +1,8 @@
 import { getCurrentUser } from "@/lib/auth";
 import { claimChallenge, getChallengePoints, getChallengeState } from "@/lib/challenges";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
-import { parseJson, v } from "@/lib/api/validation";
+import { badRequest, unauthorized } from "@/lib/api/http";
+import { v } from "@/lib/api/validation";
+import { createLearningRoute } from "@/lib/api/domains";
 
 export const dynamic = "force-dynamic";
 
@@ -12,20 +13,23 @@ const claimChallengeBodySchema = v.object<{ taskId?: string }>(
   { allowUnknown: false }
 );
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "student") {
-    unauthorized();
-  }
+export const POST = createLearningRoute({
+  role: "student",
+  body: claimChallengeBodySchema,
+  cache: "private-realtime",
+  handler: async ({ body, user }) => {
+    if (!user || user.role !== "student") {
+      unauthorized();
+    }
 
-  const body = await parseJson(request, claimChallengeBodySchema);
-  const taskId = body.taskId?.trim();
-  if (!taskId) {
-    badRequest("missing taskId");
-  }
+    const taskId = body.taskId?.trim();
+    if (!taskId) {
+      badRequest("missing taskId");
+    }
 
-  const result = await claimChallenge(user.id, taskId);
-  const state = await getChallengeState(user.id);
-  const points = await getChallengePoints(user.id);
-  return { data: { tasks: state.tasks, points, result, experiment: state.experiment } };
+    const result = await claimChallenge(user.id, taskId);
+    const state = await getChallengeState(user.id);
+    const points = await getChallengePoints(user.id);
+    return { data: { tasks: state.tasks, points, result, experiment: state.experiment } };
+  }
 });

@@ -8,10 +8,9 @@ import {
   setSessionCookie
 } from "@/lib/auth";
 import { validatePasswordPolicy } from "@/lib/password";
-import { apiSuccess, badRequest, conflict, forbidden, withApi } from "@/lib/api/http";
+import { apiSuccess, badRequest, conflict, forbidden } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createAuthRoute } from "@/lib/api/domains";
 
 const adminRegisterSchema = v.object<{
   email: string;
@@ -28,58 +27,61 @@ const adminRegisterSchema = v.object<{
   { allowUnknown: false }
 );
 
-export const POST = withApi(async (request, _context, { requestId }) => {
-  const body = await parseJson(request, adminRegisterSchema);
-  const passwordValidation = validatePasswordPolicy(body.password);
-  if (!passwordValidation.ok) {
-    badRequest(passwordValidation.errors[0], {
-      passwordPolicy: passwordValidation.policy,
-      errors: passwordValidation.errors
-    });
-  }
-
-  const expectedInvite = process.env.ADMIN_INVITE_CODE?.trim();
-  const adminCount = await getAdminCount();
-  const allowWithoutInvite = !expectedInvite && adminCount === 0;
-
-  if (expectedInvite) {
-    if (!body.inviteCode || body.inviteCode !== expectedInvite) {
-      forbidden("invalid invite code");
+export const POST = createAuthRoute({
+  cache: "private-realtime",
+  handler: async ({ request, meta }) => {
+    const body = await parseJson(request, adminRegisterSchema);
+    const passwordValidation = validatePasswordPolicy(body.password);
+    if (!passwordValidation.ok) {
+      badRequest(passwordValidation.errors[0], {
+        passwordPolicy: passwordValidation.policy,
+        errors: passwordValidation.errors
+      });
     }
-  } else if (!allowWithoutInvite) {
-    forbidden("invite code required");
-  }
 
-  const existing = await getUserByEmail(body.email);
-  if (existing) {
-    conflict("email exists");
-  }
+    const expectedInvite = process.env.ADMIN_INVITE_CODE?.trim();
+    const adminCount = await getAdminCount();
+    const allowWithoutInvite = !expectedInvite && adminCount === 0;
 
-  const id = `u-admin-${crypto.randomBytes(6).toString("hex")}`;
-  const user = {
-    id,
-    email: body.email,
-    name: body.name,
-    role: "admin" as const,
-    password: hashPassword(body.password)
-  };
-
-  await createUser(user);
-  const session = await createSession(user);
-
-  const response = apiSuccess(
-    {
-      ok: true,
-      role: "admin",
-      name: body.name
-    },
-    {
-      requestId,
-      status: 201,
-      message: "注册成功"
+    if (expectedInvite) {
+      if (!body.inviteCode || body.inviteCode !== expectedInvite) {
+        forbidden("invalid invite code");
+      }
+    } else if (!allowWithoutInvite) {
+      forbidden("invite code required");
     }
-  );
 
-  setSessionCookie(response, session.id);
-  return response;
+    const existing = await getUserByEmail(body.email);
+    if (existing) {
+      conflict("email exists");
+    }
+
+    const id = `u-admin-${crypto.randomBytes(6).toString("hex")}`;
+    const user = {
+      id,
+      email: body.email,
+      name: body.name,
+      role: "admin" as const,
+      password: hashPassword(body.password)
+    };
+
+    await createUser(user);
+    const session = await createSession(user);
+
+    const response = apiSuccess(
+      {
+        ok: true,
+        role: "admin",
+        name: body.name
+      },
+      {
+        requestId: meta.requestId,
+        status: 201,
+        message: "注册成功"
+      }
+    );
+
+    setSessionCookie(response, session.id);
+    return response;
+  }
 });

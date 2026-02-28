@@ -8,9 +8,10 @@ import {
   saveAiTaskPolicy,
   type AiTaskType
 } from "@/lib/ai-task-policies";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 import { requireRole } from "@/lib/guard";
+import { createAdminRoute } from "@/lib/api/domains";
 
 export const dynamic = "force-dynamic";
 
@@ -82,87 +83,93 @@ async function buildPayload() {
   };
 }
 
-export const GET = withApi(async () => {
-  const admin = await requireRole("admin");
-  if (!admin) {
-    unauthorized();
+export const GET = createAdminRoute({
+  cache: "private-realtime",
+  handler: async () => {
+    const admin = await requireRole("admin");
+    if (!admin) {
+      unauthorized();
+    }
+    return { data: await buildPayload() };
   }
-  return { data: await buildPayload() };
 });
 
-export const POST = withApi(async (request) => {
-  const admin = await requireRole("admin");
-  if (!admin) {
-    unauthorized();
-  }
-
-  const body = await parseJson(request, updateBodySchema);
-
-  if (body.reset) {
-    const taskType = asTaskType(body.taskType);
-    if (body.taskType && !taskType) {
-      badRequest("invalid taskType");
+export const POST = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const admin = await requireRole("admin");
+    if (!admin) {
+      unauthorized();
     }
-    const resetResult = await resetAiTaskPolicy(taskType ?? undefined);
-    await addAdminLog({
-      adminId: admin.id,
-      action: "reset_ai_task_policy",
-      entityType: "ai_policy",
-      entityId: taskType ?? "all",
-      detail: Array.isArray(resetResult) ? "reset all ai task policies" : `reset ${taskType}`
-    });
-    return { data: await buildPayload() };
-  }
 
-  if (body.policies?.length) {
-    const validPolicies = body.policies.map((item, index) => {
-      const taskType = asTaskType(item.taskType);
-      if (!taskType) {
-        badRequest(`policies[${index}].taskType invalid`);
+    const body = await parseJson(request, updateBodySchema);
+
+    if (body.reset) {
+      const taskType = asTaskType(body.taskType);
+      if (body.taskType && !taskType) {
+        badRequest("invalid taskType");
       }
-      return {
-        taskType,
-        providerChain: item.providerChain,
-        timeoutMs: item.timeoutMs,
-        maxRetries: item.maxRetries,
-        budgetLimit: item.budgetLimit,
-        minQualityScore: item.minQualityScore
-      };
+      const resetResult = await resetAiTaskPolicy(taskType ?? undefined);
+      await addAdminLog({
+        adminId: admin.id,
+        action: "reset_ai_task_policy",
+        entityType: "ai_policy",
+        entityId: taskType ?? "all",
+        detail: Array.isArray(resetResult) ? "reset all ai task policies" : `reset ${taskType}`
+      });
+      return { data: await buildPayload() };
+    }
+
+    if (body.policies?.length) {
+      const validPolicies = body.policies.map((item, index) => {
+        const taskType = asTaskType(item.taskType);
+        if (!taskType) {
+          badRequest(`policies[${index}].taskType invalid`);
+        }
+        return {
+          taskType,
+          providerChain: item.providerChain,
+          timeoutMs: item.timeoutMs,
+          maxRetries: item.maxRetries,
+          budgetLimit: item.budgetLimit,
+          minQualityScore: item.minQualityScore
+        };
+      });
+
+      await saveAiTaskPolicies(validPolicies, admin.id);
+      await addAdminLog({
+        adminId: admin.id,
+        action: "batch_update_ai_task_policy",
+        entityType: "ai_policy",
+        entityId: "batch",
+        detail: validPolicies.map((item) => item.taskType).join(",")
+      });
+      return { data: await buildPayload() };
+    }
+
+    const taskType = asTaskType(body.taskType);
+    if (!taskType) {
+      badRequest("taskType required");
+    }
+
+    const next = await saveAiTaskPolicy({
+      taskType,
+      providerChain: body.providerChain,
+      timeoutMs: body.timeoutMs,
+      maxRetries: body.maxRetries,
+      budgetLimit: body.budgetLimit,
+      minQualityScore: body.minQualityScore,
+      updatedBy: admin.id
     });
 
-    await saveAiTaskPolicies(validPolicies, admin.id);
     await addAdminLog({
       adminId: admin.id,
-      action: "batch_update_ai_task_policy",
+      action: "update_ai_task_policy",
       entityType: "ai_policy",
-      entityId: "batch",
-      detail: validPolicies.map((item) => item.taskType).join(",")
+      entityId: taskType,
+      detail: `${taskType}:${next.providerChain.join("->")}`
     });
+
     return { data: await buildPayload() };
   }
-
-  const taskType = asTaskType(body.taskType);
-  if (!taskType) {
-    badRequest("taskType required");
-  }
-
-  const next = await saveAiTaskPolicy({
-    taskType,
-    providerChain: body.providerChain,
-    timeoutMs: body.timeoutMs,
-    maxRetries: body.maxRetries,
-    budgetLimit: body.budgetLimit,
-    minQualityScore: body.minQualityScore,
-    updatedBy: admin.id
-  });
-
-  await addAdminLog({
-    adminId: admin.id,
-    action: "update_ai_task_policy",
-    entityType: "ai_policy",
-    entityId: taskType,
-    detail: `${taskType}:${next.providerChain.join("->")}`
-  });
-
-  return { data: await buildPayload() };
 });

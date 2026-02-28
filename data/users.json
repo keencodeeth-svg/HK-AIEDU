@@ -306,5 +306,117 @@
     "role": "student",
     "grade": "4",
     "password": "ca3517869a86d7627007982ee934e7dc:09596378fce156c461afb47409d00fcfb76acc68db5dca9ff690c5e1398f1394a16b3f409b581d61cdfe32569dacc80e315ca384311f98c3075a151e37630fe3"
+  },
+  {
+    "id": "u-42930b41d1ae",
+    "email": "api-test-student@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "08652d77a35e37956ed0c2c6909c8bee:048385647c21f0b60ed485e83b9b7bd1070740ba0478398f3dd9d0216df6bfc52349cd1f50911fb977d8c2d83833d31ba9f006c4aae3d57ba8b7de1f42209620"
+  },
+  {
+    "id": "u-592431740107",
+    "email": "api-test-student-mm2pmxpv@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "9e516a8533158faa7dcf35c66efe42af:45643e3f9daeb72b9d1d06ed35f17f5549de3fbaa7567acfc2782a923683db7176844567568d63703b01a9ec04f9fb521d08612559f323f00004e98b0c6b70e1"
+  },
+  {
+    "id": "u-eb73f8ae91e2",
+    "email": "api-test-student-mm32buxe@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "bb5285c7fdc91522e1d01089a516433f:0f33f2a05c12805d3d7b95f3bb802fa976fec3a0d67b83a7c623ee92d09524df542c58429ee25f4f7aa8d8f15bf4c9ae441c0ea67f2154e431337d9673306c29"
+  },
+  {
+    "id": "u-12ca084a877f",
+    "email": "api-test-student-mm32fam2@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "55d2ba877222e489c51f02a30801171c:997586dce87fc0ee67798d7a146920e180e3d6a578199d614a9bca620a508ee2b938e591baeefeb2e22ffee4458f0d8307612327d11487fb79c1959a6f69186c"
+  },
+  {
+    "id": "u-42642fa855da",
+    "email": "api-test-student-mm32krf5@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "0d25d3e68ab59b6a4c6ecaf51ff05ef7:2559982a9366ec8017d4f7312e13c58a9a9030052b23492b40dc37281859451aeada4e20b8d82fe4aa209f3a5ad03496799f7d1b9d1e1a59fb9772b10a8cf496"
+  },
+  {
+    "id": "u-3f2265c9d0b7",
+    "email": "api-test-student-mm32l7ws@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "d1b234f8822e320ce19285b5801e9c8a:060e3bfafc0556af6080be6d1e79a45e962dee6ad38743deae3e52b48168d0bbbfd94e6810d6cf7752c6f55bbbc137d0413506c4c1e648c02425a7b0a566bd57"
+  },
+  {
+    "id": "u-d15b9d003d0b",
+    "email": "api-test-student-mm39oig2@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "9251589c24746234c8c87dd065787e01:d247f93769196f6b194c2997f33908ddacc0168414ccc0d587634adc4a8cee7675938d38fa89e2cb36d8d0ca41b367ad0ab07bb7b7c430d242e4511b3598b8a7"
+  },
+  {
+    "id": "u-c51ff8391ba0",
+    "email": "api-test-student-mm39pnvr@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "fb015fb56fd3dd70c8be7dd46238afdf:c6b04dbc733705ea5e74b1d733d19e275b3ea950477ff8c4173c055852bad15b97d30f28a0d56a33486377aa018aaf1c8c08cf1c55ef74da2c207760c948dc68"
+  },
+  {
+    "id": "u-3c270e8f8712",
+    "email": "api-test-student-mm39sqnp@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "c8a387f3a8e35ac16d527a23fcad4e99:1ba6dc2351510762267f91b09d995cc011b60473826aa1aeb84e082e5dafccc42e5dc6a4c3553c4eef5bf7a43e7a693e1804f257fa70ce3201749ef47f8b3385"
+  },
+  {
+    "id": "u-fc56e0cfad28",
+    "email": "api-test-student-mm39ueyb@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "af802c2d2a3eb546f1db2391ef501f24:f477aac498c29f55b874087e6fe1bd167ebe573d9e8b785473a95a7c64c971c0a91ade80a24bbb6d8f36184090d0785a2147ece76b637be7ff34be26e1761edf"
+  },
+  {
+    "id": "u-d25599f2ced2",
+    "email": "api-test-student-mm3arl3h@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "388f40d7323a20fac7e1e1f8e0b0b206:eac278e75d3b173d49f3c1e313c7c596485541c159518b6d82e9adde77d2f72405bb391892ce21c73d740ee74274f01743f797a9fe5b929c0ae0dde322688467"
+  },
+  {
+    "id": "u-e223738228b7",
+    "email": "api-test-student-mm3bu7so@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "d45ed1459aaaf515677f2705ebdd6b31:0b969278082847e3ab3596e37004de97141d53dcfb36b932853af741360b4460681dd0ac1d39dafa5d8a68f89df6785ebdb2ea4a0b8d59daa0bfd06b7596969f"
+  },
+  {
+    "id": "u-1fc0fd6f084e",
+    "email": "api-test-student-mm3dbn87@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "b92bbb87137314cfc249d92a98fa06de:72ff9de5258e1304e3b552025ba90eb60a32a47633437cbd9e2dfd7bf1ab29d61479ebe23c90318aa504abf624c770941dccd570053f188b8f9f40c54da88915"
+  },
+  {
+    "id": "u-0591e777e503",
+    "email": "api-test-student-mm3ddlv3@local.test",
+    "name": "API Test Student",
+    "role": "student",
+    "grade": "4",
+    "password": "49f38dfd0e021d227da5735bdd386910:eaf6f088a4d53f007f0baa82ed2995a34e913b19478053fd80eef2035e26bef4a65bb1c8d4d8102f52cf6172c8e0eea1c5213a88c54277e001e31a4f09c494b0"
   }
 ]

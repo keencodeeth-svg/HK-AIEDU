@@ -11,13 +11,14 @@ import {
   evaluateAndUpsertQuestionQuality
 } from "@/lib/question-quality";
 import { addAdminLog } from "@/lib/admin-log";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 import {
   isAllowedSubject,
   normalizeDifficulty,
   trimStringArray
 } from "@/lib/api/schemas/admin";
+import { createAdminRoute } from "@/lib/api/domains";
 
 export const dynamic = "force-dynamic";
 
@@ -162,27 +163,29 @@ function makeKpKey(input: {
   ].join("|");
 }
 
-export const POST = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
+export const POST = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
 
-  const body = await parseJson(request, bodySchema);
-  const textbooks = body.textbooks ?? [];
-  const questions = body.questions ?? [];
-  if (!textbooks.length && !questions.length) {
-    badRequest("textbooks or questions required");
-  }
+    const body = await parseJson(request, bodySchema);
+    const textbooks = body.textbooks ?? [];
+    const questions = body.questions ?? [];
+    if (!textbooks.length && !questions.length) {
+      badRequest("textbooks or questions required");
+    }
 
-  const autoCreateKnowledgePoint = body.options?.autoCreateKnowledgePoint !== false;
-  const skipExistingQuestionStem = body.options?.skipExistingQuestionStem !== false;
+    const autoCreateKnowledgePoint = body.options?.autoCreateKnowledgePoint !== false;
+    const skipExistingQuestionStem = body.options?.skipExistingQuestionStem !== false;
 
-  const existingQuestions = await getQuestions();
-  const qualityCandidates = [...existingQuestions];
-  const seenStemKeys = new Set(
-    existingQuestions.map((item) => `${item.subject}|${item.grade}|${normalizeStem(item.stem)}`)
-  );
+    const existingQuestions = await getQuestions();
+    const qualityCandidates = [...existingQuestions];
+    const seenStemKeys = new Set(
+      existingQuestions.map((item) => `${item.subject}|${item.grade}|${normalizeStem(item.stem)}`)
+    );
 
   const kpList = await getKnowledgePoints();
   const kpById = new Map(kpList.map((kp) => [kp.id, kp]));
@@ -414,25 +417,26 @@ export const POST = withApi(async (request) => {
     detail: `textbooks=${textbookCreated.length}/${textbooks.length}, questions=${questionCreated.length}/${questions.length}, kpCreated=${knowledgePointsCreated}`
   });
 
-  return {
-    data: {
-      summary: {
-        textbooksTotal: textbooks.length,
-        textbooksImported: textbookCreated.length,
-        textbooksFailed: textbookFailed.length,
-        questionsTotal: questions.length,
-        questionsImported: questionCreated.length,
-        questionsFailed: questionFailed.length,
-        knowledgePointsCreated
-      },
-      textbooks: {
-        created: textbookCreated,
-        failed: textbookFailed
-      },
-      questions: {
-        created: questionCreated,
-        failed: questionFailed
+    return {
+      data: {
+        summary: {
+          textbooksTotal: textbooks.length,
+          textbooksImported: textbookCreated.length,
+          textbooksFailed: textbookFailed.length,
+          questionsTotal: questions.length,
+          questionsImported: questionCreated.length,
+          questionsFailed: questionFailed.length,
+          knowledgePointsCreated
+        },
+        textbooks: {
+          created: textbookCreated,
+          failed: textbookFailed
+        },
+        questions: {
+          created: questionCreated,
+          failed: questionFailed
+        }
       }
-    }
-  };
+    };
+  }
 });

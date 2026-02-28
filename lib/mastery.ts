@@ -1,6 +1,6 @@
-import { isDbEnabled, query, queryOne } from "./db";
+import { assertDatabaseEnabled, isDbEnabled, query, queryOne } from "./db";
 import { getQuestions } from "./content";
-import { type QuestionAttempt, getAttemptsByUser } from "./progress";
+import { type QuestionAttempt, getAttemptsByKnowledgePoint, getAttemptsByUser } from "./progress";
 import { readJson, writeJson } from "./storage";
 
 export type MasteryLevel = "weak" | "developing" | "strong";
@@ -280,6 +280,7 @@ async function buildRecordsFromAttempts(userId: string, attempts: QuestionAttemp
 
 async function readMasteryRecords(userId: string, subject?: string) {
   if (!isDbEnabled()) {
+    assertDatabaseEnabled("mastery_records");
     const records = readJson<MasteryRecord[]>(MASTERY_FILE, []).map(normalizeMasteryRecord);
     return records.filter((item) => item.userId === userId && (!subject || item.subject === subject));
   }
@@ -295,6 +296,7 @@ async function readMasteryRecords(userId: string, subject?: string) {
 
 async function replaceMasteryRecords(userId: string, subject: string | undefined, records: MasteryRecord[]) {
   if (!isDbEnabled()) {
+    assertDatabaseEnabled("mastery_records");
     const all = readJson<MasteryRecord[]>(MASTERY_FILE, []);
     const remained = all.filter((item) => {
       if (item.userId !== userId) return true;
@@ -334,11 +336,107 @@ async function replaceMasteryRecords(userId: string, subject: string | undefined
   }
 }
 
+async function upsertMasteryRecord(record: MasteryRecord) {
+  if (!isDbEnabled()) {
+    assertDatabaseEnabled("mastery_records");
+    const all = readJson<MasteryRecord[]>(MASTERY_FILE, []);
+    const next = all.filter(
+      (item) => !(item.userId === record.userId && item.knowledgePointId === record.knowledgePointId)
+    );
+    next.push(record);
+    writeJson(MASTERY_FILE, next);
+    return;
+  }
+
+  await query(
+    `INSERT INTO mastery_records
+     (id, user_id, subject, knowledge_point_id, correct_count, total_count, mastery_score, confidence_score, recency_weight, mastery_trend_7d, last_attempt_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+     ON CONFLICT (user_id, knowledge_point_id) DO UPDATE SET
+       subject = EXCLUDED.subject,
+       correct_count = EXCLUDED.correct_count,
+       total_count = EXCLUDED.total_count,
+       mastery_score = EXCLUDED.mastery_score,
+       confidence_score = EXCLUDED.confidence_score,
+       recency_weight = EXCLUDED.recency_weight,
+       mastery_trend_7d = EXCLUDED.mastery_trend_7d,
+       last_attempt_at = EXCLUDED.last_attempt_at,
+       updated_at = EXCLUDED.updated_at`,
+    [
+      record.id,
+      record.userId,
+      record.subject,
+      record.knowledgePointId,
+      record.correct,
+      record.total,
+      record.masteryScore,
+      record.confidenceScore,
+      record.recencyWeight,
+      record.masteryTrend7d,
+      record.lastAttemptAt,
+      record.updatedAt
+    ]
+  );
+}
+
+async function deleteMasteryRecord(userId: string, knowledgePointId: string, subject?: string) {
+  if (!isDbEnabled()) {
+    assertDatabaseEnabled("mastery_records");
+    const all = readJson<MasteryRecord[]>(MASTERY_FILE, []);
+    const next = all.filter(
+      (item) =>
+        !(
+          item.userId === userId &&
+          item.knowledgePointId === knowledgePointId &&
+          (!subject || item.subject === subject)
+        )
+    );
+    if (next.length !== all.length) {
+      writeJson(MASTERY_FILE, next);
+    }
+    return;
+  }
+
+  if (subject) {
+    await query(
+      "DELETE FROM mastery_records WHERE user_id = $1 AND knowledge_point_id = $2 AND subject = $3",
+      [userId, knowledgePointId, subject]
+    );
+    return;
+  }
+  await query("DELETE FROM mastery_records WHERE user_id = $1 AND knowledge_point_id = $2", [userId, knowledgePointId]);
+}
+
 export async function syncMasteryFromAttempts(userId: string, subject?: string) {
   const attempts = await getAttemptsByUser(userId);
   const nextRecords = await buildRecordsFromAttempts(userId, attempts, subject);
   await replaceMasteryRecords(userId, subject, nextRecords);
   return nextRecords;
+}
+
+export async function syncMasteryForKnowledgePoint(userId: string, knowledgePointId: string, subject?: string) {
+  const attempts = await getAttemptsByKnowledgePoint(userId, knowledgePointId, subject);
+  const records = await buildRecordsFromAttempts(userId, attempts, subject);
+  const next = records.find((item) => item.knowledgePointId === knowledgePointId) ?? null;
+  if (!next) {
+    await deleteMasteryRecord(userId, knowledgePointId, subject);
+    return null;
+  }
+  await upsertMasteryRecord(next);
+  return next;
+}
+
+export async function syncMasteryForKnowledgePoints(userId: string, knowledgePointIds: string[], subject?: string) {
+  const ids = Array.from(new Set(knowledgePointIds.filter(Boolean)));
+  if (!ids.length) {
+    return readMasteryRecords(userId, subject);
+  }
+
+  for (const knowledgePointId of ids) {
+    await syncMasteryForKnowledgePoint(userId, knowledgePointId, subject);
+  }
+
+  return readMasteryRecords(userId, subject);
 }
 
 export async function getMasteryRecordsByUser(userId: string, subject?: string) {
@@ -351,6 +449,7 @@ export async function getMasteryRecordsByUser(userId: string, subject?: string) 
 
 export async function getMasteryRecord(userId: string, knowledgePointId: string, subject?: string) {
   if (!isDbEnabled()) {
+    assertDatabaseEnabled("mastery_records");
     const records = readJson<MasteryRecord[]>(MASTERY_FILE, []).map(normalizeMasteryRecord);
     const found = records.find(
       (item) =>
@@ -359,8 +458,7 @@ export async function getMasteryRecord(userId: string, knowledgePointId: string,
         (!subject || item.subject === subject)
     );
     if (found) return found;
-    const synced = await syncMasteryFromAttempts(userId, subject);
-    return synced.find((item) => item.knowledgePointId === knowledgePointId) ?? null;
+    return syncMasteryForKnowledgePoint(userId, knowledgePointId, subject);
   }
 
   const row = subject
@@ -377,8 +475,7 @@ export async function getMasteryRecord(userId: string, knowledgePointId: string,
     return mapDbRecord(row);
   }
 
-  const synced = await syncMasteryFromAttempts(userId, subject);
-  return synced.find((item) => item.knowledgePointId === knowledgePointId) ?? null;
+  return syncMasteryForKnowledgePoint(userId, knowledgePointId, subject);
 }
 
 export function getWeaknessRankMap(records: MasteryRecord[], subject?: string) {

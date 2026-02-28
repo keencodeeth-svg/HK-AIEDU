@@ -1,12 +1,13 @@
 import { requireRole } from "@/lib/guard";
 import { createKnowledgePoint, getKnowledgePoints } from "@/lib/content";
 import { addAdminLog } from "@/lib/admin-log";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import {
   importTreeBodySchema,
   isAllowedSubject
 } from "@/lib/api/schemas/admin";
 import { parseJson } from "@/lib/api/validation";
+import { createAdminRoute } from "@/lib/api/domains";
 export const dynamic = "force-dynamic";
 
 function normalizeKey(subject: string, grade: string, unit: string, chapter: string, title: string) {
@@ -23,11 +24,13 @@ function normalizeKey(subject: string, grade: string, unit: string, chapter: str
   );
 }
 
-export const POST = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
+export const POST = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
 
   const body = await parseJson(request, importTreeBodySchema);
 
@@ -97,13 +100,14 @@ export const POST = withApi(async (request) => {
     }
   }
 
-  await addAdminLog({
-    adminId: user.id,
-    action: "import_knowledge_tree",
-    entityType: "knowledge_point",
-    entityId: null,
-    detail: `created=${created.length}, skipped=${skipped.length}`
-  });
+    await addAdminLog({
+      adminId: user.id,
+      action: "import_knowledge_tree",
+      entityType: "knowledge_point",
+      entityId: null,
+      detail: `created=${created.length}, skipped=${skipped.length}`
+    });
 
-  return { created, skipped };
+    return { created, skipped };
+  }
 });

@@ -4,10 +4,9 @@ import { getStudentContext } from "@/lib/user-context";
 import { getAssignmentsByClass } from "@/lib/assignments";
 import { getModulesByClass } from "@/lib/modules";
 import { getCourseFilesByClassIds } from "@/lib/course-files";
-import { notFound, unauthorized, withApi } from "@/lib/api/http";
+import { notFound, unauthorized } from "@/lib/api/http";
 import { parseSearchParams, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const summaryQuerySchema = v.object<{ classId: string }>(
   {
@@ -35,40 +34,43 @@ async function canAccessClass(userId: string, role: string, classId: string) {
   return null;
 }
 
-export const GET = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
-  }
-
-  const query = parseSearchParams(request, summaryQuerySchema);
-  const classId = query.classId;
-  const klass = await canAccessClass(user.id, user.role, classId);
-  if (!klass) {
-    notFound("not found");
-  }
-
-  const assignments = await getAssignmentsByClass(classId);
-  const upcoming = assignments
-    .filter((item) => new Date(item.dueDate).getTime() >= Date.now())
-    .sort((a, b) => (a.dueDate > b.dueDate ? 1 : -1))
-    .slice(0, 5)
-    .map((item) => ({
-      id: item.id,
-      title: item.title,
-      dueDate: item.dueDate,
-      submissionType: item.submissionType ?? "quiz"
-    }));
-
-  const modules = await getModulesByClass(classId);
-  const files = await getCourseFilesByClassIds([classId]);
-
-  return {
-    class: klass,
-    summary: {
-      moduleCount: modules.length,
-      resourceCount: files.length,
-      upcomingAssignments: upcoming
+export const GET = createLearningRoute({
+  cache: "private-short",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user) {
+      unauthorized();
     }
-  };
+
+    const query = parseSearchParams(request, summaryQuerySchema);
+    const classId = query.classId;
+    const klass = await canAccessClass(user.id, user.role, classId);
+    if (!klass) {
+      notFound("not found");
+    }
+
+    const assignments = await getAssignmentsByClass(classId);
+    const upcoming = assignments
+      .filter((item) => new Date(item.dueDate).getTime() >= Date.now())
+      .sort((a, b) => (a.dueDate > b.dueDate ? 1 : -1))
+      .slice(0, 5)
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        dueDate: item.dueDate,
+        submissionType: item.submissionType ?? "quiz"
+      }));
+
+    const modules = await getModulesByClass(classId);
+    const files = await getCourseFilesByClassIds([classId]);
+
+    return {
+      class: klass,
+      summary: {
+        moduleCount: modules.length,
+        resourceCount: files.length,
+        upcomingAssignments: upcoming
+      }
+    };
+  }
 });

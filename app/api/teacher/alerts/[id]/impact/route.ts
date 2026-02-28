@@ -1,10 +1,9 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getTeacherAlerts } from "@/lib/teacher-alerts";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseParams, v } from "@/lib/api/validation";
 import { buildTeacherAlertImpactReport, getTeacherAlertImpactByAlert } from "@/lib/teacher-alert-impacts";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const paramsSchema = v.object<{ id: string }>(
   {
@@ -13,51 +12,54 @@ const paramsSchema = v.object<{ id: string }>(
   { allowUnknown: true }
 );
 
-export const GET = withApi(async (_request, context) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "teacher") {
-    unauthorized();
-  }
-
-  const params = parseParams(context.params, paramsSchema);
-  const alertId = params.id.trim();
-  if (!alertId) {
-    badRequest("invalid alert id");
-  }
-
-  const impactRecord = await getTeacherAlertImpactByAlert({
-    teacherId: user.id,
-    alertId
-  });
-
-  const overview = await getTeacherAlerts({
-    teacherId: user.id,
-    includeAcknowledged: true
-  });
-  const target = overview.alerts.find((item) => item.id === alertId);
-  if (!target && !impactRecord) {
-    notFound("not found");
-  }
-
-  const impact = buildTeacherAlertImpactReport({
-    record: impactRecord,
-    current: target
-      ? {
-          riskScore: target.riskScore,
-          status: target.status,
-          metrics: target.metrics ?? {}
-        }
-      : null
-  });
-
-  return {
-    data: {
-      alertId,
-      classId: target?.classId ?? impactRecord?.classId ?? null,
-      type: target?.type ?? null,
-      riskReason: target?.riskReason ?? "",
-      recommendedAction: target?.recommendedAction ?? impactRecord?.baseline.recommendedAction ?? "",
-      impact
+export const GET = createLearningRoute({
+  role: "teacher",
+  cache: "private-short",
+  handler: async ({ params, user }) => {
+    if (!user || user.role !== "teacher") {
+      unauthorized();
     }
-  };
+
+    const parsed = parseParams(params, paramsSchema);
+    const alertId = parsed.id.trim();
+    if (!alertId) {
+      badRequest("invalid alert id");
+    }
+
+    const impactRecord = await getTeacherAlertImpactByAlert({
+      teacherId: user.id,
+      alertId
+    });
+
+    const overview = await getTeacherAlerts({
+      teacherId: user.id,
+      includeAcknowledged: true
+    });
+    const target = overview.alerts.find((item) => item.id === alertId);
+    if (!target && !impactRecord) {
+      notFound("not found");
+    }
+
+    const impact = buildTeacherAlertImpactReport({
+      record: impactRecord,
+      current: target
+        ? {
+            riskScore: target.riskScore,
+            status: target.status,
+            metrics: target.metrics ?? {}
+          }
+        : null
+    });
+
+    return {
+      data: {
+        alertId,
+        classId: target?.classId ?? impactRecord?.classId ?? null,
+        type: target?.type ?? null,
+        riskReason: target?.riskReason ?? "",
+        recommendedAction: target?.recommendedAction ?? impactRecord?.baseline.recommendedAction ?? "",
+        impact
+      }
+    };
+  }
 });

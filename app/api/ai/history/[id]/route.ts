@@ -1,8 +1,8 @@
 import { getCurrentUser } from "@/lib/auth";
 import { deleteHistoryItem, getHistoryByUser, updateHistoryItem } from "@/lib/ai-history";
-import { notFound, unauthorized, withApi } from "@/lib/api/http";
+import { notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, parseParams, v } from "@/lib/api/validation";
-export const dynamic = "force-dynamic";
+import { createAiRoute } from "@/lib/api/domains";
 
 const historyParamsSchema = v.object<{ id: string }>(
   {
@@ -19,43 +19,51 @@ const updateHistoryBodySchema = v.object<{ favorite?: boolean; tags?: string[] }
   { allowUnknown: false }
 );
 
-export const PATCH = withApi(async (request, context) => {
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
-  }
+export const PATCH = createAiRoute({
+  role: ["student", "teacher", "parent", "admin"],
+  cache: "private-realtime",
+  handler: async ({ request, params }) => {
+    const user = await getCurrentUser();
+    if (!user) {
+      unauthorized();
+    }
 
-  const params = parseParams(context.params, historyParamsSchema);
-  const body = await parseJson(request, updateHistoryBodySchema);
-  const ownsRecord = (await getHistoryByUser(user.id)).some((item) => item.id === params.id);
-  if (!ownsRecord) {
-    notFound("not found");
-  }
+    const parsed = parseParams(params, historyParamsSchema);
+    const body = await parseJson(request, updateHistoryBodySchema);
+    const ownsRecord = (await getHistoryByUser(user.id)).some((item) => item.id === parsed.id);
+    if (!ownsRecord) {
+      notFound("not found");
+    }
 
-  const next = await updateHistoryItem(params.id, body);
-  if (!next) {
-    notFound("not found");
-  }
+    const next = await updateHistoryItem(parsed.id, body);
+    if (!next) {
+      notFound("not found");
+    }
 
-  return { data: next };
+    return { data: next };
+  }
 });
 
-export const DELETE = withApi(async (_request, context) => {
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
-  }
+export const DELETE = createAiRoute({
+  role: ["student", "teacher", "parent", "admin"],
+  cache: "private-realtime",
+  handler: async ({ params }) => {
+    const user = await getCurrentUser();
+    if (!user) {
+      unauthorized();
+    }
 
-  const params = parseParams(context.params, historyParamsSchema);
-  const ownsRecord = (await getHistoryByUser(user.id)).some((item) => item.id === params.id);
-  if (!ownsRecord) {
-    notFound("not found");
-  }
+    const parsed = parseParams(params, historyParamsSchema);
+    const ownsRecord = (await getHistoryByUser(user.id)).some((item) => item.id === parsed.id);
+    if (!ownsRecord) {
+      notFound("not found");
+    }
 
-  const ok = await deleteHistoryItem(params.id);
-  if (!ok) {
-    notFound("not found");
-  }
+    const ok = await deleteHistoryItem(parsed.id);
+    if (!ok) {
+      notFound("not found");
+    }
 
-  return { ok: true };
+    return { ok: true };
+  }
 });

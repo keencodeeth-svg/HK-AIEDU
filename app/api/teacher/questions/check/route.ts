@@ -1,10 +1,9 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getQuestions } from "@/lib/content";
 import { generateQuestionCheck } from "@/lib/ai";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const questionCheckBodySchema = v.object<{
   questionId?: string;
@@ -52,57 +51,60 @@ function basicCheck(payload: {
   return { issues, risk };
 }
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "teacher") {
-    unauthorized();
-  }
-
-  const body = await parseJson(request, questionCheckBodySchema);
-
-  let stem = body.stem ?? "";
-  let options = Array.isArray(body.options) ? body.options : [];
-  let answer = body.answer ?? "";
-  let explanation = body.explanation ?? "";
-  let subject = body.subject;
-  let grade = body.grade;
-
-  if (body.questionId) {
-    const question = (await getQuestions()).find((q) => q.id === body.questionId);
-    if (!question) {
-      notFound("not found");
+export const POST = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "teacher") {
+      unauthorized();
     }
-    stem = question.stem;
-    options = question.options;
-    answer = question.answer;
-    explanation = question.explanation;
-    subject = question.subject;
-    grade = question.grade;
-  }
 
-  if (!stem || !options.length || !answer) {
-    badRequest("missing fields");
-  }
+    const body = await parseJson(request, questionCheckBodySchema);
 
-  const base = basicCheck({ stem, options, answer, explanation });
-  const ai = await generateQuestionCheck({
-    stem,
-    options,
-    answer,
-    explanation,
-    subject,
-    grade
-  });
+    let stem = body.stem ?? "";
+    let options = Array.isArray(body.options) ? body.options : [];
+    let answer = body.answer ?? "";
+    let explanation = body.explanation ?? "";
+    let subject = body.subject;
+    let grade = body.grade;
 
-  const issues = [...base.issues, ...(ai?.issues ?? [])];
-  const risk = ai?.risk ?? base.risk;
-
-  return {
-    data: {
-      issues,
-      risk,
-      suggestedAnswer: ai?.suggestedAnswer,
-      notes: ai?.notes
+    if (body.questionId) {
+      const question = (await getQuestions()).find((q) => q.id === body.questionId);
+      if (!question) {
+        notFound("not found");
+      }
+      stem = question.stem;
+      options = question.options;
+      answer = question.answer;
+      explanation = question.explanation;
+      subject = question.subject;
+      grade = question.grade;
     }
-  };
+
+    if (!stem || !options.length || !answer) {
+      badRequest("missing fields");
+    }
+
+    const base = basicCheck({ stem, options, answer, explanation });
+    const ai = await generateQuestionCheck({
+      stem,
+      options,
+      answer,
+      explanation,
+      subject,
+      grade
+    });
+
+    const issues = [...base.issues, ...(ai?.issues ?? [])];
+    const risk = ai?.risk ?? base.risk;
+
+    return {
+      data: {
+        issues,
+        risk,
+        suggestedAnswer: ai?.suggestedAnswer,
+        notes: ai?.notes
+      }
+    };
+  }
 });

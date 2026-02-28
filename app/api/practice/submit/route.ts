@@ -1,12 +1,10 @@
 import crypto from "crypto";
-import { getCurrentUser } from "@/lib/auth";
 import { getQuestions } from "@/lib/content";
 import { addAttempt } from "@/lib/progress";
-import { getMasteryRecord, getWeaknessRankMap, syncMasteryFromAttempts } from "@/lib/mastery";
-import { notFound, unauthorized, withApi } from "@/lib/api/http";
+import { getMasteryRecord, getWeaknessRankMap, syncMasteryForKnowledgePoints } from "@/lib/mastery";
+import { notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const submitBodySchema = v.object<{
   questionId: string;
@@ -19,61 +17,64 @@ const submitBodySchema = v.object<{
   { allowUnknown: false }
 );
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "student") {
-    unauthorized();
-  }
+export const POST = createLearningRoute({
+  role: "student",
+  cache: "private-realtime",
+  handler: async ({ request, user }) => {
+    if (!user || user.role !== "student") {
+      unauthorized();
+    }
 
-  const body = await parseJson(request, submitBodySchema);
+    const body = await parseJson(request, submitBodySchema);
 
-  const question = (await getQuestions()).find((q) => q.id === body.questionId);
-  if (!question) {
-    notFound("not found");
-  }
+    const question = (await getQuestions()).find((q) => q.id === body.questionId);
+    if (!question) {
+      notFound("not found");
+    }
 
-  const previousMastery = await getMasteryRecord(user.id, question.knowledgePointId, question.subject);
-  const previousScore = previousMastery?.masteryScore ?? 0;
-  const correct = body.answer === question.answer;
-  await addAttempt({
-    id: crypto.randomBytes(10).toString("hex"),
-    userId: user.id,
-    questionId: question.id,
-    subject: question.subject,
-    knowledgePointId: question.knowledgePointId,
-    correct,
-    answer: body.answer,
-    createdAt: new Date().toISOString()
-  });
-
-  const masteryRecords = await syncMasteryFromAttempts(user.id, question.subject);
-  const mastery = masteryRecords.find((item) => item.knowledgePointId === question.knowledgePointId);
-  const weaknessRankMap = getWeaknessRankMap(masteryRecords, question.subject);
-  const weaknessRank = weaknessRankMap.get(question.knowledgePointId) ?? null;
-  const masteryScore = mastery?.masteryScore ?? previousScore;
-  const masteryDelta = masteryScore - previousScore;
-
-  return {
-    correct,
-    answer: question.answer,
-    explanation: question.explanation,
-    knowledgePointId: question.knowledgePointId,
-    masteryScore,
-    masteryDelta,
-    weaknessRank,
-    mastery: {
-      knowledgePointId: question.knowledgePointId,
+    const previousMastery = await getMasteryRecord(user.id, question.knowledgePointId, question.subject);
+    const previousScore = previousMastery?.masteryScore ?? 0;
+    const correct = body.answer === question.answer;
+    await addAttempt({
+      id: crypto.randomBytes(10).toString("hex"),
+      userId: user.id,
+      questionId: question.id,
       subject: question.subject,
+      knowledgePointId: question.knowledgePointId,
+      correct,
+      answer: body.answer,
+      createdAt: new Date().toISOString()
+    });
+
+    const masteryRecords = await syncMasteryForKnowledgePoints(user.id, [question.knowledgePointId], question.subject);
+    const mastery = masteryRecords.find((item) => item.knowledgePointId === question.knowledgePointId);
+    const weaknessRankMap = getWeaknessRankMap(masteryRecords, question.subject);
+    const weaknessRank = weaknessRankMap.get(question.knowledgePointId) ?? null;
+    const masteryScore = mastery?.masteryScore ?? previousScore;
+    const masteryDelta = masteryScore - previousScore;
+
+    return {
+      correct,
+      answer: question.answer,
+      explanation: question.explanation,
+      knowledgePointId: question.knowledgePointId,
       masteryScore,
       masteryDelta,
       weaknessRank,
-      masteryLevel: mastery?.masteryLevel ?? "weak",
-      confidenceScore: mastery?.confidenceScore ?? 0,
-      recencyWeight: mastery?.recencyWeight ?? 0,
-      masteryTrend7d: mastery?.masteryTrend7d ?? 0,
-      correct: mastery?.correct ?? 0,
-      total: mastery?.total ?? 0,
-      lastAttemptAt: mastery?.lastAttemptAt ?? null
-    }
-  };
+      mastery: {
+        knowledgePointId: question.knowledgePointId,
+        subject: question.subject,
+        masteryScore,
+        masteryDelta,
+        weaknessRank,
+        masteryLevel: mastery?.masteryLevel ?? "weak",
+        confidenceScore: mastery?.confidenceScore ?? 0,
+        recencyWeight: mastery?.recencyWeight ?? 0,
+        masteryTrend7d: mastery?.masteryTrend7d ?? 0,
+        correct: mastery?.correct ?? 0,
+        total: mastery?.total ?? 0,
+        lastAttemptAt: mastery?.lastAttemptAt ?? null
+      }
+    };
+  }
 });

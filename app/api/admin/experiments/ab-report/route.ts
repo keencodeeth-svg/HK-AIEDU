@@ -1,7 +1,8 @@
 import { requireRole } from "@/lib/guard";
-import { unauthorized, withApi } from "@/lib/api/http";
+import { unauthorized } from "@/lib/api/http";
 import { parseSearchParams, v } from "@/lib/api/validation";
 import { getChallengeABReport } from "@/lib/experiments";
+import { createAdminRoute } from "@/lib/api/domains";
 
 export const dynamic = "force-dynamic";
 
@@ -12,13 +13,16 @@ const reportQuerySchema = v.object<{ days?: number }>(
   { allowUnknown: true }
 );
 
-export const GET = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
+export const GET = createAdminRoute({
+  cache: "private-short",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
+    const query = parseSearchParams(request, reportQuerySchema);
+    const days = query.days ?? 7;
+    const data = await getChallengeABReport(days);
+    return { data };
   }
-  const query = parseSearchParams(request, reportQuerySchema);
-  const days = query.days ?? 7;
-  const data = await getChallengeABReport(days);
-  return { data };
 });

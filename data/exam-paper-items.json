@@ -1,0 +1,23 @@
+[
+  {
+    "id": "exam-item-2da4fdfee14b",
+    "paperId": "exam-paper-42e1e4956291",
+    "questionId": "q-math-4-kp-math-4-3-4",
+    "score": 1,
+    "orderIndex": 1
+  },
+  {
+    "id": "exam-item-12dbe57989ad",
+    "paperId": "exam-paper-0323af3ea018",
+    "questionId": "q-math-4-kp-math-4-2-2",
+    "score": 1,
+    "orderIndex": 1
+  },
+  {
+    "id": "exam-item-3a6276515f05",
+    "paperId": "exam-paper-c265b2f6a452",
+    "questionId": "q-math-4-kp-math-4-2-2",
+    "score": 1,
+    "orderIndex": 1
+  }
+]

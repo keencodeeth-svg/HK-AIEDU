@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { readJson, writeJson } from "./storage";
 import { getKnowledgePoints, getQuestions } from "./content";
 import type { Question } from "./types";
-import { isDbEnabled, query, queryOne } from "./db";
+import { assertDatabaseEnabled, isDbEnabled, query, queryOne } from "./db";
 import { updateMemorySchedule } from "./memory";
 import { getReviewItemsByStudent } from "./reviews";
 import { getFocusSessionsByUser } from "./focus";
@@ -151,6 +151,7 @@ function mapAttempt(row: DbAttempt): QuestionAttempt {
 
 export async function getAttempts(): Promise<QuestionAttempt[]> {
   if (!isDbEnabled()) {
+    assertDatabaseEnabled("question_attempts");
     return readJson<QuestionAttempt[]>(ATTEMPTS_FILE, []);
   }
   const rows = await query<DbAttempt>("SELECT * FROM question_attempts");
@@ -159,12 +160,14 @@ export async function getAttempts(): Promise<QuestionAttempt[]> {
 
 export async function saveAttempts(list: QuestionAttempt[]) {
   if (!isDbEnabled()) {
+    assertDatabaseEnabled("question_attempts");
     writeJson(ATTEMPTS_FILE, list);
   }
 }
 
 export async function addAttempt(attempt: QuestionAttempt) {
   if (!isDbEnabled()) {
+    assertDatabaseEnabled("question_attempts");
     const list = await getAttempts();
     list.push(attempt);
     await saveAttempts(list);
@@ -216,15 +219,40 @@ export async function addAttempt(attempt: QuestionAttempt) {
 
 export async function getAttemptsByUser(userId: string) {
   if (!isDbEnabled()) {
+    assertDatabaseEnabled("question_attempts");
     return (await getAttempts()).filter((item) => item.userId === userId);
   }
   const rows = await query<DbAttempt>("SELECT * FROM question_attempts WHERE user_id = $1", [userId]);
   return rows.map(mapAttempt);
 }
 
+export async function getAttemptsByKnowledgePoint(userId: string, knowledgePointId: string, subject?: string) {
+  if (!isDbEnabled()) {
+    assertDatabaseEnabled("question_attempts");
+    const attempts = await getAttemptsByUser(userId);
+    return attempts.filter(
+      (item) =>
+        item.knowledgePointId === knowledgePointId &&
+        (!subject || item.subject === subject)
+    );
+  }
+
+  const rows = subject
+    ? await query<DbAttempt>(
+        "SELECT * FROM question_attempts WHERE user_id = $1 AND knowledge_point_id = $2 AND subject = $3",
+        [userId, knowledgePointId, subject]
+      )
+    : await query<DbAttempt>(
+        "SELECT * FROM question_attempts WHERE user_id = $1 AND knowledge_point_id = $2",
+        [userId, knowledgePointId]
+      );
+  return rows.map(mapAttempt);
+}
+
 export async function getAttemptsByUsers(userIds: string[]) {
   if (!userIds.length) return [];
   if (!isDbEnabled()) {
+    assertDatabaseEnabled("question_attempts");
     const attempts = await getAttempts();
     const set = new Set(userIds);
     return attempts.filter((item) => set.has(item.userId));
@@ -266,7 +294,23 @@ export async function getMasteryByKnowledgePoint(userId: string, subject?: strin
   return totals;
 }
 
-export async function generateStudyPlan(userId: string, subject: string): Promise<StudyPlan> {
+type StudyPlanBuildMode = "generate" | "refresh";
+
+function comparePlanCandidate(
+  mode: StudyPlanBuildMode,
+  a: { ratio: number; trend7d: number; total: number },
+  b: { ratio: number; trend7d: number; total: number }
+) {
+  if (a.ratio === b.ratio) {
+    if (a.trend7d === b.trend7d) {
+      return mode === "refresh" ? a.total - b.total : 0;
+    }
+    return a.trend7d - b.trend7d;
+  }
+  return a.ratio - b.ratio;
+}
+
+async function buildStudyPlanDraft(userId: string, subject: string, mode: StudyPlanBuildMode) {
   const knowledgePoints = (await getKnowledgePoints()).filter((kp) => kp.subject === subject);
   const mastery = await getMasteryByKnowledgePoint(userId, subject);
   const trendMap = buildKnowledgePointTrend(
@@ -279,10 +323,7 @@ export async function generateStudyPlan(userId: string, subject: string): Promis
       const trend = trendMap.get(kp.id);
       return { kp, ratio, total: stat.total, trend7d: trend?.trend7d ?? 0 };
     })
-    .sort((a, b) => {
-      if (a.ratio === b.ratio) return a.trend7d - b.trend7d;
-      return a.ratio - b.ratio;
-    })
+    .sort((a, b) => comparePlanCandidate(mode, a, b))
     .slice(0, 5);
 
   const items: StudyPlanItem[] = ranked.map((item, index) => ({
@@ -301,8 +342,13 @@ export async function generateStudyPlan(userId: string, subject: string): Promis
     createdAt: new Date().toISOString(),
     items
   };
+  return plan;
+}
 
+async function saveStudyPlan(plan: StudyPlan) {
+  const { userId, subject, items, createdAt } = plan;
   if (!isDbEnabled()) {
+    assertDatabaseEnabled("study_plans");
     const plans = readJson<StudyPlan[]>(PLANS_FILE, []);
     const nextPlans = plans.filter((p) => !(p.userId === userId && p.subject === subject));
     nextPlans.push(plan);
@@ -318,7 +364,7 @@ export async function generateStudyPlan(userId: string, subject: string): Promis
   await query("DELETE FROM study_plans WHERE user_id = $1 AND subject = $2", [userId, subject]);
   await query(
     "INSERT INTO study_plans (id, user_id, subject, created_at) VALUES ($1, $2, $3, $4)",
-    [planId, userId, subject, plan.createdAt]
+    [planId, userId, subject, createdAt]
   );
 
   for (const item of items) {
@@ -338,83 +384,22 @@ export async function generateStudyPlan(userId: string, subject: string): Promis
   return { ...plan, id: planId };
 }
 
+async function createOrRefreshStudyPlan(userId: string, subject: string, mode: StudyPlanBuildMode): Promise<StudyPlan> {
+  const draft = await buildStudyPlanDraft(userId, subject, mode);
+  return saveStudyPlan(draft);
+}
+
+export async function generateStudyPlan(userId: string, subject: string): Promise<StudyPlan> {
+  return createOrRefreshStudyPlan(userId, subject, "generate");
+}
+
 export async function refreshStudyPlan(userId: string, subject: string): Promise<StudyPlan> {
-  const knowledgePoints = (await getKnowledgePoints()).filter((kp) => kp.subject === subject);
-  const mastery = await getMasteryByKnowledgePoint(userId, subject);
-  const trendMap = buildKnowledgePointTrend(
-    (await getAttemptsByUser(userId)).filter((attempt) => attempt.subject === subject)
-  );
-  const ranked = knowledgePoints
-    .map((kp) => {
-      const stat = mastery.get(kp.id) ?? { correct: 0, total: 0 };
-      const ratio = stat.total === 0 ? 0 : stat.correct / stat.total;
-      const trend = trendMap.get(kp.id);
-      return { kp, ratio, total: stat.total, trend7d: trend?.trend7d ?? 0 };
-    })
-    .sort((a, b) => {
-      if (a.ratio === b.ratio) {
-        if (a.trend7d === b.trend7d) return a.total - b.total;
-        return a.trend7d - b.trend7d;
-      }
-      return a.ratio - b.ratio;
-    })
-    .slice(0, 5);
-
-  const items: StudyPlanItem[] = ranked.map((item, index) => ({
-    knowledgePointId: item.kp.id,
-    targetCount: resolvePlanTargetCount({
-      ratio: item.ratio,
-      total: item.total,
-      trend7d: item.trend7d
-    }),
-    dueDate: new Date(Date.now() + index * 24 * 60 * 60 * 1000).toISOString()
-  }));
-
-  const plan: StudyPlan = {
-    userId,
-    subject,
-    createdAt: new Date().toISOString(),
-    items
-  };
-
-  if (!isDbEnabled()) {
-    const plans = readJson<StudyPlan[]>(PLANS_FILE, []);
-    const nextPlans = plans.filter((p) => !(p.userId === userId && p.subject === subject));
-    nextPlans.push(plan);
-    writeJson(PLANS_FILE, nextPlans);
-    return plan;
-  }
-
-  const planId = `plan-${crypto.randomBytes(6).toString("hex")}`;
-  await query(
-    "DELETE FROM study_plan_items WHERE plan_id IN (SELECT id FROM study_plans WHERE user_id = $1 AND subject = $2)",
-    [userId, subject]
-  );
-  await query("DELETE FROM study_plans WHERE user_id = $1 AND subject = $2", [userId, subject]);
-  await query(
-    "INSERT INTO study_plans (id, user_id, subject, created_at) VALUES ($1, $2, $3, $4)",
-    [planId, userId, subject, plan.createdAt]
-  );
-
-  for (const item of items) {
-    await query(
-      `INSERT INTO study_plan_items (id, plan_id, knowledge_point_id, target_count, due_date)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [
-        `item-${crypto.randomBytes(6).toString("hex")}`,
-        planId,
-        item.knowledgePointId,
-        item.targetCount,
-        item.dueDate
-      ]
-    );
-  }
-
-  return { ...plan, id: planId };
+  return createOrRefreshStudyPlan(userId, subject, "refresh");
 }
 
 export async function getStudyPlan(userId: string, subject: string) {
   if (!isDbEnabled()) {
+    assertDatabaseEnabled("study_plans");
     const plans = readJson<StudyPlan[]>(PLANS_FILE, []);
     return plans.find((plan) => plan.userId === userId && plan.subject === subject) ?? null;
   }
@@ -451,6 +436,7 @@ export async function generateStudyPlans(userId: string, subjects: string[]) {
 
 export async function getStudyPlans(userId: string, subjects: string[]) {
   if (!isDbEnabled()) {
+    assertDatabaseEnabled("study_plans");
     const plans = readJson<StudyPlan[]>(PLANS_FILE, []);
     return plans.filter((plan) => plan.userId === userId && subjects.includes(plan.subject));
   }

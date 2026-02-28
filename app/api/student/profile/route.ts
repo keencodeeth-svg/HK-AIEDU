@@ -1,8 +1,8 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getStudentProfile, upsertStudentProfile } from "@/lib/profiles";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const updateProfileBodySchema = v.object<{
   grade?: string;
@@ -19,34 +19,40 @@ const updateProfileBodySchema = v.object<{
   { allowUnknown: false }
 );
 
-export const GET = withApi(async () => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "student") {
-    unauthorized();
+export const GET = createLearningRoute({
+  cache: "private-short",
+  handler: async () => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "student") {
+      unauthorized();
+    }
+    const profile = await getStudentProfile(user.id);
+    return { data: profile };
   }
-  const profile = await getStudentProfile(user.id);
-  return { data: profile };
 });
 
-export const PUT = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "student") {
-    unauthorized();
+export const PUT = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "student") {
+      unauthorized();
+    }
+
+    const body = await parseJson(request, updateProfileBodySchema);
+
+    if (!body.grade || !body.subjects?.length) {
+      badRequest("missing fields");
+    }
+
+    const profile = await upsertStudentProfile({
+      userId: user.id,
+      grade: body.grade,
+      subjects: body.subjects,
+      target: body.target ?? "",
+      school: body.school ?? ""
+    });
+
+    return { data: profile };
   }
-
-  const body = await parseJson(request, updateProfileBodySchema);
-
-  if (!body.grade || !body.subjects?.length) {
-    badRequest("missing fields");
-  }
-
-  const profile = await upsertStudentProfile({
-    userId: user.id,
-    grade: body.grade,
-    subjects: body.subjects,
-    target: body.target ?? "",
-    school: body.school ?? ""
-  });
-
-  return { data: profile };
 });

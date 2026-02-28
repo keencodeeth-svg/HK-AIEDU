@@ -4,12 +4,11 @@ import {
   listLearningLibraryItems,
   type LearningLibraryItem
 } from "@/lib/learning-library";
-import { unauthorized, withApi } from "@/lib/api/http";
+import { unauthorized } from "@/lib/api/http";
 import { parseSearchParams, v } from "@/lib/api/validation";
+import { createLearningRoute } from "@/lib/api/domains";
 
-export const dynamic = "force-dynamic";
-
-function useLightListMode() {
+function isLightListModeEnabled() {
   if (process.env.LIBRARY_LIGHT_LIST === "false") return false;
   if (process.env.LIBRARY_LIGHT_LIST === "true") return true;
   return true;
@@ -118,69 +117,86 @@ function matchesKeyword(item: LearningLibraryItem, keyword: string) {
   return haystack.includes(keyword);
 }
 
-export const GET = withApi(async (request) => {
-  const lightList = useLightListMode();
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
-  }
-
-  const query = parseSearchParams(request, querySchema);
-  const contentTypeInput = query.contentType?.trim();
-  const contentType =
-    contentTypeInput === "textbook" ||
-    contentTypeInput === "courseware" ||
-    contentTypeInput === "lesson_plan"
-      ? contentTypeInput
-      : undefined;
-  const keyword = query.keyword?.trim().toLowerCase() ?? "";
-  const page = parseIntParam(query.page, 1, 1, 10000);
-  const pageSize = parseIntParam(query.pageSize, 24, 1, 100);
-  const all = await listLearningLibraryItems({
-    subject: query.subject?.trim() || undefined,
-    grade: query.grade?.trim() || undefined,
-    contentType
-  });
-
-  let visible = all;
-
-  if (user.role !== "admin") {
-    let classIds: string[] = [];
-    if (user.role === "teacher") {
-      classIds = (await getClassesByTeacher(user.id)).map((item) => item.id);
-    } else if (user.role === "student") {
-      classIds = (await getClassesByStudent(user.id)).map((item) => item.id);
-    } else if (user.role === "parent" && user.studentId) {
-      classIds = (await getClassesByStudent(user.studentId)).map((item) => item.id);
+export const GET = createLearningRoute({
+  cache: "private-short",
+  handler: async ({ request }) => {
+    const lightList = isLightListModeEnabled();
+    const user = await getCurrentUser();
+    if (!user) {
+      unauthorized();
     }
-    const classIdSet = new Set(classIds);
 
-    visible = all.filter((item) => {
-      if (item.status !== "published" && item.ownerId !== user.id) {
-        return false;
-      }
-      if (item.accessScope === "global") {
-        return true;
-      }
-      if (!item.classId) {
-        return false;
-      }
-      if (user.role === "teacher" && item.ownerId === user.id) {
-        return true;
-      }
-      return classIdSet.has(item.classId);
+    const query = parseSearchParams(request, querySchema);
+    const contentTypeInput = query.contentType?.trim();
+    const contentType =
+      contentTypeInput === "textbook" ||
+      contentTypeInput === "courseware" ||
+      contentTypeInput === "lesson_plan"
+        ? contentTypeInput
+        : undefined;
+    const keyword = query.keyword?.trim().toLowerCase() ?? "";
+    const page = parseIntParam(query.page, 1, 1, 10000);
+    const pageSize = parseIntParam(query.pageSize, 24, 1, 100);
+    const all = await listLearningLibraryItems({
+      subject: query.subject?.trim() || undefined,
+      grade: query.grade?.trim() || undefined,
+      contentType
     });
-  }
 
-  const filtered = visible.filter((item) => matchesKeyword(item, keyword));
-  const total = filtered.length;
-  const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
-  const currentPage = totalPages === 0 ? 1 : Math.min(page, totalPages);
-  const start = (currentPage - 1) * pageSize;
-  const pageItems = filtered.slice(start, start + pageSize);
-  const facets = buildFacets(filtered);
+    let visible = all;
 
-  if (user.role === "admin") {
+    if (user.role !== "admin") {
+      let classIds: string[] = [];
+      if (user.role === "teacher") {
+        classIds = (await getClassesByTeacher(user.id)).map((item) => item.id);
+      } else if (user.role === "student") {
+        classIds = (await getClassesByStudent(user.id)).map((item) => item.id);
+      } else if (user.role === "parent" && user.studentId) {
+        classIds = (await getClassesByStudent(user.studentId)).map((item) => item.id);
+      }
+      const classIdSet = new Set(classIds);
+
+      visible = all.filter((item) => {
+        if (item.status !== "published" && item.ownerId !== user.id) {
+          return false;
+        }
+        if (item.accessScope === "global") {
+          return true;
+        }
+        if (!item.classId) {
+          return false;
+        }
+        if (user.role === "teacher" && item.ownerId === user.id) {
+          return true;
+        }
+        return classIdSet.has(item.classId);
+      });
+    }
+
+    const filtered = visible.filter((item) => matchesKeyword(item, keyword));
+    const total = filtered.length;
+    const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+    const currentPage = totalPages === 0 ? 1 : Math.min(page, totalPages);
+    const start = (currentPage - 1) * pageSize;
+    const pageItems = filtered.slice(start, start + pageSize);
+    const facets = buildFacets(filtered);
+
+    if (user.role === "admin") {
+      return {
+        data: pageItems.map((item) => toLibraryListItem(item, lightList)),
+        meta: {
+          total,
+          page: currentPage,
+          pageSize,
+          totalPages,
+          hasPrev: currentPage > 1 && totalPages > 0,
+          hasNext: totalPages > 0 && currentPage < totalPages
+        },
+        facets,
+        summary: buildSummary(filtered)
+      };
+    }
+
     return {
       data: pageItems.map((item) => toLibraryListItem(item, lightList)),
       meta: {
@@ -195,18 +211,4 @@ export const GET = withApi(async (request) => {
       summary: buildSummary(filtered)
     };
   }
-
-  return {
-    data: pageItems.map((item) => toLibraryListItem(item, lightList)),
-    meta: {
-      total,
-      page: currentPage,
-      pageSize,
-      totalPages,
-      hasPrev: currentPage > 1 && totalPages > 0,
-      hasNext: totalPages > 0 && currentPage < totalPages
-    },
-    facets,
-    summary: buildSummary(filtered)
-  };
 });

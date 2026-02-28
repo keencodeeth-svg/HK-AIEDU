@@ -6,10 +6,9 @@ import {
   summarizeCitationGovernance,
   type LibraryCitation
 } from "@/lib/library-rag";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseSearchParams, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const querySchema = v.object<{
   q?: string;
@@ -26,42 +25,45 @@ const querySchema = v.object<{
   { allowUnknown: true }
 );
 
-export const GET = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
+export const GET = createLearningRoute({
+  cache: "private-short",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user) {
+      unauthorized();
+    }
+
+    const query = parseSearchParams(request, querySchema);
+    const q = query.q?.trim();
+    if (!q) {
+      badRequest("q is required");
+    }
+
+    const candidates = await retrieveLibraryCitations({
+      query: q,
+      subject: query.subject?.trim() || undefined,
+      grade: query.grade?.trim() || undefined,
+      limit: query.limit ?? 6
+    });
+
+    const accessible = (
+      await Promise.all(
+        candidates.map(async (item) => {
+          const libraryItem = await getLearningLibraryItemById(item.itemId);
+          if (!libraryItem) return null;
+          const allowed = await canAccessLearningLibraryItem(user, libraryItem);
+          if (!allowed) return null;
+          if (libraryItem.status !== "published" && user.role !== "admin" && libraryItem.ownerId !== user.id) {
+            return null;
+          }
+          return item;
+        })
+      )
+    ).filter((item): item is LibraryCitation => Boolean(item));
+
+    return {
+      data: accessible,
+      governance: summarizeCitationGovernance(accessible)
+    };
   }
-
-  const query = parseSearchParams(request, querySchema);
-  const q = query.q?.trim();
-  if (!q) {
-    badRequest("q is required");
-  }
-
-  const candidates = await retrieveLibraryCitations({
-    query: q,
-    subject: query.subject?.trim() || undefined,
-    grade: query.grade?.trim() || undefined,
-    limit: query.limit ?? 6
-  });
-
-  const accessible = (
-    await Promise.all(
-      candidates.map(async (item) => {
-        const libraryItem = await getLearningLibraryItemById(item.itemId);
-        if (!libraryItem) return null;
-        const allowed = await canAccessLearningLibraryItem(user, libraryItem);
-        if (!allowed) return null;
-        if (libraryItem.status !== "published" && user.role !== "admin" && libraryItem.ownerId !== user.id) {
-          return null;
-        }
-        return item;
-      })
-    )
-  ).filter((item): item is LibraryCitation => Boolean(item));
-
-  return {
-    data: accessible,
-    governance: summarizeCitationGovernance(accessible)
-  };
 });

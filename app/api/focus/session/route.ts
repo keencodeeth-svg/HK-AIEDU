@@ -1,9 +1,8 @@
 import { getCurrentUser } from "@/lib/auth";
 import { addFocusSession } from "@/lib/focus";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const focusSessionBodySchema = v.object<{
   durationMinutes?: number;
@@ -20,28 +19,31 @@ const focusSessionBodySchema = v.object<{
   { allowUnknown: false }
 );
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "student") {
-    unauthorized();
+export const POST = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "student") {
+      unauthorized();
+    }
+
+    const body = await parseJson(request, focusSessionBodySchema);
+
+    const duration = Math.max(1, Math.min(Number(body.durationMinutes) || 0, 180));
+    const mode = body.mode === "break" ? "break" : "focus";
+
+    if (!duration) {
+      badRequest("invalid duration");
+    }
+
+    const record = await addFocusSession({
+      userId: user.id,
+      mode,
+      durationMinutes: duration,
+      startedAt: body.startedAt,
+      endedAt: body.endedAt
+    });
+
+    return { data: record };
   }
-
-  const body = await parseJson(request, focusSessionBodySchema);
-
-  const duration = Math.max(1, Math.min(Number(body.durationMinutes) || 0, 180));
-  const mode = body.mode === "break" ? "break" : "focus";
-
-  if (!duration) {
-    badRequest("invalid duration");
-  }
-
-  const record = await addFocusSession({
-    userId: user.id,
-    mode,
-    durationMinutes: duration,
-    startedAt: body.startedAt,
-    endedAt: body.endedAt
-  });
-
-  return { data: record };
 });

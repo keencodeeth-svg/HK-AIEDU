@@ -1,8 +1,7 @@
-import { getCurrentUser } from "@/lib/auth";
 import { addHistoryItem, getHistoryByUser } from "@/lib/ai-history";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
-import { parseJson, v } from "@/lib/api/validation";
-export const dynamic = "force-dynamic";
+import { badRequest, unauthorized } from "@/lib/api/http";
+import { v } from "@/lib/api/validation";
+import { createAiRoute } from "@/lib/api/domains";
 
 const createHistoryBodySchema = v.object<{ question?: string; answer?: string }>(
   {
@@ -12,35 +11,41 @@ const createHistoryBodySchema = v.object<{ question?: string; answer?: string }>
   { allowUnknown: false }
 );
 
-export const GET = withApi(async () => {
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
+export const GET = createAiRoute({
+  role: ["student", "teacher", "parent", "admin"],
+  cache: "private-realtime",
+  handler: async ({ user }) => {
+    if (!user) {
+      unauthorized();
+    }
+    const list = await getHistoryByUser(user.id);
+    return { data: list };
   }
-  const list = await getHistoryByUser(user.id);
-  return { data: list };
 });
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
+export const POST = createAiRoute({
+  role: ["student", "teacher", "parent", "admin"],
+  body: createHistoryBodySchema,
+  cache: "private-realtime",
+  handler: async ({ body, user }) => {
+    if (!user) {
+      unauthorized();
+    }
+
+    const question = body.question?.trim();
+    const answer = body.answer?.trim();
+    if (!question || !answer) {
+      badRequest("missing fields");
+    }
+
+    const next = await addHistoryItem({
+      userId: user.id,
+      question,
+      answer,
+      favorite: false,
+      tags: []
+    });
+
+    return { data: next };
   }
-
-  const body = await parseJson(request, createHistoryBodySchema);
-  const question = body.question?.trim();
-  const answer = body.answer?.trim();
-  if (!question || !answer) {
-    badRequest("missing fields");
-  }
-
-  const next = await addHistoryItem({
-    userId: user.id,
-    question,
-    answer,
-    favorite: false,
-    tags: []
-  });
-
-  return { data: next };
 });

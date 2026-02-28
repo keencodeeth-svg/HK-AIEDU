@@ -1,23 +1,25 @@
 import { cookies } from "next/headers";
 import { clearSessionCookie, getSessionCookieName, removeSession } from "@/lib/auth";
-import { apiSuccess, withApi } from "@/lib/api/http";
+import { apiSuccess } from "@/lib/api/http";
+import { createAuthRoute } from "@/lib/api/domains";
 
-export const dynamic = "force-dynamic";
-
-export const POST = withApi(async (_request, _context, { requestId }) => {
-  const cookieStore = cookies();
-  const token = cookieStore.get(getSessionCookieName())?.value;
-  if (token) {
-    await removeSession(token);
-  }
-
-  const response = apiSuccess(
-    { ok: true },
-    {
-      requestId,
-      message: "已退出登录"
+export const POST = createAuthRoute({
+  cache: "private-realtime",
+  handler: async ({ meta }) => {
+    const cookieStore = cookies();
+    const token = cookieStore.get(getSessionCookieName())?.value;
+    if (token) {
+      await removeSession(token);
     }
-  );
-  clearSessionCookie(response);
-  return response;
+
+    const response = apiSuccess(
+      { ok: true },
+      {
+        requestId: meta.requestId,
+        message: "已退出登录"
+      }
+    );
+    clearSessionCookie(response);
+    return response;
+  }
 });

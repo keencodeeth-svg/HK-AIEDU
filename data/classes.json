@@ -38,5 +38,15 @@
     "createdAt": "2026-02-24T17:18:39.618Z",
     "joinCode": "JOIN04",
     "joinMode": "approval"
+  },
+  {
+    "id": "class-15f51b1e74e8",
+    "name": "API_TEST_EXAM_CLASS_mm3bu8p0",
+    "subject": "math",
+    "grade": "4",
+    "teacherId": "u-teacher-001",
+    "createdAt": "2026-02-26T10:35:06.765Z",
+    "joinCode": "BCCD00",
+    "joinMode": "approval"
   }
 ]

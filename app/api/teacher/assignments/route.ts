@@ -1,4 +1,4 @@
-import { getCurrentUser, getParentsByStudentId } from "@/lib/auth";
+import { getParentsByStudentId } from "@/lib/auth";
 import { createAssignment, getAssignmentProgress, getAssignmentsByClassIds } from "@/lib/assignments";
 import { getClassById, getClassesByTeacher, getClassStudentIds } from "@/lib/classes";
 import { createKnowledgePoint, createQuestion, getKnowledgePoints, getQuestions } from "@/lib/content";
@@ -6,10 +6,9 @@ import type { Difficulty, KnowledgePoint } from "@/lib/types";
 import { createNotification } from "@/lib/notifications";
 import { generateQuestionDraft, hasConfiguredLlmProvider } from "@/lib/ai";
 import { getModuleById, getModulesByClass } from "@/lib/modules";
-import { apiSuccess, badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { apiSuccess, badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const createAssignmentBodySchema = v.object<{
   classId: string;
@@ -75,216 +74,222 @@ function normalizeStem(text: string) {
     .replace(/[，。！？,.!?;:；：、]/g, "");
 }
 
-export const GET = withApi(async () => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "teacher") {
-    unauthorized();
+export const GET = createLearningRoute({
+  role: "teacher",
+  cache: "private-realtime",
+  handler: async ({ user }) => {
+    if (!user || user.role !== "teacher") {
+      unauthorized();
+    }
+
+    const classes = await getClassesByTeacher(user.id);
+    const classIds = classes.map((item) => item.id);
+    const classMap = new Map(classes.map((item) => [item.id, item]));
+    const moduleLists = await Promise.all(classes.map((klass) => getModulesByClass(klass.id)));
+    const moduleMap = new Map(moduleLists.flat().map((item) => [item.id, item]));
+    const assignments = await getAssignmentsByClassIds(classIds);
+
+    const data = await Promise.all(
+      assignments.map(async (assignment) => {
+        const progress = await getAssignmentProgress(assignment.id);
+        const completed = progress.filter((item) => item.status === "completed").length;
+        const klass = classMap.get(assignment.classId);
+        const moduleTitle = assignment.moduleId ? moduleMap.get(assignment.moduleId)?.title ?? "" : "";
+        return {
+          ...assignment,
+          className: klass?.name ?? "-",
+          classSubject: klass?.subject ?? "-",
+          classGrade: klass?.grade ?? "-",
+          moduleTitle,
+          total: progress.length,
+          completed
+        };
+      })
+    );
+
+    return { data };
   }
-
-  const classes = await getClassesByTeacher(user.id);
-  const classIds = classes.map((item) => item.id);
-  const classMap = new Map(classes.map((item) => [item.id, item]));
-  const moduleLists = await Promise.all(classes.map((klass) => getModulesByClass(klass.id)));
-  const moduleMap = new Map(moduleLists.flat().map((item) => [item.id, item]));
-  const assignments = await getAssignmentsByClassIds(classIds);
-
-  const data = await Promise.all(
-    assignments.map(async (assignment) => {
-      const progress = await getAssignmentProgress(assignment.id);
-      const completed = progress.filter((item) => item.status === "completed").length;
-      const klass = classMap.get(assignment.classId);
-      const moduleTitle = assignment.moduleId ? moduleMap.get(assignment.moduleId)?.title ?? "" : "";
-      return {
-        ...assignment,
-        className: klass?.name ?? "-",
-        classSubject: klass?.subject ?? "-",
-        classGrade: klass?.grade ?? "-",
-        moduleTitle,
-        total: progress.length,
-        completed
-      };
-    })
-  );
-
-  return { data };
 });
 
-export const POST = withApi(async (request, _context, { requestId }) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "teacher") {
-    unauthorized();
-  }
-
-  const body = await parseJson(request, createAssignmentBodySchema);
-
-  const submissionType =
-    body.submissionType === "upload" ? "upload" : body.submissionType === "essay" ? "essay" : "quiz";
-  const questionCount = Number(body.questionCount ?? 0);
-
-  if (submissionType === "quiz" && questionCount <= 0) {
-    badRequest("questionCount must be greater than 0 for quiz assignments");
-  }
-
-  const klass = await getClassById(body.classId);
-  if (!klass || klass.teacherId !== user.id) {
-    notFound("class not found");
-  }
-
-  if (body.moduleId) {
-    const moduleRecord = await getModuleById(body.moduleId);
-    if (!moduleRecord || moduleRecord.classId !== klass.id) {
-      notFound("module not found");
-    }
-  }
-
-  const dueDate = normalizeDueDate(body.dueDate);
-  const mode = body.mode === "ai" ? "ai" : "bank";
-  const questionType = body.questionType?.trim();
-  const difficulty = body.difficulty;
-
-  let questionIds: string[] = [];
-  let fallbackMode: "bank" | null = null;
-
-  if (submissionType === "quiz" && mode === "ai") {
-    if (!hasConfiguredLlmProvider("chat")) {
-      fallbackMode = "bank";
-    }
-  }
-
-  if (submissionType === "quiz" && mode === "ai" && !fallbackMode) {
-    const knowledgePoints = await getKnowledgePoints();
-    const subjectPoints = knowledgePoints.filter(
-      (item) => item.subject === klass.subject && item.grade === klass.grade
-    );
-    let kp: KnowledgePoint | undefined = body.knowledgePointId
-      ? subjectPoints.find((item) => item.id === body.knowledgePointId)
-      : subjectPoints[0];
-    if (!kp) {
-      kp =
-        (await createKnowledgePoint({
-          subject: klass.subject,
-          grade: klass.grade,
-          title: "综合练习",
-          chapter: "综合"
-        })) ?? undefined;
-    }
-    if (!kp) {
-      badRequest("暂无可用知识点，请先生成知识点");
+export const POST = createLearningRoute({
+  role: "teacher",
+  cache: "private-realtime",
+  handler: async ({ request, user, meta }) => {
+    if (!user || user.role !== "teacher") {
+      unauthorized();
     }
 
-    const existing = (await getQuestions()).filter(
-      (q) => q.subject === klass.subject && q.grade === klass.grade && q.knowledgePointId === kp.id
-    );
-    const existingStems = new Set(existing.map((q) => normalizeStem(q.stem)));
-    const createdStems = new Set<string>();
+    const body = await parseJson(request, createAssignmentBodySchema);
 
-    for (let i = 0; i < questionCount; i += 1) {
-      let draft = null;
-      let attempts = 0;
-      while (!draft && attempts < 3) {
-        attempts += 1;
-        const next = await generateQuestionDraft({
-          subject: klass.subject,
-          grade: klass.grade,
-          knowledgePointTitle: kp.title,
-          chapter: kp.chapter,
-          difficulty,
-          questionType
-        });
-        if (!next) continue;
-        const key = normalizeStem(next.stem);
-        if (existingStems.has(key) || createdStems.has(key)) {
-          continue;
+    const submissionType =
+      body.submissionType === "upload" ? "upload" : body.submissionType === "essay" ? "essay" : "quiz";
+    const questionCount = Number(body.questionCount ?? 0);
+
+    if (submissionType === "quiz" && questionCount <= 0) {
+      badRequest("questionCount must be greater than 0 for quiz assignments");
+    }
+
+    const klass = await getClassById(body.classId);
+    if (!klass || klass.teacherId !== user.id) {
+      notFound("class not found");
+    }
+
+    if (body.moduleId) {
+      const moduleRecord = await getModuleById(body.moduleId);
+      if (!moduleRecord || moduleRecord.classId !== klass.id) {
+        notFound("module not found");
+      }
+    }
+
+    const dueDate = normalizeDueDate(body.dueDate);
+    const mode = body.mode === "ai" ? "ai" : "bank";
+    const questionType = body.questionType?.trim();
+    const difficulty = body.difficulty;
+
+    let questionIds: string[] = [];
+    let fallbackMode: "bank" | null = null;
+
+    if (submissionType === "quiz" && mode === "ai") {
+      if (!hasConfiguredLlmProvider("chat")) {
+        fallbackMode = "bank";
+      }
+    }
+
+    if (submissionType === "quiz" && mode === "ai" && !fallbackMode) {
+      const knowledgePoints = await getKnowledgePoints();
+      const subjectPoints = knowledgePoints.filter(
+        (item) => item.subject === klass.subject && item.grade === klass.grade
+      );
+      let kp: KnowledgePoint | undefined = body.knowledgePointId
+        ? subjectPoints.find((item) => item.id === body.knowledgePointId)
+        : subjectPoints[0];
+      if (!kp) {
+        kp =
+          (await createKnowledgePoint({
+            subject: klass.subject,
+            grade: klass.grade,
+            title: "综合练习",
+            chapter: "综合"
+          })) ?? undefined;
+      }
+      if (!kp) {
+        badRequest("暂无可用知识点，请先生成知识点");
+      }
+
+      const existing = (await getQuestions()).filter(
+        (q) => q.subject === klass.subject && q.grade === klass.grade && q.knowledgePointId === kp.id
+      );
+      const existingStems = new Set(existing.map((q) => normalizeStem(q.stem)));
+      const createdStems = new Set<string>();
+
+      for (let i = 0; i < questionCount; i += 1) {
+        let draft = null;
+        let attempts = 0;
+        while (!draft && attempts < 3) {
+          attempts += 1;
+          const next = await generateQuestionDraft({
+            subject: klass.subject,
+            grade: klass.grade,
+            knowledgePointTitle: kp.title,
+            chapter: kp.chapter,
+            difficulty,
+            questionType
+          });
+          if (!next) continue;
+          const key = normalizeStem(next.stem);
+          if (existingStems.has(key) || createdStems.has(key)) {
+            continue;
+          }
+          draft = next;
+          createdStems.add(key);
         }
-        draft = next;
-        createdStems.add(key);
+
+        if (!draft) {
+          badRequest(`AI 生成失败（第 ${i + 1} 题）`);
+        }
+
+        const saved = await createQuestion({
+          subject: klass.subject,
+          grade: klass.grade,
+          knowledgePointId: kp.id,
+          stem: draft.stem,
+          options: draft.options,
+          answer: draft.answer,
+          explanation: draft.explanation,
+          difficulty: difficulty ?? "medium",
+          questionType: questionType || "choice",
+          tags: [],
+          abilities: []
+        });
+
+        if (!saved) {
+          badRequest("题目保存失败");
+        }
+        questionIds.push(saved.id);
+      }
+    } else if (submissionType === "quiz") {
+      const questions = await getQuestions();
+      let pool = questions.filter((item) => item.subject === klass.subject && item.grade === klass.grade);
+      if (body.knowledgePointId) {
+        pool = pool.filter((item) => item.knowledgePointId === body.knowledgePointId);
+      }
+      if (difficulty) {
+        pool = pool.filter((item) => item.difficulty === difficulty);
+      }
+      if (questionType) {
+        pool = pool.filter((item) => (item.questionType ?? "choice") === questionType);
       }
 
-      if (!draft) {
-        badRequest(`AI 生成失败（第 ${i + 1} 题）`);
+      if (pool.length < questionCount) {
+        const hint =
+          fallbackMode === "bank"
+            ? "AI 未配置且题库数量不足，请先导入题库或配置模型"
+            : "题库数量不足";
+        badRequest(hint);
       }
 
-      const saved = await createQuestion({
-        subject: klass.subject,
-        grade: klass.grade,
-        knowledgePointId: kp.id,
-        stem: draft.stem,
-        options: draft.options,
-        answer: draft.answer,
-        explanation: draft.explanation,
-        difficulty: difficulty ?? "medium",
-        questionType: questionType || "choice",
-        tags: [],
-        abilities: []
-      });
-
-      if (!saved) {
-        badRequest("题目保存失败");
-      }
-      questionIds.push(saved.id);
-    }
-  } else if (submissionType === "quiz") {
-    const questions = await getQuestions();
-    let pool = questions.filter((item) => item.subject === klass.subject && item.grade === klass.grade);
-    if (body.knowledgePointId) {
-      pool = pool.filter((item) => item.knowledgePointId === body.knowledgePointId);
-    }
-    if (difficulty) {
-      pool = pool.filter((item) => item.difficulty === difficulty);
-    }
-    if (questionType) {
-      pool = pool.filter((item) => (item.questionType ?? "choice") === questionType);
+      const selected = sampleQuestions(pool, questionCount);
+      questionIds = selected.map((item) => item.id);
     }
 
-    if (pool.length < questionCount) {
-      const hint =
-        fallbackMode === "bank"
-          ? "AI 未配置且题库数量不足，请先导入题库或配置模型"
-          : "题库数量不足";
-      badRequest(hint);
-    }
-
-    const selected = sampleQuestions(pool, questionCount);
-    questionIds = selected.map((item) => item.id);
-  }
-
-  const assignment = await createAssignment({
-    classId: klass.id,
-    moduleId: body.moduleId,
-    title: body.title,
-    description: body.description,
-    dueDate,
-    questionIds,
-    submissionType,
-    maxUploads: body.maxUploads,
-    gradingFocus: body.gradingFocus
-  });
-
-  const studentIds = await getClassStudentIds(klass.id);
-  for (const studentId of studentIds) {
-    await createNotification({
-      userId: studentId,
-      title: "新的作业",
-      content: `班级「${klass.name}」发布作业：${assignment.title}`,
-      type: "assignment"
+    const assignment = await createAssignment({
+      classId: klass.id,
+      moduleId: body.moduleId,
+      title: body.title,
+      description: body.description,
+      dueDate,
+      questionIds,
+      submissionType,
+      maxUploads: body.maxUploads,
+      gradingFocus: body.gradingFocus
     });
-    const parents = await getParentsByStudentId(studentId);
-    for (const parent of parents) {
+
+    const studentIds = await getClassStudentIds(klass.id);
+    for (const studentId of studentIds) {
       await createNotification({
-        userId: parent.id,
-        title: "孩子新作业",
-        content: `孩子所在班级「${klass.name}」发布作业：${assignment.title}`,
+        userId: studentId,
+        title: "新的作业",
+        content: `班级「${klass.name}」发布作业：${assignment.title}`,
         type: "assignment"
       });
+      const parents = await getParentsByStudentId(studentId);
+      for (const parent of parents) {
+        await createNotification({
+          userId: parent.id,
+          title: "孩子新作业",
+          content: `孩子所在班级「${klass.name}」发布作业：${assignment.title}`,
+          type: "assignment"
+        });
+      }
     }
-  }
 
-  return apiSuccess(
-    {
-      data: assignment,
-      fallback: fallbackMode,
-      message: fallbackMode === "bank" ? "AI 未配置，已自动改为题库抽题" : undefined
-    },
-    { requestId }
-  );
+    return apiSuccess(
+      {
+        data: assignment,
+        fallback: fallbackMode,
+        message: fallbackMode === "bank" ? "AI 未配置，已自动改为题库抽题" : undefined
+      },
+      { requestId: meta.requestId }
+    );
+  }
 });

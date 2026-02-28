@@ -1,0 +1,50 @@
+[
+  {
+    "id": "kp-generate-good-1",
+    "input": {
+      "kind": "assist",
+      "provider": "deepseek",
+      "taskType": "assist",
+      "textBlocks": [
+        "输出了知识点树：数与代数>分数>分数加减法，并给出章节映射和前置知识关系。"
+      ],
+      "listCountHint": 3
+    },
+    "expected": {
+      "minScore": 70,
+      "riskLevel": "low"
+    }
+  },
+  {
+    "id": "kp-generate-medium-1",
+    "input": {
+      "kind": "assist",
+      "provider": "moonshot",
+      "taskType": "assist",
+      "textBlocks": [
+        "给出知识点列表，但缺少章节路径和前置依赖。"
+      ],
+      "listCountHint": 1
+    },
+    "expected": {
+      "maxScore": 78
+    }
+  },
+  {
+    "id": "kp-generate-bad-1",
+    "input": {
+      "kind": "assist",
+      "provider": "rule",
+      "taskType": "assist",
+      "textBlocks": [
+        ""
+      ],
+      "listCountHint": 0
+    },
+    "expected": {
+      "maxScore": 35,
+      "riskLevel": "high"
+    }
+  }
+]
+

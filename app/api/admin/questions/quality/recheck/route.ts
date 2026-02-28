@@ -1,6 +1,6 @@
 import { getQuestions } from "@/lib/content";
 import { requireRole } from "@/lib/guard";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseJson } from "@/lib/api/validation";
 import { questionQualityRecheckBodySchema, trimStringArray } from "@/lib/api/schemas/admin";
 import {
@@ -9,6 +9,7 @@ import {
   type QuestionQualityMetric,
   upsertQuestionQualityMetric
 } from "@/lib/question-quality";
+import { createAdminRoute } from "@/lib/api/domains";
 
 export const dynamic = "force-dynamic";
 
@@ -30,11 +31,13 @@ function metricSignature(metric: QuestionQualityMetric) {
   });
 }
 
-export const POST = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
+export const POST = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
 
   const startedAt = Date.now();
   const body = await parseJson(request, questionQualityRecheckBodySchema);
@@ -160,30 +163,31 @@ export const POST = withApi(async (request) => {
     .sort((a, b) => b.count - a.count || b.highRiskCount - a.highRiskCount || a.id.localeCompare(b.id))
     .slice(0, MAX_TOP_CLUSTERS);
 
-  return {
-    data: {
-      scope: {
-        subject: subject ?? "all",
-        grade: grade ?? "all",
-        requestedQuestionIds: questionIdList.length,
-        matchedCount,
-        processedCount: scoped.length,
-        skippedIsolated,
-        includeIsolated,
-        limit
-      },
-      summary: {
-        newlyTracked,
-        updated,
-        unchanged,
-        highRiskCount,
-        mediumRiskCount,
-        isolatedCount,
-        answerConflictCount,
-        duplicateClusterCount: clusterStats.size,
-        topDuplicateClusters
-      },
-      durationMs: Date.now() - startedAt
-    }
-  };
+    return {
+      data: {
+        scope: {
+          subject: subject ?? "all",
+          grade: grade ?? "all",
+          requestedQuestionIds: questionIdList.length,
+          matchedCount,
+          processedCount: scoped.length,
+          skippedIsolated,
+          includeIsolated,
+          limit
+        },
+        summary: {
+          newlyTracked,
+          updated,
+          unchanged,
+          highRiskCount,
+          mediumRiskCount,
+          isolatedCount,
+          answerConflictCount,
+          duplicateClusterCount: clusterStats.size,
+          topDuplicateClusters
+        },
+        durationMs: Date.now() - startedAt
+      }
+    };
+  }
 });

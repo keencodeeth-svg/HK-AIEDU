@@ -1,7 +1,7 @@
 import { createQuestion, getKnowledgePoints, getQuestions } from "@/lib/content";
 import { requireRole } from "@/lib/guard";
 import { addAdminLog } from "@/lib/admin-log";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import {
   attachQualityFields,
   evaluateAndUpsertQuestionQuality,
@@ -14,6 +14,7 @@ import {
   trimStringArray
 } from "@/lib/api/schemas/admin";
 import { parseJson, parseSearchParams, v } from "@/lib/api/validation";
+import { createAdminRoute } from "@/lib/api/domains";
 export const dynamic = "force-dynamic";
 
 const listQuestionsQuerySchema = v.object<{
@@ -111,11 +112,13 @@ type QuestionTreeNode = {
   }>;
 };
 
-export const GET = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
+export const GET = createAdminRoute({
+  cache: "private-short",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
 
   const query = parseSearchParams(request, listQuestionsQuerySchema);
   const subject = normalizeQueryString(query.subject);
@@ -313,54 +316,57 @@ export const GET = withApi(async (request) => {
         }))
     }));
 
-  return {
-    data,
-    meta: {
-      total,
-      page: safePage,
-      pageSize: shouldPaginate ? pageSize : total,
-      totalPages
-    },
-    facets: {
-      subjects: subjectFacet,
-      grades: gradeFacet,
-      chapters: chapterFacet,
-      difficulties: difficultyFacet,
-      questionTypes: questionTypeFacet
-    },
-    tree,
-    filters: {
-      subject: subject ?? null,
-      grade: grade ?? null,
-      chapter: chapter ?? null,
-      knowledgePointId: knowledgePointId ?? null,
-      difficulty: difficulty ?? null,
-      questionType: questionType ?? null,
-      search: search ?? null,
-      pool,
-      riskLevel,
-      answerConflict,
-      duplicateClusterId: duplicateClusterId ?? null,
-      sortBy,
-      sortDir
-    },
-    qualitySummary: {
-      trackedCount: metricsOfSorted.length,
-      isolatedCount,
-      highRiskCount,
-      mediumRiskCount,
-      answerConflictCount,
-      duplicateClusterCount: duplicateClusters.size,
-      topDuplicateClusters
-    }
-  };
+    return {
+      data,
+      meta: {
+        total,
+        page: safePage,
+        pageSize: shouldPaginate ? pageSize : total,
+        totalPages
+      },
+      facets: {
+        subjects: subjectFacet,
+        grades: gradeFacet,
+        chapters: chapterFacet,
+        difficulties: difficultyFacet,
+        questionTypes: questionTypeFacet
+      },
+      tree,
+      filters: {
+        subject: subject ?? null,
+        grade: grade ?? null,
+        chapter: chapter ?? null,
+        knowledgePointId: knowledgePointId ?? null,
+        difficulty: difficulty ?? null,
+        questionType: questionType ?? null,
+        search: search ?? null,
+        pool,
+        riskLevel,
+        answerConflict,
+        duplicateClusterId: duplicateClusterId ?? null,
+        sortBy,
+        sortDir
+      },
+      qualitySummary: {
+        trackedCount: metricsOfSorted.length,
+        isolatedCount,
+        highRiskCount,
+        mediumRiskCount,
+        answerConflictCount,
+        duplicateClusterCount: duplicateClusters.size,
+        topDuplicateClusters
+      }
+    };
+  }
 });
 
-export const POST = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
+export const POST = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
 
   const body = await parseJson(request, createQuestionBodySchema);
   const subject = body.subject?.trim();
@@ -405,15 +411,16 @@ export const POST = withApi(async (request) => {
       })
     : null;
 
-  if (next) {
-    await addAdminLog({
-      adminId: user.id,
-      action: "create_question",
-      entityType: "question",
-      entityId: next.id,
-      detail: `${next.subject} ${next.grade} ${next.knowledgePointId}`
-    });
-  }
+    if (next) {
+      await addAdminLog({
+        adminId: user.id,
+        action: "create_question",
+        entityType: "question",
+        entityId: next.id,
+        detail: `${next.subject} ${next.grade} ${next.knowledgePointId}`
+      });
+    }
 
-  return { data: next ? attachQualityFields(next, quality) : null };
+    return { data: next ? attachQualityFields(next, quality) : null };
+  }
 });

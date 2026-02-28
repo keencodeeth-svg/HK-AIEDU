@@ -3,8 +3,9 @@ import { createClass, getClassesByTeacher, getClassStudentIds } from "@/lib/clas
 import type { Subject } from "@/lib/types";
 import { getAssignmentsByClass } from "@/lib/assignments";
 import { SUBJECT_OPTIONS } from "@/lib/constants";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
-import { parseJson, v } from "@/lib/api/validation";
+import { badRequest, unauthorized } from "@/lib/api/http";
+import { v } from "@/lib/api/validation";
+import { createLearningRoute } from "@/lib/api/domains";
 
 export const dynamic = "force-dynamic";
 
@@ -21,46 +22,52 @@ const createClassBodySchema = v.object<{
   { allowUnknown: false }
 );
 
-export const GET = withApi(async () => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "teacher") {
-    unauthorized();
+export const GET = createLearningRoute({
+  role: "teacher",
+  cache: "private-short",
+  handler: async ({ user }) => {
+    if (!user || user.role !== "teacher") {
+      unauthorized();
+    }
+
+    const classes = await getClassesByTeacher(user.id);
+    const data = await Promise.all(
+      classes.map(async (item) => {
+        const studentIds = await getClassStudentIds(item.id);
+        const assignments = await getAssignmentsByClass(item.id);
+        return {
+          ...item,
+          studentCount: studentIds.length,
+          assignmentCount: assignments.length
+        };
+      })
+    );
+
+    return { data };
   }
-
-  const classes = await getClassesByTeacher(user.id);
-  const data = await Promise.all(
-    classes.map(async (item) => {
-      const studentIds = await getClassStudentIds(item.id);
-      const assignments = await getAssignmentsByClass(item.id);
-      return {
-        ...item,
-        studentCount: studentIds.length,
-        assignmentCount: assignments.length
-      };
-    })
-  );
-
-  return { data };
 });
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "teacher") {
-    unauthorized();
+export const POST = createLearningRoute({
+  role: "teacher",
+  body: createClassBodySchema,
+  cache: "private-realtime",
+  handler: async ({ body, user }) => {
+    if (!user || user.role !== "teacher") {
+      unauthorized();
+    }
+
+    const allowedSubjects: Subject[] = SUBJECT_OPTIONS.map((item) => item.value as Subject);
+    if (!allowedSubjects.includes(body.subject as Subject)) {
+      badRequest("invalid subject");
+    }
+
+    const created = await createClass({
+      name: body.name,
+      subject: body.subject as Subject,
+      grade: body.grade,
+      teacherId: user.id
+    });
+
+    return { data: created };
   }
-
-  const body = await parseJson(request, createClassBodySchema);
-  const allowedSubjects: Subject[] = SUBJECT_OPTIONS.map((item) => item.value as Subject);
-  if (!allowedSubjects.includes(body.subject as Subject)) {
-    badRequest("invalid subject");
-  }
-
-  const created = await createClass({
-    name: body.name,
-    subject: body.subject as Subject,
-    grade: body.grade,
-    teacherId: user.id
-  });
-
-  return { data: created };
 });

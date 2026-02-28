@@ -1,0 +1,50 @@
+[
+  {
+    "id": "homework-good-1",
+    "input": {
+      "kind": "assignment_review",
+      "provider": "deepseek",
+      "taskType": "homework_review",
+      "textBlocks": [
+        "本次作业计算步骤完整，书写规范。主要问题在于单位换算和小数点位置。建议今天完成 5 题单位换算专项，明天复练 3 题易错题，并在错题本记录原因。"
+      ],
+      "listCountHint": 3
+    },
+    "expected": {
+      "minScore": 78,
+      "riskLevel": "low"
+    }
+  },
+  {
+    "id": "homework-medium-1",
+    "input": {
+      "kind": "assignment_review",
+      "provider": "zhipu",
+      "taskType": "homework_review",
+      "textBlocks": [
+        "作业完成情况一般，建议继续努力。"
+      ],
+      "listCountHint": 1
+    },
+    "expected": {
+      "maxScore": 72
+    }
+  },
+  {
+    "id": "homework-bad-1",
+    "input": {
+      "kind": "assignment_review",
+      "provider": "mock",
+      "taskType": "homework_review",
+      "textBlocks": [
+        "请参考老师讲解。"
+      ],
+      "listCountHint": 0
+    },
+    "expected": {
+      "maxScore": 45,
+      "riskLevel": "high"
+    }
+  }
+]
+

@@ -1,0 +1,80 @@
+[
+  {
+    "id": "exam-assign-a8094453b49d",
+    "paperId": "exam-paper-42e1e4956291",
+    "studentId": "u-e223738228b7",
+    "status": "submitted",
+    "assignedAt": "2026-02-26T10:35:07.076Z",
+    "startedAt": "2026-02-26T10:35:07.930Z",
+    "autoSavedAt": "2026-02-26T10:35:08.166Z",
+    "submittedAt": "2026-02-26T10:35:08.166Z",
+    "score": 0,
+    "total": 1
+  },
+  {
+    "id": "exam-assign-134541a68d98",
+    "paperId": "exam-paper-0323af3ea018",
+    "studentId": "u-e223738228b7",
+    "status": "pending",
+    "assignedAt": "2026-02-26T11:16:39.858Z"
+  },
+  {
+    "id": "exam-assign-2c54c5ae89d3",
+    "paperId": "exam-paper-0323af3ea018",
+    "studentId": "u-1fc0fd6f084e",
+    "status": "submitted",
+    "assignedAt": "2026-02-26T11:16:39.858Z",
+    "startedAt": "2026-02-26T11:16:41.122Z",
+    "autoSavedAt": "2026-02-26T11:16:41.361Z",
+    "submittedAt": "2026-02-26T11:16:41.361Z",
+    "score": 0,
+    "total": 1
+  },
+  {
+    "id": "exam-assign-939f3c73cec0",
+    "paperId": "exam-paper-42e1e4956291",
+    "studentId": "u-1fc0fd6f084e",
+    "status": "pending",
+    "assignedAt": "2026-02-26T11:16:39.864Z"
+  },
+  {
+    "id": "exam-assign-96c7933470d2",
+    "paperId": "exam-paper-c265b2f6a452",
+    "studentId": "u-e223738228b7",
+    "status": "pending",
+    "assignedAt": "2026-02-26T11:18:11.276Z"
+  },
+  {
+    "id": "exam-assign-dce2b17b4529",
+    "paperId": "exam-paper-c265b2f6a452",
+    "studentId": "u-1fc0fd6f084e",
+    "status": "pending",
+    "assignedAt": "2026-02-26T11:18:11.276Z"
+  },
+  {
+    "id": "exam-assign-e5636aa2d817",
+    "paperId": "exam-paper-c265b2f6a452",
+    "studentId": "u-0591e777e503",
+    "status": "submitted",
+    "assignedAt": "2026-02-26T11:18:11.276Z",
+    "startedAt": "2026-02-26T11:18:11.928Z",
+    "autoSavedAt": "2026-02-26T11:18:12.289Z",
+    "submittedAt": "2026-02-26T11:18:12.289Z",
+    "score": 0,
+    "total": 1
+  },
+  {
+    "id": "exam-assign-b33197ddade5",
+    "paperId": "exam-paper-0323af3ea018",
+    "studentId": "u-0591e777e503",
+    "status": "pending",
+    "assignedAt": "2026-02-26T11:18:11.283Z"
+  },
+  {
+    "id": "exam-assign-73fbfb399d1a",
+    "paperId": "exam-paper-42e1e4956291",
+    "studentId": "u-0591e777e503",
+    "status": "pending",
+    "assignedAt": "2026-02-26T11:18:11.283Z"
+  }
+]

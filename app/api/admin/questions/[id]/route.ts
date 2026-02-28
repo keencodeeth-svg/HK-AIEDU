@@ -2,7 +2,7 @@ import { deleteQuestion, getQuestions, updateQuestion } from "@/lib/content";
 import { requireRole } from "@/lib/guard";
 import { addAdminLog } from "@/lib/admin-log";
 import type { Question } from "@/lib/types";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import {
   attachQualityFields,
   deleteQuestionQualityMetric,
@@ -15,17 +15,20 @@ import {
   updateQuestionBodySchema
 } from "@/lib/api/schemas/admin";
 import { parseJson, parseParams } from "@/lib/api/validation";
+import { createAdminRoute } from "@/lib/api/domains";
 export const dynamic = "force-dynamic";
 
-export const PATCH = withApi(async (request, context) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
-  const params = parseParams(context.params, adminIdParamsSchema);
-  const body = await parseJson(request, updateQuestionBodySchema);
+export const PATCH = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request, params: rawParams }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
+    const params = parseParams(rawParams, adminIdParamsSchema);
+    const body = await parseJson(request, updateQuestionBodySchema);
 
-  const updates: Partial<Question> = {};
+    const updates: Partial<Question> = {};
 
   if (body.subject !== undefined) {
     const subject = body.subject.trim();
@@ -99,47 +102,51 @@ export const PATCH = withApi(async (request, context) => {
     updates.abilities = trimStringArray(body.abilities);
   }
 
-  const next = await updateQuestion(params.id, updates);
-  if (!next) {
-    notFound("not found");
+    const next = await updateQuestion(params.id, updates);
+    if (!next) {
+      notFound("not found");
+    }
+
+    const quality = await evaluateAndUpsertQuestionQuality({
+      question: next,
+      candidates: await getQuestions()
+    });
+
+    await addAdminLog({
+      adminId: user.id,
+      action: "update_question",
+      entityType: "question",
+      entityId: next.id,
+      detail: `${next.subject} ${next.grade} ${next.knowledgePointId}`
+    });
+
+    return { data: attachQualityFields(next, quality) };
   }
-
-  const quality = await evaluateAndUpsertQuestionQuality({
-    question: next,
-    candidates: await getQuestions()
-  });
-
-  await addAdminLog({
-    adminId: user.id,
-    action: "update_question",
-    entityType: "question",
-    entityId: next.id,
-    detail: `${next.subject} ${next.grade} ${next.knowledgePointId}`
-  });
-
-  return { data: attachQualityFields(next, quality) };
 });
 
-export const DELETE = withApi(async (_request, context) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
+export const DELETE = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ params: rawParams }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
+    const params = parseParams(rawParams, adminIdParamsSchema);
+
+    const ok = await deleteQuestion(params.id);
+    if (!ok) {
+      notFound("not found");
+    }
+    await deleteQuestionQualityMetric(params.id);
+
+    await addAdminLog({
+      adminId: user.id,
+      action: "delete_question",
+      entityType: "question",
+      entityId: params.id,
+      detail: ""
+    });
+
+    return { ok: true };
   }
-  const params = parseParams(context.params, adminIdParamsSchema);
-
-  const ok = await deleteQuestion(params.id);
-  if (!ok) {
-    notFound("not found");
-  }
-  await deleteQuestionQualityMetric(params.id);
-
-  await addAdminLog({
-    adminId: user.id,
-    action: "delete_question",
-    entityType: "question",
-    entityId: params.id,
-    detail: ""
-  });
-
-  return { ok: true };
 });

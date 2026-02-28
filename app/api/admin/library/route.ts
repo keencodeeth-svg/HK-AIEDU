@@ -4,9 +4,10 @@ import {
   hydrateLearningLibraryItemContent,
   listLearningLibraryItems
 } from "@/lib/learning-library";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseJson } from "@/lib/api/validation";
 import { v } from "@/lib/api/validation";
+import { createAdminRoute } from "@/lib/api/domains";
 
 export const dynamic = "force-dynamic";
 
@@ -62,68 +63,74 @@ function toPublicLibraryItem<T extends { contentStorageProvider?: string; conten
   return rest;
 }
 
-export const GET = withApi(async () => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
+export const GET = createAdminRoute({
+  cache: "private-short",
+  handler: async () => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
 
-  const data = await listLearningLibraryItems({
-    accessScope: "global"
-  });
-  return { data: data.map((item) => toPublicLibraryItem(item)) };
+    const data = await listLearningLibraryItems({
+      accessScope: "global"
+    });
+    return { data: data.map((item) => toPublicLibraryItem(item)) };
+  }
 });
 
-export const POST = withApi(async (request) => {
-  const user = await requireRole("admin");
-  if (!user) {
-    unauthorized();
-  }
+export const POST = createAdminRoute({
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await requireRole("admin");
+    if (!user) {
+      unauthorized();
+    }
 
-  const body = await parseJson(request, bodySchema);
-  const title = body.title?.trim();
-  const subject = body.subject?.trim();
-  const grade = body.grade?.trim();
-  if (!title || !subject || !grade) {
-    badRequest("missing fields");
-  }
+    const body = await parseJson(request, bodySchema);
+    const title = body.title?.trim();
+    const subject = body.subject?.trim();
+    const grade = body.grade?.trim();
+    if (!title || !subject || !grade) {
+      badRequest("missing fields");
+    }
 
-  const contentType = normalizeContentType(body.contentType?.trim());
-  const sourceType = normalizeSourceType(body.sourceType?.trim());
-  if (contentType === "textbook" && sourceType !== "file") {
-    badRequest("textbook requires file source");
-  }
-  if (sourceType === "file" && !body.contentBase64?.trim()) {
-    badRequest("file content required");
-  }
-  if (sourceType === "link" && !body.linkUrl?.trim()) {
-    badRequest("link required");
-  }
-  if (sourceType === "text" && !body.textContent?.trim()) {
-    badRequest("text content required");
-  }
+    const contentType = normalizeContentType(body.contentType?.trim());
+    const sourceType = normalizeSourceType(body.sourceType?.trim());
+    if (contentType === "textbook" && sourceType !== "file") {
+      badRequest("textbook requires file source");
+    }
+    if (sourceType === "file" && !body.contentBase64?.trim()) {
+      badRequest("file content required");
+    }
+    if (sourceType === "link" && !body.linkUrl?.trim()) {
+      badRequest("link required");
+    }
+    if (sourceType === "text" && !body.textContent?.trim()) {
+      badRequest("text content required");
+    }
 
-  const item = await createLearningLibraryItem({
-    title,
-    description: body.description?.trim() || undefined,
-    contentType,
-    subject,
-    grade,
-    ownerRole: "admin",
-    ownerId: user.id,
-    accessScope: "global",
-    sourceType,
-    fileName: body.fileName?.trim() || undefined,
-    mimeType: body.mimeType?.trim() || undefined,
-    size: body.size,
-    contentBase64: body.contentBase64?.trim() || undefined,
-    linkUrl: body.linkUrl?.trim() || undefined,
-    textContent: body.textContent ?? undefined,
-    knowledgePointIds: body.knowledgePointIds ?? [],
-    generatedByAi: false,
-    status: "published"
-  });
+    const item = await createLearningLibraryItem({
+      title,
+      description: body.description?.trim() || undefined,
+      contentType,
+      subject,
+      grade,
+      ownerRole: "admin",
+      ownerId: user.id,
+      accessScope: "global",
+      sourceType,
+      fileName: body.fileName?.trim() || undefined,
+      mimeType: body.mimeType?.trim() || undefined,
+      size: body.size,
+      contentBase64: body.contentBase64?.trim() || undefined,
+      linkUrl: body.linkUrl?.trim() || undefined,
+      textContent: body.textContent ?? undefined,
+      knowledgePointIds: body.knowledgePointIds ?? [],
+      generatedByAi: false,
+      status: "published"
+    });
 
-  const hydrated = await hydrateLearningLibraryItemContent(item);
-  return { data: toPublicLibraryItem(hydrated ?? item) };
+    const hydrated = await hydrateLearningLibraryItemContent(item);
+    return { data: toPublicLibraryItem(hydrated ?? item) };
+  }
 });

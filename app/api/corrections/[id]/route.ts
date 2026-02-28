@@ -1,8 +1,8 @@
 import { getStudentContext } from "@/lib/user-context";
 import { updateCorrectionTask } from "@/lib/corrections";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, parseParams, v } from "@/lib/api/validation";
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const correctionParamsSchema = v.object<{ id: string }>(
   {
@@ -18,21 +18,24 @@ const updateCorrectionBodySchema = v.object<{ status?: "pending" | "completed" }
   { allowUnknown: false }
 );
 
-export const PATCH = withApi(async (request, context) => {
-  const student = await getStudentContext();
-  if (!student) {
-    unauthorized();
-  }
+export const PATCH = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request, params }) => {
+    const student = await getStudentContext();
+    if (!student) {
+      unauthorized();
+    }
 
-  const params = parseParams(context.params, correctionParamsSchema);
-  const body = await parseJson(request, updateCorrectionBodySchema);
-  if (!body.status) {
-    badRequest("status required");
-  }
+    const parsed = parseParams(params, correctionParamsSchema);
+    const body = await parseJson(request, updateCorrectionBodySchema);
+    if (!body.status) {
+      badRequest("status required");
+    }
 
-  const next = await updateCorrectionTask({ id: params.id, userId: student.id, status: body.status });
-  if (!next) {
-    notFound("not found");
+    const next = await updateCorrectionTask({ id: parsed.id, userId: student.id, status: body.status });
+    if (!next) {
+      notFound("not found");
+    }
+    return { data: next };
   }
-  return { data: next };
 });

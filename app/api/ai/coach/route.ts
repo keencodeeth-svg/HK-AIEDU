@@ -2,10 +2,9 @@ import { getCurrentUser } from "@/lib/auth";
 import { generateAssistAnswer } from "@/lib/ai";
 import { addHistoryItem, getHistoryByUser, type AiHistoryItem } from "@/lib/ai-history";
 import { assessAiQuality } from "@/lib/ai-quality-control";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createAiRoute } from "@/lib/api/domains";
 
 const coachBodySchema = v.object<{
   question: string;
@@ -81,104 +80,108 @@ function buildCoachMemorySnapshot(params: {
   };
 }
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user) {
-    unauthorized();
-  }
+export const POST = createAiRoute({
+  role: ["student", "teacher", "parent", "admin"],
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user) {
+      unauthorized();
+    }
 
-  const body = await parseJson(request, coachBodySchema);
-  if (!body.question?.trim()) {
-    badRequest("missing question");
-  }
+    const body = await parseJson(request, coachBodySchema);
+    if (!body.question?.trim()) {
+      badRequest("missing question");
+    }
 
-  const subject = body.subject?.trim();
-  const grade = body.grade?.trim();
-  let memorySnapshot: CoachMemorySnapshot;
-  if (user.role === "student") {
-    try {
-      const history = await getHistoryByUser(user.id);
-      memorySnapshot = buildCoachMemorySnapshot({
-        history,
-        subject,
-        grade
-      });
-    } catch {
+    const subject = body.subject?.trim();
+    const grade = body.grade?.trim();
+    let memorySnapshot: CoachMemorySnapshot;
+    if (user.role === "student") {
+      try {
+        const history = await getHistoryByUser(user.id);
+        memorySnapshot = buildCoachMemorySnapshot({
+          history,
+          subject,
+          grade
+        });
+      } catch {
+        memorySnapshot = {
+          recentSessionCount: 0,
+          recentQuestions: [],
+          patternHint: "陪练记录暂不可用，先按当前题目给出分步提示。",
+          contextPrompt: ""
+        };
+      }
+    } else {
       memorySnapshot = {
         recentSessionCount: 0,
         recentQuestions: [],
-        patternHint: "陪练记录暂不可用，先按当前题目给出分步提示。",
+        patternHint: "当前角色不记录长期陪练记忆。",
         contextPrompt: ""
       };
     }
-  } else {
-    memorySnapshot = {
-      recentSessionCount: 0,
-      recentQuestions: [],
-      patternHint: "当前角色不记录长期陪练记忆。",
-      contextPrompt: ""
+
+    const assist = await generateAssistAnswer({
+      question: body.question.trim(),
+      subject,
+      grade,
+      memoryContext: memorySnapshot.contextPrompt
+    });
+
+    const checkpoints = [
+      "你能先说出题目里给了哪些已知条件吗？",
+      "这道题对应哪个知识点或公式？",
+      "下一步你准备怎么做？"
+    ];
+
+    const feedback = body.studentAnswer
+      ? `我看到你的思路：${body.studentAnswer}。我们先对照已知条件和关键公式，再把步骤拆成 2-3 步。`
+      : null;
+    const quality = assessAiQuality({
+      kind: "coach",
+      taskType: "assist",
+      provider: assist.provider,
+      textBlocks: [assist.answer, ...(assist.steps ?? []), ...(assist.hints ?? []), feedback ?? ""],
+      listCountHint: checkpoints.length + (assist.steps?.length ?? 0)
+    });
+
+    if (user.role === "student") {
+      try {
+        const tags = [
+          "coach_session",
+          subject ? `subject:${subject}` : "",
+          grade ? `grade:${grade}` : "",
+          body.studentAnswer?.trim() ? "with_thinking" : "without_thinking"
+        ].filter(Boolean);
+        const answerSummary = [assist.answer, feedback ?? ""].filter(Boolean).join("\n").slice(0, 4000);
+        await addHistoryItem({
+          userId: user.id,
+          question: body.question.trim(),
+          answer: answerSummary,
+          favorite: false,
+          tags
+        });
+      } catch {
+        // ignore history write failure to keep coach path available
+      }
+    }
+
+    return {
+      data: {
+        answer: assist.answer,
+        steps: assist.steps,
+        hints: assist.hints,
+        checkpoints,
+        feedback,
+        memory: {
+          recentSessionCount: memorySnapshot.recentSessionCount,
+          recentQuestions: memorySnapshot.recentQuestions,
+          patternHint: memorySnapshot.patternHint
+        },
+        provider: assist.provider,
+        quality
+      }
     };
   }
-
-  const assist = await generateAssistAnswer({
-    question: body.question.trim(),
-    subject,
-    grade,
-    memoryContext: memorySnapshot.contextPrompt
-  });
-
-  const checkpoints = [
-    "你能先说出题目里给了哪些已知条件吗？",
-    "这道题对应哪个知识点或公式？",
-    "下一步你准备怎么做？"
-  ];
-
-  const feedback = body.studentAnswer
-    ? `我看到你的思路：${body.studentAnswer}。我们先对照已知条件和关键公式，再把步骤拆成 2-3 步。`
-    : null;
-  const quality = assessAiQuality({
-    kind: "coach",
-    taskType: "assist",
-    provider: assist.provider,
-    textBlocks: [assist.answer, ...(assist.steps ?? []), ...(assist.hints ?? []), feedback ?? ""],
-    listCountHint: checkpoints.length + (assist.steps?.length ?? 0)
-  });
-
-  if (user.role === "student") {
-    try {
-      const tags = [
-        "coach_session",
-        subject ? `subject:${subject}` : "",
-        grade ? `grade:${grade}` : "",
-        body.studentAnswer?.trim() ? "with_thinking" : "without_thinking"
-      ].filter(Boolean);
-      const answerSummary = [assist.answer, feedback ?? ""].filter(Boolean).join("\n").slice(0, 4000);
-      await addHistoryItem({
-        userId: user.id,
-        question: body.question.trim(),
-        answer: answerSummary,
-        favorite: false,
-        tags
-      });
-    } catch {
-      // ignore history write failure to keep coach path available
-    }
-  }
-
-  return {
-    data: {
-      answer: assist.answer,
-      steps: assist.steps,
-      hints: assist.hints,
-      checkpoints,
-      feedback,
-      memory: {
-        recentSessionCount: memorySnapshot.recentSessionCount,
-        recentQuestions: memorySnapshot.recentQuestions,
-        patternHint: memorySnapshot.patternHint
-      },
-      provider: assist.provider,
-      quality
-    }
-  };
 });

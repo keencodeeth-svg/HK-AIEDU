@@ -3,10 +3,9 @@ import {
   listParentActionReceipts,
   upsertParentActionReceipt
 } from "@/lib/parent-action-receipts";
-import { badRequest, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseJson, parseSearchParams, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const bodySchema = v.object<{
   source?: string;
@@ -71,67 +70,75 @@ function calculateEffectScore(input: { status: "done" | "skipped"; estimatedMinu
   return -Math.max(3, Math.min(20, Math.round(input.estimatedMinutes / 4)));
 }
 
-export const GET = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "parent") {
-    unauthorized();
-  }
-  if (!user.studentId) {
-    badRequest("missing student");
-  }
+export const GET = createLearningRoute({
+  role: "parent",
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "parent") {
+      unauthorized();
+    }
+    if (!user.studentId) {
+      badRequest("missing student");
+    }
 
-  const query = parseSearchParams(request, querySchema);
-  const source = query.source ? normalizeSource(query.source) : undefined;
-  const receipts = await listParentActionReceipts({
-    parentId: user.id,
-    studentId: user.studentId,
-    source
-  });
+    const query = parseSearchParams(request, querySchema);
+    const source = query.source ? normalizeSource(query.source) : undefined;
+    const receipts = await listParentActionReceipts({
+      parentId: user.id,
+      studentId: user.studentId,
+      source
+    });
 
-  return {
-    data: receipts
-  };
+    return {
+      data: receipts
+    };
+  }
 });
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "parent") {
-    unauthorized();
-  }
-  if (!user.studentId) {
-    badRequest("missing student");
-  }
+export const POST = createLearningRoute({
+  role: "parent",
+  cache: "private-realtime",
+  handler: async ({ request }) => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "parent") {
+      unauthorized();
+    }
+    if (!user.studentId) {
+      badRequest("missing student");
+    }
 
-  const body = await parseJson(request, bodySchema);
-  const actionItemId = body.actionItemId?.trim();
-  if (!actionItemId) {
-    badRequest("actionItemId required");
-  }
+    const body = await parseJson(request, bodySchema);
+    const actionItemId = body.actionItemId?.trim();
+    if (!actionItemId) {
+      badRequest("actionItemId required");
+    }
 
-  const source = normalizeSource(body.source);
-  if (!isKnownActionItemId(source, actionItemId)) {
-    badRequest("invalid actionItemId for source");
-  }
-  const status = normalizeStatus(body.status);
-  const estimatedMinutes = body.estimatedMinutes ?? 0;
-  const note = body.note?.trim() ?? "";
-  if (status === "skipped" && note.length < 2) {
-    badRequest("skipped status requires note");
-  }
-  const effectScore = calculateEffectScore({ status, estimatedMinutes });
+    const source = normalizeSource(body.source);
+    if (!isKnownActionItemId(source, actionItemId)) {
+      badRequest("invalid actionItemId for source");
+    }
+    const status = normalizeStatus(body.status);
+    const estimatedMinutes = body.estimatedMinutes ?? 0;
+    const note = body.note?.trim() ?? "";
+    if (status === "skipped" && note.length < 2) {
+      badRequest("skipped status requires note");
+    }
+    const effectScore = calculateEffectScore({ status, estimatedMinutes });
 
-  const receipt = await upsertParentActionReceipt({
-    parentId: user.id,
-    studentId: user.studentId,
-    source,
-    actionItemId,
-    status,
-    note: note || undefined,
-    estimatedMinutes,
-    effectScore
-  });
+    const receipt = await upsertParentActionReceipt({
+      parentId: user.id,
+      studentId: user.studentId,
+      source,
+      actionItemId,
+      status,
+      note: note || undefined,
+      estimatedMinutes,
+      effectScore
+    });
 
-  return {
-    data: receipt
-  };
+    return {
+      data: receipt
+    };
+  }
 });

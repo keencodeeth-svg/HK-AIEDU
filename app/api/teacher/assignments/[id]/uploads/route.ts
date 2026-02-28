@@ -1,10 +1,9 @@
 import { getClassStudentIds } from "@/lib/classes";
 import { getAssignmentUploads } from "@/lib/assignment-uploads";
-import { notFound, withApi } from "@/lib/api/http";
+import { notFound } from "@/lib/api/http";
 import { requireTeacherAssignment } from "@/lib/guard";
 import { parseSearchParams, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const assignmentUploadsQuerySchema = v.object<{ studentId: string }>(
   {
@@ -13,16 +12,20 @@ const assignmentUploadsQuerySchema = v.object<{ studentId: string }>(
   { allowUnknown: true }
 );
 
-export const GET = withApi(async (request, context) => {
-  const query = parseSearchParams(request, assignmentUploadsQuerySchema);
-  const studentId = query.studentId;
+export const GET = createLearningRoute({
+  role: "teacher",
+  cache: "private-realtime",
+  handler: async ({ request, params }) => {
+    const query = parseSearchParams(request, assignmentUploadsQuerySchema);
+    const studentId = query.studentId;
 
-  const { assignment, klass } = await requireTeacherAssignment(context.params.id);
-  const studentIds = await getClassStudentIds(klass.id);
-  if (!studentIds.includes(studentId)) {
-    notFound("student not in class");
+    const { assignment, klass } = await requireTeacherAssignment(params.id);
+    const studentIds = await getClassStudentIds(klass.id);
+    if (!studentIds.includes(studentId)) {
+      notFound("student not in class");
+    }
+
+    const uploads = await getAssignmentUploads(assignment.id, studentId);
+    return { data: uploads };
   }
-
-  const uploads = await getAssignmentUploads(assignment.id, studentId);
-  return { data: uploads };
 });

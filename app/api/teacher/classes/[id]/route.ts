@@ -1,7 +1,8 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getClassById, updateClassSettings } from "@/lib/classes";
-import { notFound, unauthorized, withApi } from "@/lib/api/http";
-import { parseJson, v } from "@/lib/api/validation";
+import { notFound, unauthorized } from "@/lib/api/http";
+import { v } from "@/lib/api/validation";
+import { createLearningRoute } from "@/lib/api/domains";
 
 export const dynamic = "force-dynamic";
 
@@ -14,19 +15,30 @@ const updateClassBodySchema = v.object<{
   { allowUnknown: false }
 );
 
-export const PATCH = withApi(async (request, context) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "teacher") {
-    unauthorized();
-  }
+const classParamsSchema = v.object<{ id: string }>(
+  {
+    id: v.string({ minLength: 1 })
+  },
+  { allowUnknown: true }
+);
 
-  const classId = context.params.id;
-  const klass = await getClassById(classId);
-  if (!klass || klass.teacherId !== user.id) {
-    notFound("not found");
-  }
+export const PATCH = createLearningRoute({
+  role: "teacher",
+  params: classParamsSchema,
+  body: updateClassBodySchema,
+  cache: "private-realtime",
+  handler: async ({ params, body, user }) => {
+    if (!user || user.role !== "teacher") {
+      unauthorized();
+    }
 
-  const body = await parseJson(request, updateClassBodySchema);
-  const updated = await updateClassSettings(classId, { joinMode: body.joinMode });
-  return { data: updated };
+    const classId = params.id;
+    const klass = await getClassById(classId);
+    if (!klass || klass.teacherId !== user.id) {
+      notFound("not found");
+    }
+
+    const updated = await updateClassSettings(classId, { joinMode: body.joinMode });
+    return { data: updated };
+  }
 });

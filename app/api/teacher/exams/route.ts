@@ -1,17 +1,16 @@
-import { getCurrentUser } from "@/lib/auth";
 import { getClassById, getClassStudentIds, getClassesByTeacher } from "@/lib/classes";
 import { getQuestions } from "@/lib/content";
+import { listQuestionQualityMetrics } from "@/lib/question-quality";
 import {
   createAndPublishExam,
   ensureExamAssignmentsForPaper,
   getExamPapersByClassIds
 } from "@/lib/exams";
 import { createNotification } from "@/lib/notifications";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 import type { Difficulty } from "@/lib/types";
-
-export const dynamic = "force-dynamic";
+import { createExamRoute } from "@/lib/api/domains";
 
 const createExamBodySchema = v.object<{
   classId: string;
@@ -28,6 +27,7 @@ const createExamBodySchema = v.object<{
   questionType?: string;
   publishMode?: "teacher_assigned" | "targeted";
   antiCheatLevel?: "off" | "basic";
+  includeIsolated?: boolean;
 }>(
   {
     classId: v.string({ minLength: 1 }),
@@ -43,7 +43,8 @@ const createExamBodySchema = v.object<{
     difficulty: v.optional(v.enum(["easy", "medium", "hard"] as const)),
     questionType: v.optional(v.string({ minLength: 1 })),
     publishMode: v.optional(v.enum(["teacher_assigned", "targeted"] as const)),
-    antiCheatLevel: v.optional(v.enum(["off", "basic"] as const))
+    antiCheatLevel: v.optional(v.enum(["off", "basic"] as const)),
+    includeIsolated: v.optional(v.boolean())
   },
   { allowUnknown: false }
 );
@@ -72,8 +73,10 @@ function sampleQuestions<T>(items: T[], count: number) {
   return shuffled.slice(0, count);
 }
 
-export const GET = withApi(async () => {
-  const user = await getCurrentUser();
+export const GET = createExamRoute({
+  role: "teacher",
+  cache: "private-realtime",
+  handler: async ({ user }) => {
   if (!user || user.role !== "teacher") {
     unauthorized();
   }
@@ -108,11 +111,14 @@ export const GET = withApi(async () => {
     })
   );
 
-  return { data };
+    return { data };
+  }
 });
 
-export const POST = withApi(async (request) => {
-  const user = await getCurrentUser();
+export const POST = createExamRoute({
+  role: "teacher",
+  cache: "private-realtime",
+  handler: async ({ request, user }) => {
   if (!user || user.role !== "teacher") {
     unauthorized();
   }
@@ -131,6 +137,15 @@ export const POST = withApi(async (request) => {
 
   const allQuestions = await getQuestions();
   const questionMap = new Map(allQuestions.map((item) => [item.id, item]));
+  const includeIsolated = body.includeIsolated === true;
+  const classScopedIds = allQuestions
+    .filter((item) => item.subject === klass.subject && item.grade === klass.grade)
+    .map((item) => item.id);
+  const classScopedQuality = await listQuestionQualityMetrics({ questionIds: classScopedIds });
+  const isolatedSet = new Set(classScopedQuality.filter((item) => item.isolated).map((item) => item.questionId));
+  const isolatedPoolCount = classScopedIds.filter((item) => isolatedSet.has(item)).length;
+  let isolatedExcludedCount = 0;
+  let isolationFallbackUsed = false;
 
   let questionIds = Array.from(new Set(body.questionIds ?? []));
   if (questionIds.length > 0) {
@@ -144,6 +159,13 @@ export const POST = withApi(async (request) => {
     });
     if (outOfClass.length) {
       badRequest("questionIds must match class subject and grade");
+    }
+    if (!includeIsolated) {
+      const isolatedSelected = questionIds.filter((id) => isolatedSet.has(id));
+      isolatedExcludedCount = isolatedSelected.length;
+      if (isolatedSelected.length) {
+        badRequest(`题目包含隔离池高风险题（${isolatedSelected.length} 题），请先移除或显式开启 includeIsolated`);
+      }
     }
   } else {
     const count = Number(body.questionCount ?? 0);
@@ -160,10 +182,15 @@ export const POST = withApi(async (request) => {
     if (body.questionType) {
       pool = pool.filter((item) => (item.questionType ?? "choice") === body.questionType);
     }
-    if (pool.length < count) {
+    const activePool = includeIsolated ? pool : pool.filter((item) => !isolatedSet.has(item.id));
+    isolatedExcludedCount = includeIsolated ? 0 : pool.length - activePool.length;
+    const selectedPool =
+      !includeIsolated && activePool.length < count && pool.length >= count ? pool : activePool;
+    isolationFallbackUsed = !includeIsolated && selectedPool === pool && activePool.length < count;
+    if (selectedPool.length < count) {
       badRequest("题库数量不足，无法生成考试");
     }
-    questionIds = sampleQuestions(pool, count).map((item) => item.id);
+    questionIds = sampleQuestions(selectedPool, count).map((item) => item.id);
   }
 
   const classStudentIds = await getClassStudentIds(klass.id);
@@ -203,11 +230,18 @@ export const POST = withApi(async (request) => {
     });
   }
 
-  return {
-    message: "考试发布成功",
-    data: {
-      ...exam,
-      assignedCount: notifyStudentIds.length
-    }
-  };
+    return {
+      message: "考试发布成功",
+      data: {
+        ...exam,
+        assignedCount: notifyStudentIds.length,
+        qualityGovernance: {
+          includeIsolated,
+          isolatedPoolCount,
+          isolatedExcludedCount: isolationFallbackUsed ? 0 : isolatedExcludedCount,
+          isolationFallbackUsed
+        }
+      }
+    };
+  }
 });

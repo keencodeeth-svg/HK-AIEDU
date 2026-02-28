@@ -7,9 +7,8 @@ import {
   summarizeParentActionReceipts
 } from "@/lib/parent-action-receipts";
 import { getWrongReviewQueue } from "@/lib/wrong-review";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
-
-export const dynamic = "force-dynamic";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
+import { createLearningRoute } from "@/lib/api/domains";
 
 type ParentAssignmentActionItem = {
   id: string;
@@ -80,157 +79,166 @@ function buildAssignmentActionItems(params: {
   return items.slice(0, 3);
 }
 
-export const GET = withApi(async () => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "parent") {
-    unauthorized();
-  }
+export const GET = createLearningRoute({
+  role: "parent",
+  cache: "private-realtime",
+  handler: async () => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "parent") {
+      unauthorized();
+    }
 
-  if (!user.studentId) {
-    badRequest("missing student");
-  }
+    if (!user.studentId) {
+      badRequest("missing student");
+    }
 
-  const student = await getUserById(user.studentId);
-  if (!student) {
-    notFound("student not found");
-  }
+    const student = await getUserById(user.studentId);
+    if (!student) {
+      notFound("student not found");
+    }
 
-  const classes = await getClassesByStudent(user.studentId);
-  const classMap = new Map(classes.map((item) => [item.id, item]));
-  const assignments = await getAssignmentsByClassIds(classes.map((item) => item.id));
-  const progress = await getAssignmentProgressByStudent(user.studentId);
-  const progressMap = new Map(progress.map((item) => [item.assignmentId, item]));
+    const classes = await getClassesByStudent(user.studentId);
+    const classMap = new Map(classes.map((item) => [item.id, item]));
+    const assignments = await getAssignmentsByClassIds(classes.map((item) => item.id));
+    const progress = await getAssignmentProgressByStudent(user.studentId);
+    const progressMap = new Map(progress.map((item) => [item.assignmentId, item]));
 
-  const data = assignments.map((assignment) => {
-    const klass = classMap.get(assignment.classId);
-    const record = progressMap.get(assignment.id);
-    return {
-      id: assignment.id,
-      title: assignment.title,
-      dueDate: assignment.dueDate,
-      className: klass?.name ?? "-",
-      subject: klass?.subject ?? "-",
-      grade: klass?.grade ?? "-",
-      status: record?.status ?? "pending",
-      score: record?.score ?? null,
-      total: record?.total ?? null,
-      completedAt: record?.completedAt ?? null
-    };
-  });
+    const data = assignments.map((assignment) => {
+      const klass = classMap.get(assignment.classId);
+      const record = progressMap.get(assignment.id);
+      return {
+        id: assignment.id,
+        title: assignment.title,
+        dueDate: assignment.dueDate,
+        className: klass?.name ?? "-",
+        subject: klass?.subject ?? "-",
+        grade: klass?.grade ?? "-",
+        status: record?.status ?? "pending",
+        score: record?.score ?? null,
+        total: record?.total ?? null,
+        completedAt: record?.completedAt ?? null
+      };
+    });
 
-  const pending = data.filter((item) => item.status !== "completed");
-  const dueSoon = pending.filter((item) => {
-    const diff = new Date(item.dueDate).getTime() - Date.now();
-    return diff >= 0 && diff <= 2 * 24 * 60 * 60 * 1000;
-  });
-  const overdue = pending.filter((item) => new Date(item.dueDate).getTime() < Date.now());
-  const completed = data.filter((item) => item.status === "completed");
-  const reviewQueue = await getWrongReviewQueue(user.studentId);
-  const reviewDueToday = reviewQueue.summary.dueToday;
+    const pending = data.filter((item) => item.status !== "completed");
+    const dueSoon = pending.filter((item) => {
+      const diff = new Date(item.dueDate).getTime() - Date.now();
+      return diff >= 0 && diff <= 2 * 24 * 60 * 60 * 1000;
+    });
+    const overdue = pending.filter((item) => new Date(item.dueDate).getTime() < Date.now());
+    const completed = data.filter((item) => item.status === "completed");
+    const reviewQueue = await getWrongReviewQueue(user.studentId);
+    const reviewDueToday = reviewQueue.summary.dueToday;
 
-  const actionItems = buildAssignmentActionItems({
-    pending: pending.length,
-    dueSoon: dueSoon.length,
-    overdue: overdue.length,
-    reviewDueToday,
-    studentName: student.name
-  });
-  const estimatedMinutes = actionItems.reduce((sum, item) => sum + item.estimatedMinutes, 0);
-  const parentTips = actionItems.map((item) => item.parentTip);
-  const receipts = await listParentActionReceipts({
-    parentId: user.id,
-    studentId: user.studentId,
-    source: "assignment_plan"
-  });
-  const receiptMap = new Map(
-    receipts.map((item) => [
-      buildParentActionReceiptKey({
-        source: item.source,
-        actionItemId: item.actionItemId
-      }),
-      item
-    ])
-  );
-  const actionItemsWithReceipt = actionItems.map((item) => {
-    const receipt = receiptMap.get(
-      buildParentActionReceiptKey({ source: "assignment_plan", actionItemId: item.id })
-    );
-    return {
-      ...item,
-      receipt: receipt
-        ? {
-            status: receipt.status,
-            completedAt: receipt.completedAt,
-            note: receipt.note ?? null,
-            effectScore: receipt.effectScore
-          }
-        : null
-    };
-  });
-  const completedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "done").length;
-  const skippedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "skipped").length;
-  const pendingCount = Math.max(0, actionItemsWithReceipt.length - completedCount - skippedCount);
-  const doneEffectScore = receipts
-    .filter((item) => item.status === "done")
-    .reduce((sum, item) => sum + item.effectScore, 0);
-  const skippedPenaltyScore = receipts
-    .filter((item) => item.status === "skipped")
-    .reduce((sum, item) => sum + item.effectScore, 0);
-  const receiptEffectScore = doneEffectScore + skippedPenaltyScore;
-  const history = summarizeParentActionReceipts(receipts);
-
-  const reminderText = [
-    `${student.name}本周作业提醒：待完成 ${pending.length} 份。`,
-    overdue.length ? `已逾期 ${overdue.length} 份，请尽快完成。` : "",
-    dueSoon.length ? `近 2 天到期 ${dueSoon.length} 份。` : "",
-    reviewDueToday ? `今日错题复练 ${reviewDueToday} 题。` : "",
-    ...dueSoon.slice(0, 3).map((item) => `- ${item.className} · ${item.title}（截止 ${new Date(item.dueDate).toLocaleDateString("zh-CN")}）`)
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  return {
-    student: { id: student.id, name: student.name },
-    data,
-    summary: {
+    const actionItems = buildAssignmentActionItems({
       pending: pending.length,
       dueSoon: dueSoon.length,
       overdue: overdue.length,
-      completed: completed.length,
-      reviewDueToday
-    },
-    reminderText,
-    actionItems: actionItemsWithReceipt,
-    estimatedMinutes,
-    parentTips,
-    execution: {
-      suggestedCount: actionItemsWithReceipt.length,
-      completedCount,
-      skippedCount,
-      pendingCount,
-      completionRate: actionItemsWithReceipt.length
-        ? Math.round((completedCount / actionItemsWithReceipt.length) * 100)
-        : 0,
-      lastCompletedAt: receipts.find((item) => item.status === "done")?.completedAt ?? null,
-      lastActionAt: receipts[0]?.completedAt ?? null,
-      streakDays: history.streakDays,
-      doneMinutes: history.doneMinutes
-    },
-    effect: {
-      pendingDelta: pending.length - completed.length,
-      receiptEffectScore,
-      doneEffectScore,
-      skippedPenaltyScore,
-      last7dEffectScore: history.last7dEffectScore,
-      avgEffectScore: history.avgEffectScore
-    },
-    history: {
-      totalCount: history.totalCount,
-      doneCount: history.doneCount,
-      skippedCount: history.skippedCount,
-      last7dDoneCount: history.last7dDoneCount,
-      last7dSkippedCount: history.last7dSkippedCount,
-      lastActionAt: history.lastActionAt
-    }
-  };
+      reviewDueToday,
+      studentName: student.name
+    });
+    const estimatedMinutes = actionItems.reduce((sum, item) => sum + item.estimatedMinutes, 0);
+    const parentTips = actionItems.map((item) => item.parentTip);
+    const receipts = await listParentActionReceipts({
+      parentId: user.id,
+      studentId: user.studentId,
+      source: "assignment_plan"
+    });
+    const receiptMap = new Map(
+      receipts.map((item) => [
+        buildParentActionReceiptKey({
+          source: item.source,
+          actionItemId: item.actionItemId
+        }),
+        item
+      ])
+    );
+    const actionItemsWithReceipt = actionItems.map((item) => {
+      const receipt = receiptMap.get(
+        buildParentActionReceiptKey({ source: "assignment_plan", actionItemId: item.id })
+      );
+      return {
+        ...item,
+        receipt: receipt
+          ? {
+              status: receipt.status,
+              completedAt: receipt.completedAt,
+              note: receipt.note ?? null,
+              effectScore: receipt.effectScore
+            }
+          : null
+      };
+    });
+    const completedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "done").length;
+    const skippedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "skipped").length;
+    const pendingCount = Math.max(0, actionItemsWithReceipt.length - completedCount - skippedCount);
+    const doneEffectScore = receipts
+      .filter((item) => item.status === "done")
+      .reduce((sum, item) => sum + item.effectScore, 0);
+    const skippedPenaltyScore = receipts
+      .filter((item) => item.status === "skipped")
+      .reduce((sum, item) => sum + item.effectScore, 0);
+    const receiptEffectScore = doneEffectScore + skippedPenaltyScore;
+    const history = summarizeParentActionReceipts(receipts);
+
+    const reminderText = [
+      `${student.name}本周作业提醒：待完成 ${pending.length} 份。`,
+      overdue.length ? `已逾期 ${overdue.length} 份，请尽快完成。` : "",
+      dueSoon.length ? `近 2 天到期 ${dueSoon.length} 份。` : "",
+      reviewDueToday ? `今日错题复练 ${reviewDueToday} 题。` : "",
+      ...dueSoon
+        .slice(0, 3)
+        .map(
+          (item) =>
+            `- ${item.className} · ${item.title}（截止 ${new Date(item.dueDate).toLocaleDateString("zh-CN")}）`
+        )
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return {
+      student: { id: student.id, name: student.name },
+      data,
+      summary: {
+        pending: pending.length,
+        dueSoon: dueSoon.length,
+        overdue: overdue.length,
+        completed: completed.length,
+        reviewDueToday
+      },
+      reminderText,
+      actionItems: actionItemsWithReceipt,
+      estimatedMinutes,
+      parentTips,
+      execution: {
+        suggestedCount: actionItemsWithReceipt.length,
+        completedCount,
+        skippedCount,
+        pendingCount,
+        completionRate: actionItemsWithReceipt.length
+          ? Math.round((completedCount / actionItemsWithReceipt.length) * 100)
+          : 0,
+        lastCompletedAt: receipts.find((item) => item.status === "done")?.completedAt ?? null,
+        lastActionAt: receipts[0]?.completedAt ?? null,
+        streakDays: history.streakDays,
+        doneMinutes: history.doneMinutes
+      },
+      effect: {
+        pendingDelta: pending.length - completed.length,
+        receiptEffectScore,
+        doneEffectScore,
+        skippedPenaltyScore,
+        last7dEffectScore: history.last7dEffectScore,
+        avgEffectScore: history.avgEffectScore
+      },
+      history: {
+        totalCount: history.totalCount,
+        doneCount: history.doneCount,
+        skippedCount: history.skippedCount,
+        last7dDoneCount: history.last7dDoneCount,
+        last7dSkippedCount: history.last7dSkippedCount,
+        lastActionAt: history.lastActionAt
+      }
+    };
+  }
 });

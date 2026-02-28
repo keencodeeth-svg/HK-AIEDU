@@ -1,4 +1,5 @@
 import { getAiTaskPolicy, type AiTaskType } from "./ai-task-policies";
+import { applyAiQualityCalibration } from "./ai-quality-calibration";
 
 export type AiQualityRiskLevel = "low" | "medium" | "high";
 
@@ -8,6 +9,11 @@ export type AiQualityResult = {
   needsHumanReview: boolean;
   fallbackAction: string;
   reasons: string[];
+  calibration?: {
+    globalBias: number;
+    providerAdjustment: number;
+    kindAdjustment: number;
+  };
   taskType?: AiTaskType;
   minQualityScore?: number;
   policyViolated?: boolean;
@@ -66,7 +72,20 @@ export function assessAiQuality(input: {
     reasons.push("作业批改意见偏简略。");
   }
 
-  const confidenceScore = clamp(score, 0, 100);
+  const baseScore = clamp(score, 0, 100);
+  const calibrated = applyAiQualityCalibration({
+    score: baseScore,
+    provider: input.provider,
+    kind: input.kind
+  });
+  const confidenceScore = calibrated.score;
+  if (
+    calibrated.adjustments.globalBias !== 0 ||
+    calibrated.adjustments.providerAdjustment !== 0 ||
+    calibrated.adjustments.kindAdjustment !== 0
+  ) {
+    reasons.push("质量分已应用离线校准参数。");
+  }
   const rawRiskLevel: AiQualityRiskLevel =
     confidenceScore < 55 ? "high" : confidenceScore < 75 ? "medium" : "low";
   const resolvedTaskType =
@@ -102,6 +121,7 @@ export function assessAiQuality(input: {
     needsHumanReview,
     fallbackAction,
     reasons,
+    calibration: calibrated.adjustments,
     taskType: resolvedTaskType,
     minQualityScore,
     policyViolated

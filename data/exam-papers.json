@@ -1,0 +1,32 @@
+[
+  {
+    "id": "exam-paper-42e1e4956291",
+    "classId": "class-15f51b1e74e8",
+    "title": "API_TEST_EXAM_mm3bu8vx",
+    "endAt": "2026-02-28T10:35:07.005Z",
+    "status": "published",
+    "createdBy": "u-teacher-001",
+    "createdAt": "2026-02-26T10:35:07.076Z",
+    "updatedAt": "2026-02-26T10:35:07.076Z"
+  },
+  {
+    "id": "exam-paper-0323af3ea018",
+    "classId": "class-15f51b1e74e8",
+    "title": "API_TEST_EXAM_mm3dboc0",
+    "endAt": "2026-02-28T11:16:39.792Z",
+    "status": "published",
+    "createdBy": "u-teacher-001",
+    "createdAt": "2026-02-26T11:16:39.858Z",
+    "updatedAt": "2026-02-26T11:16:39.858Z"
+  },
+  {
+    "id": "exam-paper-c265b2f6a452",
+    "classId": "class-15f51b1e74e8",
+    "title": "API_TEST_EXAM_mm3ddmvh",
+    "endAt": "2026-02-28T11:18:11.213Z",
+    "status": "published",
+    "createdBy": "u-teacher-001",
+    "createdAt": "2026-02-26T11:18:11.276Z",
+    "updatedAt": "2026-02-26T11:18:11.276Z"
+  }
+]

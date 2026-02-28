@@ -1,9 +1,8 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getFavoriteByUserQuestion, removeFavorite, upsertFavorite } from "@/lib/favorites";
-import { unauthorized, withApi } from "@/lib/api/http";
+import { unauthorized } from "@/lib/api/http";
 import { parseJson, parseParams, v } from "@/lib/api/validation";
-
-export const dynamic = "force-dynamic";
+import { createLearningRoute } from "@/lib/api/domains";
 
 const favoriteParamsSchema = v.object<{ questionId: string }>(
   {
@@ -20,46 +19,55 @@ const updateFavoriteBodySchema = v.object<{ tags?: string[]; note?: string }>(
   { allowUnknown: false }
 );
 
-export const GET = withApi(async (_request, context) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "student") {
-    unauthorized();
-  }
+export const GET = createLearningRoute({
+  cache: "private-short",
+  handler: async ({ params }) => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "student") {
+      unauthorized();
+    }
 
-  const params = parseParams(context.params, favoriteParamsSchema);
-  const favorite = await getFavoriteByUserQuestion(user.id, params.questionId);
-  return { data: favorite };
+    const parsed = parseParams(params, favoriteParamsSchema);
+    const favorite = await getFavoriteByUserQuestion(user.id, parsed.questionId);
+    return { data: favorite };
+  }
 });
 
-export const PATCH = withApi(async (request, context) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "student") {
-    unauthorized();
+export const PATCH = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ request, params }) => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "student") {
+      unauthorized();
+    }
+
+    const parsed = parseParams(params, favoriteParamsSchema);
+    const body = await parseJson(request, updateFavoriteBodySchema);
+    const tags = Array.isArray(body.tags)
+      ? body.tags.map((item) => String(item).trim()).filter(Boolean)
+      : undefined;
+
+    const record = await upsertFavorite({
+      userId: user.id,
+      questionId: parsed.questionId,
+      tags,
+      note: body.note
+    });
+
+    return { data: record };
   }
-
-  const params = parseParams(context.params, favoriteParamsSchema);
-  const body = await parseJson(request, updateFavoriteBodySchema);
-  const tags = Array.isArray(body.tags)
-    ? body.tags.map((item) => String(item).trim()).filter(Boolean)
-    : undefined;
-
-  const record = await upsertFavorite({
-    userId: user.id,
-    questionId: params.questionId,
-    tags,
-    note: body.note
-  });
-
-  return { data: record };
 });
 
-export const DELETE = withApi(async (_request, context) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "student") {
-    unauthorized();
-  }
+export const DELETE = createLearningRoute({
+  cache: "private-realtime",
+  handler: async ({ params }) => {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "student") {
+      unauthorized();
+    }
 
-  const params = parseParams(context.params, favoriteParamsSchema);
-  const removed = await removeFavorite(user.id, params.questionId);
-  return { removed };
+    const parsed = parseParams(params, favoriteParamsSchema);
+    const removed = await removeFavorite(user.id, parsed.questionId);
+    return { removed };
+  }
 });

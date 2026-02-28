@@ -1,7 +1,9 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getClassById, updateClassSettings } from "@/lib/classes";
 import crypto from "crypto";
-import { notFound, unauthorized, withApi } from "@/lib/api/http";
+import { notFound, unauthorized } from "@/lib/api/http";
+import { v } from "@/lib/api/validation";
+import { createLearningRoute } from "@/lib/api/domains";
 
 export const dynamic = "force-dynamic";
 
@@ -9,18 +11,29 @@ function generateJoinCode() {
   return crypto.randomBytes(4).toString("hex").slice(0, 6).toUpperCase();
 }
 
-export const POST = withApi(async (_request, context) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "teacher") {
-    unauthorized();
-  }
+const classParamsSchema = v.object<{ id: string }>(
+  {
+    id: v.string({ minLength: 1 })
+  },
+  { allowUnknown: true }
+);
 
-  const classId = context.params.id;
-  const klass = await getClassById(classId);
-  if (!klass || klass.teacherId !== user.id) {
-    notFound("not found");
-  }
+export const POST = createLearningRoute({
+  role: "teacher",
+  params: classParamsSchema,
+  cache: "private-realtime",
+  handler: async ({ params, user }) => {
+    if (!user || user.role !== "teacher") {
+      unauthorized();
+    }
 
-  const updated = await updateClassSettings(classId, { joinCode: generateJoinCode() });
-  return { data: updated };
+    const classId = params.id;
+    const klass = await getClassById(classId);
+    if (!klass || klass.teacherId !== user.id) {
+      notFound("not found");
+    }
+
+    const updated = await updateClassSettings(classId, { joinCode: generateJoinCode() });
+    return { data: updated };
+  }
 });

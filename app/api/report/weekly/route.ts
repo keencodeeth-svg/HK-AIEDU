@@ -7,8 +7,8 @@ import {
   summarizeParentActionReceipts
 } from "@/lib/parent-action-receipts";
 import { getDailyAccuracy, getStatsBetween, getWeakKnowledgePoints, getWeeklyStats } from "@/lib/progress";
-import { unauthorized, withApi } from "@/lib/api/http";
-export const dynamic = "force-dynamic";
+import { unauthorized } from "@/lib/api/http";
+import { createLearningRoute } from "@/lib/api/domains";
 
 type WeeklyActionItem = {
   id: string;
@@ -75,146 +75,149 @@ function pickActionItems(params: {
   return items.slice(0, 3);
 }
 
-export const GET = withApi(async () => {
-  const user = await getCurrentUser();
-  const student = await getStudentContext();
-  if (!student) {
-    unauthorized();
-  }
+export const GET = createLearningRoute({
+  cache: "private-short",
+  handler: async () => {
+    const user = await getCurrentUser();
+    const student = await getStudentContext();
+    if (!student) {
+      unauthorized();
+    }
 
-  const stats = await getWeeklyStats(student.id);
-  const profile = await getStudentProfile(student.id);
-  const subjects = profile?.subjects?.length ? profile.subjects : ["math"];
-  const end = new Date();
-  const start = new Date();
-  start.setDate(end.getDate() - 7);
-  const prevStart = new Date();
-  prevStart.setDate(end.getDate() - 14);
-  const previousStats = await getStatsBetween(student.id, prevStart, start);
-  const trend = await getDailyAccuracy(student.id, 7);
+    const stats = await getWeeklyStats(student.id);
+    const profile = await getStudentProfile(student.id);
+    const subjects = profile?.subjects?.length ? profile.subjects : ["math"];
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - 7);
+    const prevStart = new Date();
+    prevStart.setDate(end.getDate() - 14);
+    const previousStats = await getStatsBetween(student.id, prevStart, start);
+    const trend = await getDailyAccuracy(student.id, 7);
 
-  const weakPoints = (
-    await Promise.all(
-      subjects.map(async (subject) =>
-        (await getWeakKnowledgePoints(student.id, subject)).map((item) => ({
-          id: item.kp.id,
-          title: item.kp.title,
-          ratio: Math.round(item.ratio * 100),
-          total: item.total,
-          subject
-        }))
+    const weakPoints = (
+      await Promise.all(
+        subjects.map(async (subject) =>
+          (await getWeakKnowledgePoints(student.id, subject)).map((item) => ({
+            id: item.kp.id,
+            title: item.kp.title,
+            ratio: Math.round(item.ratio * 100),
+            total: item.total,
+            subject
+          }))
+        )
       )
     )
-  )
-    .flat()
-    .sort((a, b) => a.ratio - b.ratio)
-    .slice(0, 5);
+      .flat()
+      .sort((a, b) => a.ratio - b.ratio)
+      .slice(0, 5);
 
-  const suggestions: string[] = [];
-  if (stats.total < 5) {
-    suggestions.push("本周练习偏少，建议每天完成 5-8 题。");
-  }
-  if (stats.accuracy < 60) {
-    suggestions.push("正确率偏低，建议先巩固基础知识点，再逐步提升难度。");
-  }
-  if (stats.accuracy >= previousStats.accuracy + 5) {
-    suggestions.push("正确率提升明显，继续保持当前节奏。");
-  } else if (stats.accuracy + 5 < previousStats.accuracy) {
-    suggestions.push("正确率有所下降，建议复盘错因并进行错题专练。");
-  }
-  if (weakPoints.length) {
-    suggestions.push(`优先巩固：${weakPoints[0].title}。`);
-  }
-
-  const actionItems = pickActionItems({ stats, previousStats, weakPoints });
-  const estimatedMinutes = actionItems.reduce((sum, item) => sum + item.estimatedMinutes, 0);
-  const parentTips = actionItems.map((item) => item.parentTip);
-  const receipts =
-    user?.role === "parent"
-      ? await listParentActionReceipts({
-          parentId: user.id,
-          studentId: student.id,
-          source: "weekly_report"
-        })
-      : [];
-  const receiptMap = new Map(
-    receipts.map((item) => [
-      buildParentActionReceiptKey({
-        source: item.source,
-        actionItemId: item.actionItemId
-      }),
-      item
-    ])
-  );
-
-  const actionItemsWithReceipt = actionItems.map((item) => {
-    const receipt = receiptMap.get(
-      buildParentActionReceiptKey({ source: "weekly_report", actionItemId: item.id })
-    );
-    return {
-      ...item,
-      receipt: receipt
-        ? {
-            status: receipt.status,
-            completedAt: receipt.completedAt,
-            note: receipt.note ?? null,
-            effectScore: receipt.effectScore
-          }
-        : null
-    };
-  });
-  const completedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "done").length;
-  const skippedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "skipped").length;
-  const pendingCount = Math.max(0, actionItemsWithReceipt.length - completedCount - skippedCount);
-  const doneEffectScore = receipts
-    .filter((item) => item.status === "done")
-    .reduce((sum, item) => sum + item.effectScore, 0);
-  const skippedPenaltyScore = receipts
-    .filter((item) => item.status === "skipped")
-    .reduce((sum, item) => sum + item.effectScore, 0);
-  const effectScore = doneEffectScore + skippedPenaltyScore;
-  const history = summarizeParentActionReceipts(receipts);
-
-  return {
-    student: { id: student.id, name: student.name, grade: student.grade },
-    stats,
-    previousStats,
-    trend,
-    weakPoints,
-    suggestions,
-    actionItems: actionItemsWithReceipt,
-    estimatedMinutes,
-    parentTips,
-    execution: {
-      suggestedCount: actionItemsWithReceipt.length,
-      completedCount,
-      skippedCount,
-      pendingCount,
-      completionRate: actionItemsWithReceipt.length
-        ? Math.round((completedCount / actionItemsWithReceipt.length) * 100)
-        : 0,
-      lastCompletedAt: receipts.find((item) => item.status === "done")?.completedAt ?? null,
-      lastActionAt: receipts[0]?.completedAt ?? null,
-      streakDays: history.streakDays,
-      doneMinutes: history.doneMinutes
-    },
-    effect: {
-      accuracyDelta: stats.accuracy - previousStats.accuracy,
-      weeklyAccuracy: stats.accuracy,
-      previousAccuracy: previousStats.accuracy,
-      receiptEffectScore: effectScore,
-      doneEffectScore,
-      skippedPenaltyScore,
-      last7dEffectScore: history.last7dEffectScore,
-      avgEffectScore: history.avgEffectScore
-    },
-    history: {
-      totalCount: history.totalCount,
-      doneCount: history.doneCount,
-      skippedCount: history.skippedCount,
-      last7dDoneCount: history.last7dDoneCount,
-      last7dSkippedCount: history.last7dSkippedCount,
-      lastActionAt: history.lastActionAt
+    const suggestions: string[] = [];
+    if (stats.total < 5) {
+      suggestions.push("本周练习偏少，建议每天完成 5-8 题。");
     }
-  };
+    if (stats.accuracy < 60) {
+      suggestions.push("正确率偏低，建议先巩固基础知识点，再逐步提升难度。");
+    }
+    if (stats.accuracy >= previousStats.accuracy + 5) {
+      suggestions.push("正确率提升明显，继续保持当前节奏。");
+    } else if (stats.accuracy + 5 < previousStats.accuracy) {
+      suggestions.push("正确率有所下降，建议复盘错因并进行错题专练。");
+    }
+    if (weakPoints.length) {
+      suggestions.push(`优先巩固：${weakPoints[0].title}。`);
+    }
+
+    const actionItems = pickActionItems({ stats, previousStats, weakPoints });
+    const estimatedMinutes = actionItems.reduce((sum, item) => sum + item.estimatedMinutes, 0);
+    const parentTips = actionItems.map((item) => item.parentTip);
+    const receipts =
+      user?.role === "parent"
+        ? await listParentActionReceipts({
+            parentId: user.id,
+            studentId: student.id,
+            source: "weekly_report"
+          })
+        : [];
+    const receiptMap = new Map(
+      receipts.map((item) => [
+        buildParentActionReceiptKey({
+          source: item.source,
+          actionItemId: item.actionItemId
+        }),
+        item
+      ])
+    );
+
+    const actionItemsWithReceipt = actionItems.map((item) => {
+      const receipt = receiptMap.get(
+        buildParentActionReceiptKey({ source: "weekly_report", actionItemId: item.id })
+      );
+      return {
+        ...item,
+        receipt: receipt
+          ? {
+              status: receipt.status,
+              completedAt: receipt.completedAt,
+              note: receipt.note ?? null,
+              effectScore: receipt.effectScore
+            }
+          : null
+      };
+    });
+    const completedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "done").length;
+    const skippedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "skipped").length;
+    const pendingCount = Math.max(0, actionItemsWithReceipt.length - completedCount - skippedCount);
+    const doneEffectScore = receipts
+      .filter((item) => item.status === "done")
+      .reduce((sum, item) => sum + item.effectScore, 0);
+    const skippedPenaltyScore = receipts
+      .filter((item) => item.status === "skipped")
+      .reduce((sum, item) => sum + item.effectScore, 0);
+    const effectScore = doneEffectScore + skippedPenaltyScore;
+    const history = summarizeParentActionReceipts(receipts);
+
+    return {
+      student: { id: student.id, name: student.name, grade: student.grade },
+      stats,
+      previousStats,
+      trend,
+      weakPoints,
+      suggestions,
+      actionItems: actionItemsWithReceipt,
+      estimatedMinutes,
+      parentTips,
+      execution: {
+        suggestedCount: actionItemsWithReceipt.length,
+        completedCount,
+        skippedCount,
+        pendingCount,
+        completionRate: actionItemsWithReceipt.length
+          ? Math.round((completedCount / actionItemsWithReceipt.length) * 100)
+          : 0,
+        lastCompletedAt: receipts.find((item) => item.status === "done")?.completedAt ?? null,
+        lastActionAt: receipts[0]?.completedAt ?? null,
+        streakDays: history.streakDays,
+        doneMinutes: history.doneMinutes
+      },
+      effect: {
+        accuracyDelta: stats.accuracy - previousStats.accuracy,
+        weeklyAccuracy: stats.accuracy,
+        previousAccuracy: previousStats.accuracy,
+        receiptEffectScore: effectScore,
+        doneEffectScore,
+        skippedPenaltyScore,
+        last7dEffectScore: history.last7dEffectScore,
+        avgEffectScore: history.avgEffectScore
+      },
+      history: {
+        totalCount: history.totalCount,
+        doneCount: history.doneCount,
+        skippedCount: history.skippedCount,
+        last7dDoneCount: history.last7dDoneCount,
+        last7dSkippedCount: history.last7dSkippedCount,
+        lastActionAt: history.lastActionAt
+      }
+    };
+  }
 });

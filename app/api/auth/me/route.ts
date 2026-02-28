@@ -1,9 +1,10 @@
 import { getCurrentUser } from "@/lib/auth";
-import { withApi } from "@/lib/api/http";
+import { createAuthRoute } from "@/lib/api/domains";
 
-export const dynamic = "force-dynamic";
-
-export const GET = withApi(async () => {
-  const user = await getCurrentUser();
-  return { user };
+export const GET = createAuthRoute({
+  cache: "private-realtime",
+  handler: async () => {
+    const user = await getCurrentUser();
+    return { user };
+  }
 });

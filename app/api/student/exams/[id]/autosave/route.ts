@@ -1,4 +1,3 @@
-import { getCurrentUser } from "@/lib/auth";
 import { getClassesByStudent } from "@/lib/classes";
 import {
   ensureExamAssignment,
@@ -8,8 +7,10 @@ import {
   markExamAssignmentInProgress,
   upsertExamAnswerDraft
 } from "@/lib/exams";
-import { badRequest, notFound, unauthorized, withApi } from "@/lib/api/http";
+import { resolveExamAvailability } from "@/lib/exam-availability";
+import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
+import { createExamRoute } from "@/lib/api/domains";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,13 @@ const autosaveBodySchema = v.object<{ answers: unknown }>(
     answers: passthrough
   },
   { allowUnknown: false }
+);
+
+const examParamsSchema = v.object<{ id: string }>(
+  {
+    id: v.string({ minLength: 1 })
+  },
+  { allowUnknown: true }
 );
 
 function normalizeAnswers(input: unknown) {
@@ -36,20 +44,11 @@ function normalizeAnswers(input: unknown) {
   return answers;
 }
 
-function assertExamOpen(startAt?: string, endAt?: string) {
-  const now = Date.now();
-  if (startAt && new Date(startAt).getTime() > now) {
-    badRequest("考试尚未开始");
-  }
-  if (endAt && new Date(endAt).getTime() < now) {
-    badRequest("考试已截止");
-  }
-}
-
 function assertExamTimeNotExceeded(input: {
   endAt: string;
   durationMinutes?: number;
   startedAt?: string;
+  graceMs?: number;
 }) {
   const now = Date.now();
   const endDeadline = new Date(input.endAt).getTime();
@@ -58,66 +57,75 @@ function assertExamTimeNotExceeded(input: {
       ? new Date(input.startedAt).getTime() + input.durationMinutes * 60 * 1000
       : Number.POSITIVE_INFINITY;
   const effectiveDeadline = Math.min(endDeadline, durationDeadline);
-  if (Number.isFinite(effectiveDeadline) && now > effectiveDeadline) {
+  const graceMs = Math.max(0, Number(input.graceMs ?? 0));
+  if (Number.isFinite(effectiveDeadline) && now > effectiveDeadline + graceMs) {
     badRequest("考试作答时间已结束");
   }
 }
 
-export const POST = withApi(async (request, context) => {
-  const user = await getCurrentUser();
-  if (!user || user.role !== "student") {
-    unauthorized();
+export const POST = createExamRoute({
+  role: "student",
+  params: examParamsSchema,
+  cache: "private-realtime",
+  handler: async ({ request, params, user }) => {
+    if (!user || user.role !== "student") {
+      unauthorized();
+    }
+
+    const paperId = params.id;
+    const paper = await getExamPaperById(paperId);
+    if (!paper) {
+      notFound("not found");
+    }
+
+    const classIds = new Set((await getClassesByStudent(user.id)).map((item) => item.id));
+    if (!classIds.has(paper.classId)) {
+      notFound("not found");
+    }
+
+    const availability = resolveExamAvailability({
+      status: paper.status,
+      startAt: paper.startAt,
+      endAt: paper.endAt
+    });
+    if (!availability.canSubmit) {
+      badRequest(availability.lockReason ?? "考试当前不可作答");
+    }
+
+    const assignmentBeforeSave =
+      paper.publishMode === "targeted"
+        ? await getExamAssignment(paper.id, user.id)
+        : await ensureExamAssignment(paper.id, user.id);
+    if (!assignmentBeforeSave) {
+      notFound("not found");
+    }
+    assertExamTimeNotExceeded({
+      endAt: paper.endAt,
+      durationMinutes: paper.durationMinutes,
+      startedAt: assignmentBeforeSave.startedAt
+    });
+
+    const submitted = await getExamSubmission(paper.id, user.id);
+    if (submitted) {
+      badRequest("考试已提交");
+    }
+
+    const body = await parseJson(request, autosaveBodySchema);
+    const answers = normalizeAnswers(body.answers);
+    const draft = await upsertExamAnswerDraft({
+      paperId: paper.id,
+      studentId: user.id,
+      answers
+    });
+    const assignment = await markExamAssignmentInProgress({
+      paperId: paper.id,
+      studentId: user.id
+    });
+
+    return {
+      savedAt: draft.updatedAt,
+      status: assignment.status,
+      startedAt: assignment.startedAt ?? null
+    };
   }
-
-  const paperId = context.params.id;
-  const paper = await getExamPaperById(paperId);
-  if (!paper) {
-    notFound("not found");
-  }
-
-  const classIds = new Set((await getClassesByStudent(user.id)).map((item) => item.id));
-  if (!classIds.has(paper.classId)) {
-    notFound("not found");
-  }
-
-  if (paper.status === "closed") {
-    badRequest("考试已关闭");
-  }
-  assertExamOpen(paper.startAt, paper.endAt);
-
-  const assignmentBeforeSave =
-    paper.publishMode === "targeted"
-      ? await getExamAssignment(paper.id, user.id)
-      : await ensureExamAssignment(paper.id, user.id);
-  if (!assignmentBeforeSave) {
-    notFound("not found");
-  }
-  assertExamTimeNotExceeded({
-    endAt: paper.endAt,
-    durationMinutes: paper.durationMinutes,
-    startedAt: assignmentBeforeSave.startedAt
-  });
-
-  const submitted = await getExamSubmission(paper.id, user.id);
-  if (submitted) {
-    badRequest("考试已提交");
-  }
-
-  const body = await parseJson(request, autosaveBodySchema);
-  const answers = normalizeAnswers(body.answers);
-  const draft = await upsertExamAnswerDraft({
-    paperId: paper.id,
-    studentId: user.id,
-    answers
-  });
-  const assignment = await markExamAssignmentInProgress({
-    paperId: paper.id,
-    studentId: user.id
-  });
-
-  return {
-    savedAt: draft.updatedAt,
-    status: assignment.status,
-    startedAt: assignment.startedAt ?? null
-  };
 });
