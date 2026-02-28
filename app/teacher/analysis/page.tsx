@@ -105,6 +105,39 @@ type AlertImpactData = {
   };
 };
 
+type InterventionCausalityItem = {
+  actionId: string;
+  alertId: string;
+  actionType: "assign_review" | "notify_student" | "auto_chain" | "mark_done";
+  classId: string;
+  className: string;
+  subject: string;
+  grade: string;
+  alertType: "student-risk" | "knowledge-risk";
+  riskScore: number | null;
+  riskReason: string;
+  recommendedAction: string;
+  createdAt: string;
+  targetStudents: number;
+  executedStudents: number;
+  executionRate: number;
+  assignmentExecutionCount: number;
+  reviewExecutionCount: number;
+  preAccuracy: number | null;
+  postAccuracy: number | null;
+  scoreDelta: number | null;
+  preAttemptCount: number;
+  postAttemptCount: number;
+};
+
+type InterventionCausalitySummary = {
+  actionCount: number;
+  classCount: number;
+  avgExecutionRate: number;
+  avgScoreDelta: number;
+  improvedActionCount: number;
+};
+
 export default function TeacherAnalysisPage() {
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [classId, setClassId] = useState("");
@@ -112,6 +145,7 @@ export default function TeacherAnalysisPage() {
   const [report, setReport] = useState<any>(null);
   const [heatmapLoading, setHeatmapLoading] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [students, setStudents] = useState<StudentItem[]>([]);
   const [studentId, setStudentId] = useState("");
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
@@ -123,6 +157,9 @@ export default function TeacherAnalysisPage() {
   const [alertActionMessage, setAlertActionMessage] = useState<string | null>(null);
   const [impactByAlertId, setImpactByAlertId] = useState<Record<string, AlertImpactData>>({});
   const [loadingImpactId, setLoadingImpactId] = useState<string | null>(null);
+  const [causalitySummary, setCausalitySummary] = useState<InterventionCausalitySummary | null>(null);
+  const [causalityItems, setCausalityItems] = useState<InterventionCausalityItem[]>([]);
+  const [causalityLoading, setCausalityLoading] = useState(false);
 
   useEffect(() => {
     fetch("/api/teacher/classes")
@@ -157,11 +194,21 @@ export default function TeacherAnalysisPage() {
     setParentCollaboration(data?.summary?.parentCollaboration ?? null);
   }
 
+  async function loadInterventionCausality(targetId: string) {
+    setCausalityLoading(true);
+    const res = await fetch(`/api/teacher/insights/intervention-causality?classId=${targetId}&days=14`);
+    const data = await res.json();
+    setCausalitySummary(data?.data?.summary ?? null);
+    setCausalityItems(data?.data?.items ?? []);
+    setCausalityLoading(false);
+  }
+
   useEffect(() => {
     if (classId) {
       loadHeatmap(classId);
       loadAlerts(classId);
       loadTeacherSummary();
+      loadInterventionCausality(classId);
     }
   }, [classId]);
 
@@ -240,12 +287,18 @@ export default function TeacherAnalysisPage() {
   async function generateReport() {
     if (!classId) return;
     setReportLoading(true);
+    setReportError(null);
     const res = await fetch("/api/teacher/insights/report", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ classId })
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setReportError(data?.error ?? data?.message ?? "学情报告生成失败");
+      setReportLoading(false);
+      return;
+    }
     setReport(data?.data ?? null);
     setReportLoading(false);
   }
@@ -457,6 +510,67 @@ export default function TeacherAnalysisPage() {
         </div>
       </Card>
 
+      <Card title="干预因果看板" tag="闭环">
+        {causalitySummary ? (
+          <div className="grid grid-2">
+            <div className="card">
+              <div className="section-title">动作数（14天）</div>
+              <div className="kpi-value">{causalitySummary.actionCount}</div>
+            </div>
+            <div className="card">
+              <div className="section-title">平均执行率</div>
+              <div className="kpi-value">{causalitySummary.avgExecutionRate}%</div>
+            </div>
+            <div className="card">
+              <div className="section-title">平均分数变化</div>
+              <div className="kpi-value">{causalitySummary.avgScoreDelta}</div>
+            </div>
+            <div className="card">
+              <div className="section-title">正向动作数</div>
+              <div className="kpi-value">{causalitySummary.improvedActionCount}</div>
+            </div>
+          </div>
+        ) : null}
+        <div className="grid" style={{ gap: 10, marginTop: 12 }}>
+          {causalityLoading ? (
+            <div className="empty-state">
+              <p className="empty-state-title">加载中</p>
+              <p>正在计算教师干预动作的执行与效果。</p>
+            </div>
+          ) : causalityItems.length === 0 ? (
+            <div className="empty-state">
+              <p className="empty-state-title">暂无干预数据</p>
+              <p>先执行预警动作后即可看到“动作-执行-效果”追踪。</p>
+            </div>
+          ) : (
+            causalityItems.slice(0, 8).map((item) => (
+              <div className="card" key={item.actionId}>
+                <div className="section-title">
+                  {item.alertType === "student-risk" ? "学生风险干预" : "知识点风险干预"} · {item.actionType}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 4 }}>
+                  {item.className} · {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级 ·{" "}
+                  {new Date(item.createdAt).toLocaleString("zh-CN")}
+                </div>
+                <div className="pill-list" style={{ marginTop: 8 }}>
+                  <span className="pill">
+                    执行率 {item.executedStudents}/{item.targetStudents}（{item.executionRate}%）
+                  </span>
+                  <span className="pill">作业执行 {item.assignmentExecutionCount}</span>
+                  <span className="pill">复练执行 {item.reviewExecutionCount}</span>
+                  <span className="pill">动作后正确率 {item.postAccuracy ?? "-"}%</span>
+                  <span className="pill">动作前正确率 {item.preAccuracy ?? "-"}%</span>
+                  <span className="pill">分数变化 {item.scoreDelta ?? "-"}</span>
+                </div>
+                <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-1)" }}>
+                  样本题次：前 {item.preAttemptCount} · 后 {item.postAttemptCount}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
+
       <Card title="知识点掌握热力图" tag="热力图">
         {showHeatmapSkeleton ? (
           <div className="skeleton-grid grid-3">
@@ -504,6 +618,7 @@ export default function TeacherAnalysisPage() {
             {reportLoading ? "生成中..." : "生成学情报告"}
           </button>
         </div>
+        {reportError ? <div className="status-note error" style={{ marginTop: 8 }}>{reportError}</div> : null}
         {showReportSkeleton ? (
           <div className="skeleton-grid" style={{ marginTop: 12 }}>
             <div className="skeleton-card">
