@@ -60,8 +60,10 @@ export default function TeacherAiToolsPage() {
       isolatedPoolCount: number;
       activePoolCount: number;
       shortfallCount?: number;
+      qualityGovernanceDegraded?: boolean;
     } | null;
   } | null>(null);
+  const [paperError, setPaperError] = useState<string | null>(null);
   const [outlineForm, setOutlineForm] = useState({ classId: "", topic: "", knowledgePointIds: [] as string[] });
   const [outlineResult, setOutlineResult] = useState<any>(null);
   const [wrongForm, setWrongForm] = useState({ classId: "", rangeDays: 7 });
@@ -130,12 +132,19 @@ export default function TeacherAiToolsPage() {
     event.preventDefault();
     if (!paperForm.classId) return;
     setLoading(true);
+    setPaperError(null);
     const res = await fetch("/api/teacher/paper/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(paperForm)
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setPaperResult(null);
+      setPaperError(data?.error ?? data?.message ?? "组卷失败，请稍后重试");
+      setLoading(false);
+      return;
+    }
     setPaperResult({
       questions: data?.data?.questions ?? [],
       count: data?.data?.count ?? 0,
@@ -557,6 +566,9 @@ export default function TeacherAiToolsPage() {
                 {paperResult.qualityGovernance.shortfallCount ? (
                   <span className="pill">缺口 {paperResult.qualityGovernance.shortfallCount}</span>
                 ) : null}
+                {paperResult.qualityGovernance.qualityGovernanceDegraded ? (
+                  <span className="pill">质检降级（质量表不可用）</span>
+                ) : null}
               </div>
             ) : null}
             <div className="grid" style={{ gap: 10, marginTop: 10 }}>
@@ -580,6 +592,7 @@ export default function TeacherAiToolsPage() {
             </div>
           </div>
         ) : null}
+        {paperError ? <div className="status-note error">{paperError}</div> : null}
       </Card>
 
       <Card title="AI 课堂讲稿生成" tag="讲稿">
