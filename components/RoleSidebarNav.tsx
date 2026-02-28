@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type NavLink = { href: string; label: string };
 type NavGroup = { title: string; links: NavLink[] };
@@ -32,6 +32,7 @@ export default function RoleSidebarNav({
   const [groupOpenState, setGroupOpenState] = useState<Record<string, boolean>>({});
   const [recentHrefs, setRecentHrefs] = useState<string[]>([]);
   const [collapsed, setCollapsed] = useState(false);
+  const [searchKeyword, setSearchKeyword] = useState("");
   const allLinks = useMemo(() => {
     const seen = new Set<string>();
     const merged: NavLink[] = [];
@@ -106,6 +107,41 @@ export default function RoleSidebarNav({
     return recentHrefs.map((href) => hrefMap.get(href)).filter(Boolean) as NavLink[];
   }, [allLinks, recentHrefs]);
 
+  const normalizedSearch = searchKeyword.trim().toLowerCase();
+  const matchByKeyword = useCallback(
+    (item: NavLink) => {
+      if (!normalizedSearch) return true;
+      return (
+        item.label.toLowerCase().includes(normalizedSearch) ||
+        item.href.toLowerCase().includes(normalizedSearch)
+      );
+    },
+    [normalizedSearch]
+  );
+
+  const visiblePrimaryLinks = useMemo(
+    () => primaryLinks.filter((item) => matchByKeyword(item)),
+    [primaryLinks, matchByKeyword]
+  );
+  const visibleRecentLinks = useMemo(
+    () => recentLinks.filter((item) => matchByKeyword(item)),
+    [recentLinks, matchByKeyword]
+  );
+  const visibleGroups = useMemo(
+    () =>
+      navGroups
+        .map((group) => ({ ...group, links: group.links.filter((item) => matchByKeyword(item)) }))
+        .filter((group) => group.links.length),
+    [navGroups, matchByKeyword]
+  );
+  const visibleLinkCount = useMemo(() => {
+    const byHref = new Set<string>();
+    visiblePrimaryLinks.forEach((item) => byHref.add(item.href));
+    visibleRecentLinks.forEach((item) => byHref.add(item.href));
+    visibleGroups.forEach((group) => group.links.forEach((item) => byHref.add(item.href)));
+    return byHref.size;
+  }, [visiblePrimaryLinks, visibleRecentLinks, visibleGroups]);
+
   function toggleGroup(title: string) {
     setGroupOpenState((prev) => {
       const next = { ...prev, [title]: !(prev[title] ?? true) };
@@ -135,6 +171,19 @@ export default function RoleSidebarNav({
     );
   }
 
+  function setAllGroupState(nextOpen: boolean) {
+    const next = navGroups.reduce<Record<string, boolean>>((acc, group) => {
+      acc[group.title] = nextOpen;
+      return acc;
+    }, {});
+    setGroupOpenState(next);
+    try {
+      window.localStorage.setItem(GROUP_STATE_KEY, JSON.stringify(next));
+    } catch {
+      // ignore storage exceptions
+    }
+  }
+
   return (
     <nav className={`role-side-nav${collapsed ? " collapsed" : ""}`}>
       <div className="role-side-control">
@@ -148,28 +197,59 @@ export default function RoleSidebarNav({
         </button>
       </div>
 
-      <div className="role-side-section">
-        <div className="role-side-section-title">核心功能</div>
-        <div className="role-side-links">
-          {primaryLinks.map((item) => renderNavLink(item))}
-        </div>
-      </div>
-
-      {recentLinks.length ? (
-        <div className="role-side-section">
-          <div className="role-side-section-title">最近访问</div>
-          <div className="role-side-links">
-            {recentLinks.map((item) => renderNavLink(item, `recent-${item.href}`))}
+      {!collapsed ? (
+        <div className="role-side-search">
+          <input
+            className="role-side-search-input"
+            value={searchKeyword}
+            onChange={(event) => setSearchKeyword(event.target.value)}
+            placeholder="搜索功能（如：考试、报告、题库）"
+            aria-label="搜索侧边栏功能"
+          />
+          {searchKeyword ? (
+            <button type="button" className="role-side-search-clear" onClick={() => setSearchKeyword("")}>
+              清空
+            </button>
+          ) : null}
+          <div className="role-side-search-meta">
+            已显示 {visibleLinkCount} / {allLinks.length} 个功能
           </div>
         </div>
       ) : null}
 
-      {navGroups.map((group, index) => (
+      {!collapsed ? (
+        <div className="role-side-actions">
+          <button type="button" className="role-side-action" onClick={() => setAllGroupState(true)}>
+            全展开
+          </button>
+          <button type="button" className="role-side-action" onClick={() => setAllGroupState(false)}>
+            全收起
+          </button>
+        </div>
+      ) : null}
+
+      <div className="role-side-section">
+        <div className="role-side-section-title">核心功能（{visiblePrimaryLinks.length}）</div>
+        <div className="role-side-links">
+          {visiblePrimaryLinks.map((item) => renderNavLink(item))}
+        </div>
+      </div>
+
+      {visibleRecentLinks.length ? (
+        <div className="role-side-section">
+          <div className="role-side-section-title">最近访问</div>
+          <div className="role-side-links">
+            {visibleRecentLinks.map((item) => renderNavLink(item, `recent-${item.href}`))}
+          </div>
+        </div>
+      ) : null}
+
+      {visibleGroups.map((group, index) => (
         <div key={group.title} className="role-side-section">
           <div className="role-side-section-head">
             <div className="role-side-section-title">
               <span className="role-side-step">{index + 1}</span>
-              {group.title}
+              {group.title}（{group.links.length}）
             </div>
             <button
               type="button"
@@ -187,6 +267,8 @@ export default function RoleSidebarNav({
           ) : null}
         </div>
       ))}
+
+      {visibleLinkCount === 0 ? <div className="role-side-empty">未找到匹配功能，请更换关键词。</div> : null}
     </nav>
   );
 }
