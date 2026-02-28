@@ -120,6 +120,7 @@ export default function QuestionsListPanel({
 }: Props) {
   const [resultView, setResultView] = useState<"compact" | "detailed">("compact");
   const [openResultGroups, setOpenResultGroups] = useState<Record<string, boolean>>({});
+  const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
 
   const controlStyle = {
     width: "100%",
@@ -200,16 +201,28 @@ export default function QuestionsListPanel({
   useEffect(() => {
     setOpenResultGroups((prev) => {
       const next: Record<string, boolean> = {};
-      groupedResults.forEach((group) => {
+      groupedResults.forEach((group, index) => {
         if (typeof prev[group.id] === "boolean") {
           next[group.id] = prev[group.id];
           return;
         }
-        next[group.id] = query.riskLevel !== "all" && query.riskLevel === group.risk;
+        if (query.riskLevel !== "all" && query.riskLevel === group.risk) {
+          next[group.id] = true;
+          return;
+        }
+        next[group.id] = index === 0;
       });
       return next;
     });
   }, [groupedResults, query.riskLevel]);
+
+  useEffect(() => {
+    if (!selectedQuestion) return;
+    const stillExists = list.some((item) => item.id === selectedQuestion.id);
+    if (!stillExists) {
+      setSelectedQuestion(null);
+    }
+  }, [list, selectedQuestion]);
 
   function setAllResultGroups(open: boolean) {
     const next: Record<string, boolean> = {};
@@ -646,6 +659,56 @@ export default function QuestionsListPanel({
         </div>
 
         <div className="masonry-list" style={{ gridTemplateColumns: "1fr" }}>
+          {selectedQuestion ? (
+            <div className="card full-span" style={{ padding: 12, background: "rgba(255, 255, 255, 0.88)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <div className="section-title" style={{ marginTop: 0 }}>
+                  题目详情
+                </div>
+                <button className="button ghost" type="button" onClick={() => setSelectedQuestion(null)}>
+                  关闭
+                </button>
+              </div>
+              <div style={{ marginTop: 4, fontSize: 12, color: "var(--ink-1)" }}>
+                {SUBJECT_LABELS[selectedQuestion.subject] ?? selectedQuestion.subject} · {selectedQuestion.grade} 年级 ·
+                难度 {difficultyLabel[selectedQuestion.difficulty ?? "medium"] ?? selectedQuestion.difficulty ?? "中"} ·
+                题型 {questionTypeLabel[selectedQuestion.questionType ?? "choice"] ?? selectedQuestion.questionType ?? "选择题"} ·
+                ID {selectedQuestion.id}
+              </div>
+              <div style={{ marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.7 }}>{selectedQuestion.stem}</div>
+              {selectedQuestion.options.length ? (
+                <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+                  {selectedQuestion.options.map((option) => (
+                    <div key={`${selectedQuestion.id}-opt-${option}`} className="card" style={{ padding: 8 }}>
+                      {option}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <span className="badge">正确答案：{selectedQuestion.answer}</span>
+                <span className="badge">知识点ID：{selectedQuestion.knowledgePointId}</span>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <div className="section-title" style={{ marginTop: 0 }}>
+                  解析
+                </div>
+                <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
+                  {selectedQuestion.explanation?.trim() || "暂无解析"}
+                </div>
+              </div>
+              {selectedQuestion.tags?.length ? (
+                <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {selectedQuestion.tags.map((tag) => (
+                    <span className="badge" key={`${selectedQuestion.id}-tag-${tag}`}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {loading ? (
             <div className="empty-state full-span">
               <p className="empty-state-title">加载中</p>
@@ -725,6 +788,13 @@ export default function QuestionsListPanel({
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end" }}>
                               <span className="badge">答案：{item.answer}</span>
                               <button
+                                className="button secondary"
+                                type="button"
+                                onClick={() => setSelectedQuestion(item)}
+                              >
+                                查看详情
+                              </button>
+                              <button
                                 className="button ghost"
                                 type="button"
                                 onClick={() => onToggleIsolation(item.id, !item.isolated)}
@@ -797,6 +867,9 @@ export default function QuestionsListPanel({
                           </div>
                         ) : null}
                         <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          <button className="button secondary" type="button" onClick={() => setSelectedQuestion(item)}>
+                            查看详情
+                          </button>
                           <div className="badge">答案：{item.answer}</div>
                           <button
                             className="button ghost"
