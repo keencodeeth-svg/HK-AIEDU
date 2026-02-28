@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Card from "@/components/Card";
 import { GRADE_OPTIONS, SUBJECT_OPTIONS } from "@/lib/constants";
@@ -22,6 +22,8 @@ type KnowledgePoint = {
   subject: string;
   grade: string;
   title: string;
+  chapter?: string;
+  unit?: string;
 };
 
 type Variant = {
@@ -67,6 +69,7 @@ export default function PracticePage() {
   const [grade, setGrade] = useState("4");
   const [knowledgePoints, setKnowledgePoints] = useState<KnowledgePoint[]>([]);
   const [knowledgePointId, setKnowledgePointId] = useState<string | undefined>(undefined);
+  const [knowledgeSearch, setKnowledgeSearch] = useState("");
   const [mode, setMode] = useState<"normal" | "challenge" | "timed" | "wrong" | "adaptive" | "review">("normal");
   const [question, setQuestion] = useState<Question | null>(null);
   const [answer, setAnswer] = useState("");
@@ -299,7 +302,52 @@ export default function PracticePage() {
     setLoadingVariants(false);
   }
 
-  const filtered = knowledgePoints.filter((kp) => kp.subject === subject && kp.grade === grade);
+  const filtered = useMemo(
+    () =>
+      knowledgePoints
+        .filter((kp) => kp.subject === subject && kp.grade === grade)
+        .sort((a, b) => {
+          const unitA = a.unit ?? "未分单元";
+          const unitB = b.unit ?? "未分单元";
+          if (unitA !== unitB) return unitA.localeCompare(unitB, "zh-CN");
+          const chapterA = a.chapter ?? "未分章节";
+          const chapterB = b.chapter ?? "未分章节";
+          if (chapterA !== chapterB) return chapterA.localeCompare(chapterB, "zh-CN");
+          return a.title.localeCompare(b.title, "zh-CN");
+        }),
+    [knowledgePoints, subject, grade]
+  );
+
+  const filteredKnowledgePoints = useMemo(() => {
+    const keyword = knowledgeSearch.trim().toLowerCase();
+    if (!keyword) return filtered;
+    return filtered.filter((kp) => {
+      const title = kp.title.toLowerCase();
+      const chapter = (kp.chapter ?? "").toLowerCase();
+      const unit = (kp.unit ?? "").toLowerCase();
+      return title.includes(keyword) || chapter.includes(keyword) || unit.includes(keyword);
+    });
+  }, [filtered, knowledgeSearch]);
+
+  const groupedKnowledgePoints = useMemo(() => {
+    const groupMap = new Map<string, { unit: string; chapter: string; items: KnowledgePoint[] }>();
+    filteredKnowledgePoints.forEach((kp) => {
+      const unit = kp.unit ?? "未分单元";
+      const chapter = kp.chapter ?? "未分章节";
+      const key = `${unit}__${chapter}`;
+      const current = groupMap.get(key) ?? { unit, chapter, items: [] };
+      current.items.push(kp);
+      groupMap.set(key, current);
+    });
+    return Array.from(groupMap.values());
+  }, [filteredKnowledgePoints]);
+
+  useEffect(() => {
+    if (!knowledgePointId) return;
+    if (!filtered.find((kp) => kp.id === knowledgePointId)) {
+      setKnowledgePointId(undefined);
+    }
+  }, [filtered, knowledgePointId]);
 
   useEffect(() => {
     if (!timerRunning) return;
@@ -411,6 +459,15 @@ export default function PracticePage() {
             </select>
           </label>
           <label>
+            <div className="section-title">知识点检索</div>
+            <input
+              value={knowledgeSearch}
+              onChange={(event) => setKnowledgeSearch(event.target.value)}
+              placeholder="按知识点/章节/单元搜索"
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+            />
+          </label>
+          <label>
             <div className="section-title">知识点</div>
             <select
               value={knowledgePointId}
@@ -418,12 +475,22 @@ export default function PracticePage() {
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             >
               <option value="">全部</option>
-              {filtered.map((kp) => (
-                <option value={kp.id} key={kp.id}>
-                  {kp.title}
-                </option>
+              {groupedKnowledgePoints.map((group) => (
+                <optgroup
+                  key={`${group.unit}-${group.chapter}`}
+                  label={`${group.unit} / ${group.chapter}（${group.items.length}）`}
+                >
+                  {group.items.map((kp) => (
+                    <option value={kp.id} key={kp.id}>
+                      {kp.title}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
+            <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-1)" }}>
+              已显示 {filteredKnowledgePoints.length}/{filtered.length} 个知识点
+            </div>
           </label>
         </div>
         <button className="button primary" style={{ marginTop: 12 }} onClick={loadQuestion}>
