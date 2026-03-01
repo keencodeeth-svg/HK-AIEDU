@@ -46,6 +46,19 @@ export type InterventionCausalityReport = {
     avgExecutionRate: number;
     avgScoreDelta: number;
     improvedActionCount: number;
+    evidenceReadyCount: number;
+    evidenceReadyRate: number;
+    byAlertType: {
+      studentRiskActionCount: number;
+      knowledgeRiskActionCount: number;
+    };
+    byActionType: Array<{
+      actionType: TeacherAlertActionType;
+      actionCount: number;
+      avgExecutionRate: number;
+      avgScoreDelta: number;
+      improvedActionCount: number;
+    }>;
   };
   items: InterventionCausalityItem[];
 };
@@ -104,7 +117,14 @@ export async function buildInterventionCausalityReport(params: {
         classCount: 0,
         avgExecutionRate: 0,
         avgScoreDelta: 0,
-        improvedActionCount: 0
+        improvedActionCount: 0,
+        evidenceReadyCount: 0,
+        evidenceReadyRate: 0,
+        byAlertType: {
+          studentRiskActionCount: 0,
+          knowledgeRiskActionCount: 0
+        },
+        byActionType: []
       },
       items: []
     };
@@ -281,6 +301,56 @@ export async function buildInterventionCausalityReport(params: {
         2
       )
     : 0;
+  const evidenceReadyCount = items.filter((item) => item.preAttemptCount > 0 && item.postAttemptCount > 0).length;
+  const evidenceReadyRate = items.length ? round((evidenceReadyCount / items.length) * 100, 2) : 0;
+
+  const byAlertType = {
+    studentRiskActionCount: items.filter((item) => item.alertType === "student-risk").length,
+    knowledgeRiskActionCount: items.filter((item) => item.alertType === "knowledge-risk").length
+  };
+
+  const actionTypeBuckets = new Map<
+    TeacherAlertActionType,
+    {
+      actionCount: number;
+      executionRateSum: number;
+      scoreDeltaSum: number;
+      scoreDeltaCount: number;
+      improvedActionCount: number;
+    }
+  >();
+  items.forEach((item) => {
+    const current = actionTypeBuckets.get(item.actionType) ?? {
+      actionCount: 0,
+      executionRateSum: 0,
+      scoreDeltaSum: 0,
+      scoreDeltaCount: 0,
+      improvedActionCount: 0
+    };
+    current.actionCount += 1;
+    current.executionRateSum += item.executionRate;
+    if (item.scoreDelta !== null) {
+      current.scoreDeltaSum += item.scoreDelta;
+      current.scoreDeltaCount += 1;
+    }
+    if ((item.scoreDelta ?? 0) > 0) {
+      current.improvedActionCount += 1;
+    }
+    actionTypeBuckets.set(item.actionType, current);
+  });
+
+  const byActionType = Array.from(actionTypeBuckets.entries())
+    .map(([actionType, bucket]) => ({
+      actionType,
+      actionCount: bucket.actionCount,
+      avgExecutionRate: bucket.actionCount ? round(bucket.executionRateSum / bucket.actionCount, 2) : 0,
+      avgScoreDelta: bucket.scoreDeltaCount ? round(bucket.scoreDeltaSum / bucket.scoreDeltaCount, 2) : 0,
+      improvedActionCount: bucket.improvedActionCount
+    }))
+    .sort((a, b) => {
+      if (b.actionCount !== a.actionCount) return b.actionCount - a.actionCount;
+      return a.actionType.localeCompare(b.actionType);
+    });
 
   return {
     summary: {
@@ -288,9 +358,12 @@ export async function buildInterventionCausalityReport(params: {
       classCount: new Set(items.map((item) => item.classId)).size,
       avgExecutionRate,
       avgScoreDelta,
-      improvedActionCount: items.filter((item) => (item.scoreDelta ?? 0) > 0).length
+      improvedActionCount: items.filter((item) => (item.scoreDelta ?? 0) > 0).length,
+      evidenceReadyCount,
+      evidenceReadyRate,
+      byAlertType,
+      byActionType
     },
     items
   };
 }
-

@@ -136,6 +136,26 @@ type InterventionCausalitySummary = {
   avgExecutionRate: number;
   avgScoreDelta: number;
   improvedActionCount: number;
+  evidenceReadyCount: number;
+  evidenceReadyRate: number;
+  byAlertType: {
+    studentRiskActionCount: number;
+    knowledgeRiskActionCount: number;
+  };
+  byActionType: Array<{
+    actionType: "assign_review" | "notify_student" | "auto_chain" | "mark_done";
+    actionCount: number;
+    avgExecutionRate: number;
+    avgScoreDelta: number;
+    improvedActionCount: number;
+  }>;
+};
+
+const ACTION_TYPE_LABEL: Record<InterventionCausalityItem["actionType"], string> = {
+  assign_review: "布置修复",
+  notify_student: "提醒学生/班级",
+  auto_chain: "一键闭环",
+  mark_done: "确认完成"
 };
 
 export default function TeacherAnalysisPage() {
@@ -160,6 +180,7 @@ export default function TeacherAnalysisPage() {
   const [causalitySummary, setCausalitySummary] = useState<InterventionCausalitySummary | null>(null);
   const [causalityItems, setCausalityItems] = useState<InterventionCausalityItem[]>([]);
   const [causalityLoading, setCausalityLoading] = useState(false);
+  const [causalityDays, setCausalityDays] = useState(14);
 
   useEffect(() => {
     fetch("/api/teacher/classes")
@@ -194,9 +215,9 @@ export default function TeacherAnalysisPage() {
     setParentCollaboration(data?.summary?.parentCollaboration ?? null);
   }
 
-  async function loadInterventionCausality(targetId: string) {
+  async function loadInterventionCausality(targetId: string, days: number) {
     setCausalityLoading(true);
-    const res = await fetch(`/api/teacher/insights/intervention-causality?classId=${targetId}&days=14`);
+    const res = await fetch(`/api/teacher/insights/intervention-causality?classId=${targetId}&days=${days}`);
     const data = await res.json();
     setCausalitySummary(data?.data?.summary ?? null);
     setCausalityItems(data?.data?.items ?? []);
@@ -208,9 +229,9 @@ export default function TeacherAnalysisPage() {
       loadHeatmap(classId);
       loadAlerts(classId);
       loadTeacherSummary();
-      loadInterventionCausality(classId);
+      loadInterventionCausality(classId, causalityDays);
     }
-  }, [classId]);
+  }, [classId, causalityDays]);
 
   async function acknowledgeAlert(alertId: string) {
     setAcknowledgingAlertId(alertId);
@@ -511,10 +532,25 @@ export default function TeacherAnalysisPage() {
       </Card>
 
       <Card title="干预因果看板" tag="闭环">
+        <div className="cta-row" style={{ marginBottom: 12 }}>
+          <label style={{ minWidth: 220 }}>
+            <div className="section-title">观察窗口</div>
+            <select
+              value={causalityDays}
+              onChange={(event) => setCausalityDays(Number(event.target.value))}
+              style={{ width: "100%" }}
+            >
+              <option value={7}>近 7 天</option>
+              <option value={14}>近 14 天</option>
+              <option value={21}>近 21 天</option>
+              <option value={30}>近 30 天</option>
+            </select>
+          </label>
+        </div>
         {causalitySummary ? (
-          <div className="grid grid-2">
+          <div className="grid grid-3">
             <div className="card">
-              <div className="section-title">动作数（14天）</div>
+              <div className="section-title">动作数（{causalityDays}天）</div>
               <div className="kpi-value">{causalitySummary.actionCount}</div>
             </div>
             <div className="card">
@@ -529,6 +565,36 @@ export default function TeacherAnalysisPage() {
               <div className="section-title">正向动作数</div>
               <div className="kpi-value">{causalitySummary.improvedActionCount}</div>
             </div>
+            <div className="card">
+              <div className="section-title">有效样本覆盖</div>
+              <div className="kpi-value">{causalitySummary.evidenceReadyRate}%</div>
+              <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                {causalitySummary.evidenceReadyCount}/{causalitySummary.actionCount}
+              </div>
+            </div>
+            <div className="card">
+              <div className="section-title">学生风险动作</div>
+              <div className="kpi-value">{causalitySummary.byAlertType.studentRiskActionCount}</div>
+            </div>
+            <div className="card">
+              <div className="section-title">知识点风险动作</div>
+              <div className="kpi-value">{causalitySummary.byAlertType.knowledgeRiskActionCount}</div>
+            </div>
+          </div>
+        ) : null}
+        {causalitySummary?.byActionType?.length ? (
+          <div className="grid grid-2" style={{ marginTop: 12 }}>
+            {causalitySummary.byActionType.map((item) => (
+              <div className="card" key={item.actionType}>
+                <div className="section-title">{ACTION_TYPE_LABEL[item.actionType]}</div>
+                <div className="pill-list" style={{ marginTop: 8 }}>
+                  <span className="pill">动作数 {item.actionCount}</span>
+                  <span className="pill">平均执行率 {item.avgExecutionRate}%</span>
+                  <span className="pill">平均分数变化 {item.avgScoreDelta}</span>
+                  <span className="pill">正向动作 {item.improvedActionCount}</span>
+                </div>
+              </div>
+            ))}
           </div>
         ) : null}
         <div className="grid" style={{ gap: 10, marginTop: 12 }}>
@@ -546,7 +612,8 @@ export default function TeacherAnalysisPage() {
             causalityItems.slice(0, 8).map((item) => (
               <div className="card" key={item.actionId}>
                 <div className="section-title">
-                  {item.alertType === "student-risk" ? "学生风险干预" : "知识点风险干预"} · {item.actionType}
+                  {item.alertType === "student-risk" ? "学生风险干预" : "知识点风险干预"} ·{" "}
+                  {ACTION_TYPE_LABEL[item.actionType]}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 4 }}>
                   {item.className} · {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级 ·{" "}
