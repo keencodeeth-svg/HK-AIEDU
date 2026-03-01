@@ -143,6 +143,72 @@ export async function runAdminContentSuite(context) {
     `POST /api/admin/ai/quality-calibration (restore) failed: ${restoreCalibration.raw}`
   );
 
+  const aiEvalGate = await apiFetch("/api/admin/ai/evals/gate?limit=5");
+  assert.equal(aiEvalGate.status, 200, `GET /api/admin/ai/evals/gate failed: ${aiEvalGate.raw}`);
+  assert.equal(typeof aiEvalGate.body?.data?.config?.enabled, "boolean", "AI eval gate should include enabled");
+  assert.equal(
+    typeof aiEvalGate.body?.data?.config?.minPassRate,
+    "number",
+    "AI eval gate should include minPassRate"
+  );
+  assert.ok(Array.isArray(aiEvalGate.body?.data?.recentRuns), "AI eval gate should include recentRuns");
+  const baselineEvalGateConfig = aiEvalGate.body?.data?.config ?? null;
+
+  const patchEvalGate = await apiFetch("/api/admin/ai/evals/gate", {
+    method: "POST",
+    json: {
+      enabled: !(baselineEvalGateConfig?.enabled ?? true)
+    }
+  });
+  assert.equal(patchEvalGate.status, 200, `POST /api/admin/ai/evals/gate (patch) failed: ${patchEvalGate.raw}`);
+  assert.equal(
+    patchEvalGate.body?.data?.config?.enabled,
+    !(baselineEvalGateConfig?.enabled ?? true),
+    "AI eval gate patch should update enabled"
+  );
+
+  const runEvalGate = await apiFetch("/api/admin/ai/evals/gate", {
+    method: "POST",
+    json: {
+      action: "run",
+      force: true,
+      configOverride: {
+        autoRollbackOnFail: false
+      }
+    }
+  });
+  assert.equal(runEvalGate.status, 200, `POST /api/admin/ai/evals/gate (run) failed: ${runEvalGate.raw}`);
+  assert.ok(runEvalGate.body?.data?.lastRun?.id, "AI eval gate run should return lastRun.id");
+  assert.equal(
+    typeof runEvalGate.body?.data?.report?.summary?.passRate,
+    "number",
+    "AI eval gate run should return report.summary.passRate"
+  );
+
+  const restoreEvalGate = await apiFetch("/api/admin/ai/evals/gate", {
+    method: "POST",
+    json: {
+      enabled: baselineEvalGateConfig?.enabled ?? true,
+      datasets: baselineEvalGateConfig?.datasets ?? [
+        "explanation",
+        "homework_review",
+        "knowledge_points_generate",
+        "writing_feedback",
+        "lesson_outline",
+        "question_check"
+      ],
+      minPassRate: baselineEvalGateConfig?.minPassRate ?? 75,
+      minAverageScore: baselineEvalGateConfig?.minAverageScore ?? 68,
+      maxHighRiskCount: baselineEvalGateConfig?.maxHighRiskCount ?? 6,
+      autoRollbackOnFail: baselineEvalGateConfig?.autoRollbackOnFail ?? false
+    }
+  });
+  assert.equal(
+    restoreEvalGate.status,
+    200,
+    `POST /api/admin/ai/evals/gate (restore) failed: ${restoreEvalGate.raw}`
+  );
+
   const tightenAssistBudget = await apiFetch("/api/admin/ai/policies", {
     method: "POST",
     json: {

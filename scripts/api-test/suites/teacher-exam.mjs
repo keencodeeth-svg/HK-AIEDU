@@ -70,6 +70,30 @@ export async function runTeacherExamSuite(context) {
 
   assert.ok(examClass?.id, "Teacher exam class should have id");
 
+  const generatePaper = await apiFetch("/api/teacher/paper/generate", {
+    method: "POST",
+    json: {
+      classId: examClass.id,
+      questionCount: 8,
+      mode: "ai",
+      difficulty: "hard",
+      questionType: "application",
+      knowledgePointIds: ["API_TEST_NON_EXISTING_KP"]
+    }
+  });
+  assert.equal(generatePaper.status, 200, `POST /api/teacher/paper/generate failed: ${generatePaper.raw}`);
+  assert.ok((generatePaper.body?.data?.count ?? 0) >= 1, "Paper generate should return at least 1 question");
+  assert.equal(
+    typeof generatePaper.body?.data?.diagnostics?.selectedStage,
+    "string",
+    "Paper generate should return diagnostics.selectedStage"
+  );
+  assert.equal(
+    typeof generatePaper.body?.data?.qualityGovernance?.activePoolCount,
+    "number",
+    "Paper generate should return qualityGovernance.activePoolCount"
+  );
+
   const addExamStudent = await apiFetch(`/api/teacher/classes/${examClass.id}/students`, {
     method: "POST",
     json: { email }

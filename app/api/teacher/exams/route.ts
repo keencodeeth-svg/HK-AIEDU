@@ -73,6 +73,10 @@ function sampleQuestions<T>(items: T[], count: number) {
   return shuffled.slice(0, count);
 }
 
+function normalizeQuestionType(value?: string | null) {
+  return (value ?? "choice").trim().toLowerCase();
+}
+
 export const GET = createExamRoute({
   role: "teacher",
   cache: "private-realtime",
@@ -147,9 +151,21 @@ export const POST = createExamRoute({
   const isolatedPoolCount = classScopedIds.filter((item) => isolatedSet.has(item)).length;
   let isolatedExcludedCount = 0;
   let isolationFallbackUsed = false;
+  let requestedQuestionCount = Number(body.questionCount ?? 0);
+  let selectedPoolCount = 0;
+  let selectionStage = "manual";
+  let stageTrail: Array<{
+    stage: string;
+    label: string;
+    totalPoolCount: number;
+    activePoolCount: number;
+    isolatedExcludedCount: number;
+  }> = [];
 
   let questionIds = Array.from(new Set(body.questionIds ?? []));
   if (questionIds.length > 0) {
+    requestedQuestionCount = questionIds.length;
+    selectedPoolCount = questionIds.length;
     const invalidIds = questionIds.filter((id) => !questionMap.has(id));
     if (invalidIds.length) {
       badRequest("questionIds contains invalid item");
@@ -174,26 +190,77 @@ export const POST = createExamRoute({
     if (count <= 0) {
       badRequest("questionCount must be greater than 0");
     }
-    let pool = allQuestions.filter((item) => item.subject === klass.subject && item.grade === klass.grade);
-    if (body.knowledgePointId) {
-      pool = pool.filter((item) => item.knowledgePointId === body.knowledgePointId);
+    requestedQuestionCount = count;
+    const classScopedQuestions = allQuestions.filter((item) => item.subject === klass.subject && item.grade === klass.grade);
+    const stageDefs = [
+      { key: "strict", label: "严格筛选", useKnowledgePoint: true, useDifficulty: true, useQuestionType: true },
+      { key: "relax_type", label: "放宽题型", useKnowledgePoint: true, useDifficulty: true, useQuestionType: false },
+      {
+        key: "relax_difficulty",
+        label: "放宽难度+题型",
+        useKnowledgePoint: true,
+        useDifficulty: false,
+        useQuestionType: false
+      },
+      {
+        key: "relax_knowledge_point",
+        label: "放宽知识点",
+        useKnowledgePoint: false,
+        useDifficulty: false,
+        useQuestionType: false
+      }
+    ] as const;
+    const stagePools = stageDefs.map((stage) => {
+      let pool = classScopedQuestions;
+      if (stage.useKnowledgePoint && body.knowledgePointId) {
+        pool = pool.filter((item) => item.knowledgePointId === body.knowledgePointId);
+      }
+      if (stage.useDifficulty && body.difficulty) {
+        pool = pool.filter((item) => item.difficulty === body.difficulty);
+      }
+      if (stage.useQuestionType && body.questionType) {
+        pool = pool.filter((item) => normalizeQuestionType(item.questionType) === normalizeQuestionType(body.questionType));
+      }
+      const activePool = includeIsolated ? pool : pool.filter((item) => !isolatedSet.has(item.id));
+      return {
+        stage: stage.key,
+        label: stage.label,
+        totalPool: pool,
+        activePool,
+        isolatedExcludedCount: includeIsolated ? 0 : Math.max(0, pool.length - activePool.length)
+      };
+    });
+    stageTrail = stagePools.map((stage) => ({
+      stage: stage.stage,
+      label: stage.label,
+      totalPoolCount: stage.totalPool.length,
+      activePoolCount: stage.activePool.length,
+      isolatedExcludedCount: stage.isolatedExcludedCount
+    }));
+    const enoughStage = stagePools.find((stage) => stage.activePool.length >= count);
+    const bestStage =
+      enoughStage ??
+      stagePools
+        .slice()
+        .sort((left, right) => right.activePool.length - left.activePool.length || right.totalPool.length - left.totalPool.length)[0];
+    const selectedPool = bestStage?.activePool ?? [];
+    selectedPoolCount = selectedPool.length;
+    selectionStage = bestStage?.stage ?? "none";
+    isolatedExcludedCount = bestStage?.isolatedExcludedCount ?? 0;
+    isolationFallbackUsed = selectionStage !== "strict";
+
+    if (!selectedPool.length || selectedPool.length < 3) {
+      badRequest("题库数量不足，无法生成考试", {
+        stageTrail,
+        suggestions: [
+          "先清空知识点、难度、题型筛选后重试",
+          "降低题目数量",
+          "必要时开启 includeIsolated 后再人工抽检题目"
+        ]
+      });
     }
-    if (body.difficulty) {
-      pool = pool.filter((item) => item.difficulty === body.difficulty);
-    }
-    if (body.questionType) {
-      pool = pool.filter((item) => (item.questionType ?? "choice") === body.questionType);
-    }
-    const activePool = includeIsolated ? pool : pool.filter((item) => !isolatedSet.has(item.id));
-    isolatedExcludedCount = includeIsolated ? 0 : pool.length - activePool.length;
-    const selectedPool =
-      !includeIsolated && activePool.length < count && pool.length >= count ? pool : activePool;
-    // Shortage fallback avoids hard failure when non-isolated pool is temporarily too small.
-    isolationFallbackUsed = !includeIsolated && selectedPool === pool && activePool.length < count;
-    if (selectedPool.length < count) {
-      badRequest("题库数量不足，无法生成考试");
-    }
-    questionIds = sampleQuestions(selectedPool, count).map((item) => item.id);
+    const finalCount = Math.min(count, selectedPool.length);
+    questionIds = sampleQuestions(selectedPool, finalCount).map((item) => item.id);
   }
 
   const classStudentIds = await getClassStudentIds(klass.id);
@@ -239,12 +306,21 @@ export const POST = createExamRoute({
       data: {
         ...exam,
         assignedCount: notifyStudentIds.length,
+        requestedQuestionCount,
+        actualQuestionCount: questionIds.length,
         qualityGovernance: {
           includeIsolated,
           isolatedPoolCount,
           isolatedExcludedCount: isolationFallbackUsed ? 0 : isolatedExcludedCount,
-          isolationFallbackUsed
-        }
+          isolationFallbackUsed,
+          selectedPoolCount,
+          selectionStage,
+          stageTrail
+        },
+        warnings:
+          questionIds.length < requestedQuestionCount
+            ? [`题量不足，已自动降级筛选并按 ${questionIds.length} 题发布（目标 ${requestedQuestionCount} 题）`]
+            : []
       }
     };
   }

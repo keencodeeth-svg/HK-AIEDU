@@ -162,6 +162,43 @@ type QualityCalibrationPayload = QualityCalibrationConfig & {
   snapshots?: QualityCalibrationSnapshot[];
 };
 
+type EvalGateConfig = {
+  enabled: boolean;
+  datasets: EvalDatasetName[];
+  minPassRate: number;
+  minAverageScore: number;
+  maxHighRiskCount: number;
+  autoRollbackOnFail: boolean;
+  updatedAt: string;
+  updatedBy?: string;
+};
+
+type EvalGateRun = {
+  id: string;
+  executedAt: string;
+  config: EvalGateConfig;
+  reportSummary: {
+    totalCases: number;
+    passRate: number;
+    averageScore: number;
+    highRiskCount: number;
+  };
+  passed: boolean;
+  failedRules: string[];
+  rollback: {
+    attempted: boolean;
+    snapshotId: string | null;
+    success: boolean;
+    message: string;
+  };
+};
+
+type EvalGatePayload = {
+  config: EvalGateConfig;
+  recentRuns: EvalGateRun[];
+  lastRun?: EvalGateRun;
+};
+
 type PolicyDraft = {
   providerChain: string;
   timeoutMs: number;
@@ -186,6 +223,7 @@ const EVAL_DATASET_OPTIONS: Array<{ key: EvalDatasetName; label: string }> = [
   { key: "lesson_outline", label: "教案提纲" },
   { key: "question_check", label: "题目质检" }
 ];
+const EVAL_DATASET_LABELS = new Map(EVAL_DATASET_OPTIONS.map((item) => [item.key, item.label]));
 
 function toChainInput(value: string[]) {
   return value.join(", ");
@@ -228,6 +266,20 @@ export default function AdminAiModelsPage() {
   const [selectedEvalDatasets, setSelectedEvalDatasets] = useState<EvalDatasetName[]>(
     EVAL_DATASET_OPTIONS.map((item) => item.key)
   );
+  const [evalGateConfig, setEvalGateConfig] = useState<EvalGateConfig | null>(null);
+  const [evalGateRuns, setEvalGateRuns] = useState<EvalGateRun[]>([]);
+  const [evalGateLastRun, setEvalGateLastRun] = useState<EvalGateRun | null>(null);
+  const [evalGateLoading, setEvalGateLoading] = useState(false);
+  const [evalGateSaving, setEvalGateSaving] = useState(false);
+  const [evalGateRunning, setEvalGateRunning] = useState(false);
+  const [evalGateDraft, setEvalGateDraft] = useState({
+    enabled: true,
+    datasets: EVAL_DATASET_OPTIONS.map((item) => item.key as EvalDatasetName),
+    minPassRate: 75,
+    minAverageScore: 68,
+    maxHighRiskCount: 6,
+    autoRollbackOnFail: false
+  });
 
   async function loadConfig() {
     setLoading(true);
@@ -307,6 +359,104 @@ export default function AdminAiModelsPage() {
       syncCalibrationPayload((payload?.data ?? null) as QualityCalibrationPayload | null);
     } finally {
       setCalibrationLoading(false);
+    }
+  }
+
+  function syncEvalGatePayload(payload: EvalGatePayload | null) {
+    if (!payload?.config) {
+      setEvalGateConfig(null);
+      setEvalGateRuns([]);
+      setEvalGateLastRun(null);
+      return;
+    }
+    setEvalGateConfig(payload.config);
+    setEvalGateRuns(payload.recentRuns ?? []);
+    setEvalGateLastRun(payload.lastRun ?? payload.recentRuns?.[0] ?? null);
+    setEvalGateDraft({
+      enabled: payload.config.enabled,
+      datasets: payload.config.datasets?.length ? payload.config.datasets : EVAL_DATASET_OPTIONS.map((item) => item.key),
+      minPassRate: payload.config.minPassRate,
+      minAverageScore: payload.config.minAverageScore,
+      maxHighRiskCount: payload.config.maxHighRiskCount,
+      autoRollbackOnFail: payload.config.autoRollbackOnFail
+    });
+  }
+
+  async function loadEvalGate() {
+    setEvalGateLoading(true);
+    try {
+      const res = await fetch("/api/admin/ai/evals/gate?limit=12", { cache: "no-store" });
+      const payload = await res.json();
+      if (!res.ok) {
+        setError(payload?.error ?? "加载评测门禁失败");
+        return;
+      }
+      syncEvalGatePayload((payload?.data ?? null) as EvalGatePayload | null);
+    } finally {
+      setEvalGateLoading(false);
+    }
+  }
+
+  async function saveEvalGateConfig() {
+    setEvalGateSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/admin/ai/evals/gate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: evalGateDraft.enabled,
+          datasets: evalGateDraft.datasets,
+          minPassRate: evalGateDraft.minPassRate,
+          minAverageScore: evalGateDraft.minAverageScore,
+          maxHighRiskCount: evalGateDraft.maxHighRiskCount,
+          autoRollbackOnFail: evalGateDraft.autoRollbackOnFail
+        })
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        setError(payload?.error ?? "保存评测门禁失败");
+        return;
+      }
+      syncEvalGatePayload((payload?.data ?? null) as EvalGatePayload | null);
+      setMessage("评测门禁配置已保存");
+    } finally {
+      setEvalGateSaving(false);
+    }
+  }
+
+  async function runEvalGate() {
+    setEvalGateRunning(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/admin/ai/evals/gate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "run",
+          force: true,
+          configOverride: {
+            enabled: evalGateDraft.enabled,
+            datasets: evalGateDraft.datasets,
+            minPassRate: evalGateDraft.minPassRate,
+            minAverageScore: evalGateDraft.minAverageScore,
+            maxHighRiskCount: evalGateDraft.maxHighRiskCount,
+            autoRollbackOnFail: evalGateDraft.autoRollbackOnFail
+          }
+        })
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        setError(payload?.error ?? "执行评测门禁失败");
+        return;
+      }
+      syncEvalGatePayload((payload?.data ?? null) as EvalGatePayload | null);
+      const passed = Boolean(payload?.data?.lastRun?.passed);
+      setMessage(passed ? "评测门禁通过" : "评测门禁未通过，请根据失败规则调整");
+    } finally {
+      setEvalGateRunning(false);
     }
   }
 
@@ -424,8 +574,20 @@ export default function AdminAiModelsPage() {
     });
   }
 
+  function toggleEvalGateDataset(dataset: EvalDatasetName) {
+    setEvalGateDraft((prev) => {
+      const next = prev.datasets.includes(dataset)
+        ? prev.datasets.filter((item) => item !== dataset)
+        : [...prev.datasets, dataset];
+      return {
+        ...prev,
+        datasets: next.length ? next : [dataset]
+      };
+    });
+  }
+
   useEffect(() => {
-    Promise.all([loadConfig(), loadPolicies(), loadMetrics(), loadCalibration()]);
+    Promise.all([loadConfig(), loadPolicies(), loadMetrics(), loadCalibration(), loadEvalGate()]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1096,6 +1258,193 @@ export default function AdminAiModelsPage() {
           ) : (
             <div style={{ fontSize: 12, color: "var(--ink-1)" }}>尚未运行离线评测。</div>
           )}
+        </div>
+      </Card>
+
+      <Card title="离线评测门禁" tag="Gate">
+        <div className="grid" style={{ gap: 10 }}>
+          <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+            用于发布前自动判断 AI 质量是否达标。未达标时可自动回滚到最近稳定校准快照。
+          </div>
+
+          {evalGateLoading ? <div style={{ fontSize: 12, color: "var(--ink-1)" }}>加载门禁配置中...</div> : null}
+
+          <div className="grid grid-3">
+            <label style={{ fontSize: 12 }}>
+              <div className="section-title">门禁开关</div>
+              <select
+                value={evalGateDraft.enabled ? "enabled" : "disabled"}
+                onChange={(event) =>
+                  setEvalGateDraft((prev) => ({ ...prev, enabled: event.target.value === "enabled" }))
+                }
+                style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+              >
+                <option value="enabled">开启</option>
+                <option value="disabled">关闭</option>
+              </select>
+            </label>
+            <label style={{ fontSize: 12 }}>
+              <div className="section-title">最低通过率（%）</div>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={evalGateDraft.minPassRate}
+                onChange={(event) =>
+                  setEvalGateDraft((prev) => ({ ...prev, minPassRate: Number(event.target.value || 0) }))
+                }
+                style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+              />
+            </label>
+            <label style={{ fontSize: 12 }}>
+              <div className="section-title">最低均分</div>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={evalGateDraft.minAverageScore}
+                onChange={(event) =>
+                  setEvalGateDraft((prev) => ({ ...prev, minAverageScore: Number(event.target.value || 0) }))
+                }
+                style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-2">
+            <label style={{ fontSize: 12 }}>
+              <div className="section-title">最高高风险样本数</div>
+              <input
+                type="number"
+                min={0}
+                max={9999}
+                value={evalGateDraft.maxHighRiskCount}
+                onChange={(event) =>
+                  setEvalGateDraft((prev) => ({ ...prev, maxHighRiskCount: Number(event.target.value || 0) }))
+                }
+                style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+              />
+            </label>
+            <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 8, marginTop: 22 }}>
+              <input
+                type="checkbox"
+                checked={evalGateDraft.autoRollbackOnFail}
+                onChange={(event) =>
+                  setEvalGateDraft((prev) => ({ ...prev, autoRollbackOnFail: event.target.checked }))
+                }
+              />
+              <span>门禁失败自动回滚校准快照</span>
+            </label>
+          </div>
+
+          <div className="grid grid-3">
+            {EVAL_DATASET_OPTIONS.map((dataset) => (
+              <label
+                key={`gate-dataset-${dataset.key}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: 10,
+                  borderRadius: 10,
+                  border: "1px solid var(--stroke)",
+                  fontSize: 12
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={evalGateDraft.datasets.includes(dataset.key)}
+                  onChange={() => toggleEvalGateDataset(dataset.key)}
+                />
+                <span>{dataset.label}</span>
+              </label>
+            ))}
+          </div>
+
+          <div className="cta-row">
+            <button className="button secondary" type="button" onClick={saveEvalGateConfig} disabled={evalGateSaving}>
+              {evalGateSaving ? "保存中..." : "保存门禁配置"}
+            </button>
+            <button className="button primary" type="button" onClick={runEvalGate} disabled={evalGateRunning}>
+              {evalGateRunning ? "执行中..." : "立即执行门禁"}
+            </button>
+            <button className="button ghost" type="button" onClick={loadEvalGate} disabled={evalGateLoading}>
+              刷新门禁状态
+            </button>
+          </div>
+
+          {evalGateConfig ? (
+            <div className="card" style={{ fontSize: 12, color: "var(--ink-1)" }}>
+              当前配置：{evalGateConfig.enabled ? "启用" : "停用"} · 数据集{" "}
+              {(evalGateConfig.datasets ?? []).map((item) => EVAL_DATASET_LABELS.get(item) ?? item).join("、") || "-"} ·
+              更新时间 {evalGateConfig.updatedAt ? new Date(evalGateConfig.updatedAt).toLocaleString("zh-CN") : "-"} ·
+              操作人 {evalGateConfig.updatedBy ?? "-"}
+            </div>
+          ) : null}
+
+          {evalGateLastRun ? (
+            <div className="card">
+              <div className="section-title">
+                最近执行：{evalGateLastRun.passed ? "通过" : "未通过"} ·{" "}
+                {new Date(evalGateLastRun.executedAt).toLocaleString("zh-CN")}
+              </div>
+              <div className="pill-list" style={{ marginTop: 8 }}>
+                <span className="pill">样本 {evalGateLastRun.reportSummary.totalCases}</span>
+                <span className="pill">通过率 {evalGateLastRun.reportSummary.passRate}%</span>
+                <span className="pill">均分 {evalGateLastRun.reportSummary.averageScore}</span>
+                <span className="pill">高风险 {evalGateLastRun.reportSummary.highRiskCount}</span>
+              </div>
+              {evalGateLastRun.failedRules?.length ? (
+                <ul style={{ margin: "8px 0 0 16px", fontSize: 12 }}>
+                  {evalGateLastRun.failedRules.map((rule) => (
+                    <li key={rule}>{rule}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-1)" }}>本次门禁无失败规则。</div>
+              )}
+              {evalGateLastRun.rollback.attempted ? (
+                <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-1)" }}>
+                  自动回滚：{evalGateLastRun.rollback.success ? "成功" : "失败"} · 快照{" "}
+                  {evalGateLastRun.rollback.snapshotId ?? "-"} · {evalGateLastRun.rollback.message}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: "var(--ink-1)" }}>尚未执行过门禁。</div>
+          )}
+
+          {evalGateRuns.length ? (
+            <div className="card">
+              <div className="section-title">最近门禁记录</div>
+              <div className="grid" style={{ gap: 8, marginTop: 8 }}>
+                {evalGateRuns.slice(0, 6).map((run) => (
+                  <div
+                    key={run.id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: 10,
+                      borderRadius: 10,
+                      border: "1px solid var(--stroke)"
+                    }}
+                  >
+                    <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                      {new Date(run.executedAt).toLocaleString("zh-CN")} · {run.passed ? "通过" : "未通过"} · 通过率{" "}
+                      {run.reportSummary.passRate}% · 高风险 {run.reportSummary.highRiskCount}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                      {(run.config.datasets ?? [])
+                        .map((dataset) => EVAL_DATASET_LABELS.get(dataset) ?? dataset)
+                        .join("、")}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       </Card>
 

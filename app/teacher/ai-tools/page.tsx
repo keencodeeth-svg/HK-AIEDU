@@ -55,16 +55,38 @@ export default function TeacherAiToolsPage() {
   const [paperResult, setPaperResult] = useState<{
     questions: PaperQuestion[];
     count: number;
+    requestedCount?: number;
+    diagnostics?: {
+      reasonCodes?: string[];
+      selectedStage?: string;
+      selectedStageLabel?: string;
+      stageTrail?: Array<{
+        stage: string;
+        label: string;
+        totalPoolCount: number;
+        activePoolCount: number;
+        isolatedExcludedCount: number;
+      }>;
+      generation?: {
+        bankSelectedCount: number;
+        aiAttemptedCount: number;
+        aiGeneratedCount: number;
+        ruleFallbackCount: number;
+      };
+      suggestions?: string[];
+    } | null;
     qualityGovernance?: {
       includeIsolated: boolean;
       isolatedExcludedCount: number;
       isolatedPoolCount: number;
       activePoolCount: number;
+      totalPoolCount?: number;
       shortfallCount?: number;
       qualityGovernanceDegraded?: boolean;
     } | null;
   } | null>(null);
   const [paperError, setPaperError] = useState<string | null>(null);
+  const [paperErrorSuggestions, setPaperErrorSuggestions] = useState<string[]>([]);
   const [outlineForm, setOutlineForm] = useState({ classId: "", topic: "", knowledgePointIds: [] as string[] });
   const [outlineResult, setOutlineResult] = useState<any>(null);
   const [outlineError, setOutlineError] = useState<string | null>(null);
@@ -138,6 +160,7 @@ export default function TeacherAiToolsPage() {
     if (!paperForm.classId) return;
     setLoading(true);
     setPaperError(null);
+    setPaperErrorSuggestions([]);
     const res = await fetch("/api/teacher/paper/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -147,12 +170,15 @@ export default function TeacherAiToolsPage() {
     if (!res.ok) {
       setPaperResult(null);
       setPaperError(data?.error ?? data?.message ?? "组卷失败，请稍后重试");
+      setPaperErrorSuggestions(Array.isArray(data?.details?.suggestions) ? data.details.suggestions : []);
       setLoading(false);
       return;
     }
     setPaperResult({
       questions: data?.data?.questions ?? [],
       count: data?.data?.count ?? 0,
+      requestedCount: data?.data?.requestedCount ?? 0,
+      diagnostics: data?.data?.diagnostics ?? null,
       qualityGovernance: data?.data?.qualityGovernance ?? null
     });
     setLoading(false);
@@ -471,6 +497,20 @@ export default function TeacherAiToolsPage() {
         <span className="chip">教学助手</span>
       </div>
 
+      <Card title="功能引导（教师版）" tag="上手">
+        <div className="grid" style={{ gap: 8 }}>
+          <div style={{ fontSize: 13, color: "var(--ink-1)" }}>
+            推荐使用顺序：AI组卷 → 课堂讲稿 → 讲评包下发 → 题目纠错。
+          </div>
+          <div className="pill-list">
+            <span className="pill">先选班级，再选知识点（可不选）</span>
+            <span className="pill">筛选越多，题量越可能不足</span>
+            <span className="pill">组卷失败优先清空筛选后重试</span>
+            <span className="pill">讲评包可直接一键下发给学生和家长</span>
+          </div>
+        </div>
+      </Card>
+
       <Card title="AI 组卷" tag="组卷">
         <form onSubmit={handleGeneratePaper} style={{ display: "grid", gap: 12 }}>
           <label>
@@ -592,10 +632,26 @@ export default function TeacherAiToolsPage() {
 
         {paperResult ? (
           <div style={{ marginTop: 12 }} className="grid" aria-live="polite">
-            <div className="badge">生成题目 {paperResult.count} 道</div>
+            <div className="badge">
+              生成题目 {paperResult.count} / 目标 {paperResult.requestedCount ?? paperResult.count} 道
+            </div>
+            {paperResult.diagnostics ? (
+              <div className="pill-list">
+                <span className="pill">选题阶段：{paperResult.diagnostics.selectedStageLabel ?? "未知"}</span>
+                <span className="pill">Bank 命中 {paperResult.diagnostics.generation?.bankSelectedCount ?? 0}</span>
+                <span className="pill">AI 尝试 {paperResult.diagnostics.generation?.aiAttemptedCount ?? 0}</span>
+                <span className="pill">AI 生成 {paperResult.diagnostics.generation?.aiGeneratedCount ?? 0}</span>
+                {paperResult.diagnostics.generation?.ruleFallbackCount ? (
+                  <span className="pill">规则兜底 {paperResult.diagnostics.generation.ruleFallbackCount}</span>
+                ) : null}
+              </div>
+            ) : null}
             {paperResult.qualityGovernance ? (
               <div className="pill-list">
                 <span className="pill">可用题池 {paperResult.qualityGovernance.activePoolCount}</span>
+                {typeof paperResult.qualityGovernance.totalPoolCount === "number" ? (
+                  <span className="pill">总题池 {paperResult.qualityGovernance.totalPoolCount}</span>
+                ) : null}
                 <span className="pill">隔离池总量 {paperResult.qualityGovernance.isolatedPoolCount}</span>
                 <span className="pill">本次排除 {paperResult.qualityGovernance.isolatedExcludedCount}</span>
                 <span className="pill">
@@ -607,6 +663,29 @@ export default function TeacherAiToolsPage() {
                 {paperResult.qualityGovernance.qualityGovernanceDegraded ? (
                   <span className="pill">质检降级（质量表不可用）</span>
                 ) : null}
+              </div>
+            ) : null}
+            {paperResult.diagnostics?.stageTrail?.length ? (
+              <div className="card">
+                <div className="section-title">筛选放宽轨迹</div>
+                <div className="grid" style={{ gap: 6, marginTop: 8 }}>
+                  {paperResult.diagnostics.stageTrail.map((stage) => (
+                    <div key={stage.stage} style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                      {stage.label}：总题池 {stage.totalPoolCount}，可用 {stage.activePoolCount}，排除隔离池{" "}
+                      {stage.isolatedExcludedCount}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {paperResult.diagnostics?.suggestions?.length ? (
+              <div className="card">
+                <div className="section-title">系统建议</div>
+                <ul style={{ margin: "8px 0 0 16px" }}>
+                  {paperResult.diagnostics.suggestions.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
               </div>
             ) : null}
             <div className="grid" style={{ gap: 10, marginTop: 10 }}>
@@ -635,6 +714,16 @@ export default function TeacherAiToolsPage() {
           </div>
         ) : null}
         {paperError ? <div className="status-note error">{paperError}</div> : null}
+        {paperErrorSuggestions.length ? (
+          <div className="card" style={{ marginTop: 8 }}>
+            <div className="section-title">排查建议</div>
+            <ul style={{ margin: "8px 0 0 16px" }}>
+              {paperErrorSuggestions.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </Card>
 
       <Card title="AI 课堂讲稿生成" tag="讲稿">

@@ -156,6 +156,19 @@ export default function CreateTeacherExamPage() {
         </div>
       </div>
 
+      <Card title="使用提示" tag="引导">
+        <div className="grid" style={{ gap: 8 }}>
+          <div style={{ fontSize: 13, color: "var(--ink-1)" }}>
+            推荐流程：先设班级和题量，再选知识点和难度，最后确认截止时间。
+          </div>
+          <div className="pill-list">
+            <span className="pill">题型/难度筛选过多可能导致题量不足</span>
+            <span className="pill">若发布失败，先清空知识点筛选再重试</span>
+            <span className="pill">默认会排除隔离池高风险题</span>
+          </div>
+        </div>
+      </Card>
+
       <Card title="考试设置" tag="创建">
         <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
           <label>

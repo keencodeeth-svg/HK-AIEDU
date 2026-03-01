@@ -12,6 +12,9 @@ export type LibraryChunk = {
   grade: string;
   contentType: "textbook" | "courseware" | "lesson_plan";
   text: string;
+  sectionTitle?: string;
+  hasFormula?: boolean;
+  formulaFragments?: string[];
   chunkIndex: number;
   knowledgePointIds: string[];
   sourceUpdatedAt: string;
@@ -26,6 +29,9 @@ export type LibraryCitation = {
   grade: string;
   contentType: "textbook" | "courseware" | "lesson_plan";
   snippet: string;
+  sectionTitle?: string;
+  formulaFragments?: string[];
+  evidenceType?: "keyword" | "chapter" | "formula";
   score: number;
   confidence: number;
   trustLevel: "high" | "medium" | "low";
@@ -49,6 +55,8 @@ export type CitationGovernanceSummary = {
 const LIBRARY_CHUNKS_FILE = "library-chunks.json";
 const CHUNK_LENGTH = 480;
 const CHUNK_OVERLAP = 80;
+const EVIDENCE_SNIPPET_LENGTH = 220;
+const EVIDENCE_FOCUS_OFFSET = 72;
 
 function normalizeSearchText(value: string) {
   return value
@@ -100,6 +108,136 @@ function splitIntoChunks(text: string) {
   return chunks;
 }
 
+function isSectionHeading(line: string) {
+  const value = line.trim();
+  if (!value) return false;
+  if (value.length > 42) return false;
+  if (/^第[0-9一二三四五六七八九十百千]+[章节单元课]/.test(value)) return true;
+  if (/^[0-9]{1,2}(\.[0-9]{1,2}){0,2}\s*[^0-9]/.test(value)) return true;
+  if (/^[一二三四五六七八九十]{1,3}[、.．]/.test(value)) return true;
+  if (/^[（(][0-9一二三四五六七八九十]{1,3}[)）]/.test(value)) return true;
+  if (/^(chapter|unit|lesson)\s+[0-9ivx]+/i.test(value)) return true;
+  if (/^(本章小结|知识点归纳|课堂小结|课后练习|例题|思考题|拓展题)/.test(value)) return true;
+  return false;
+}
+
+function splitIntoSections(text: string) {
+  const lines = text
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    return [] as Array<{ title?: string; text: string }>;
+  }
+
+  const sections: Array<{ title?: string; text: string }> = [];
+  let currentTitle = "";
+  let buffer: string[] = [];
+  const flush = () => {
+    if (!buffer.length) return;
+    sections.push({
+      title: currentTitle || undefined,
+      text: buffer.join("\n").trim()
+    });
+    buffer = [];
+  };
+
+  lines.forEach((line) => {
+    if (isSectionHeading(line)) {
+      flush();
+      currentTitle = line;
+      buffer.push(line);
+      return;
+    }
+    buffer.push(line);
+  });
+  flush();
+
+  if (!sections.length) {
+    return [
+      {
+        title: undefined,
+        text: lines.join("\n")
+      }
+    ];
+  }
+  return sections;
+}
+
+function normalizeFormula(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[，。！？、,.!?;:；："'`~]/g, "")
+    .trim();
+}
+
+function extractFormulaFragments(text: string) {
+  if (!text.trim()) return [] as string[];
+  const segments = text
+    .split(/[\n；;。]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const formulas = segments.filter((segment) => {
+    if (segment.length < 4 || segment.length > 90) return false;
+    if (!/[=≈≠≤≥+\-×÷*/%^]/.test(segment)) return false;
+    return /[0-9a-zA-Z\u4e00-\u9fa5]/.test(segment);
+  });
+  return uniqueStrings(formulas).slice(0, 4);
+}
+
+function extractQueryKeywords(value: string) {
+  const compact = value
+    .toLowerCase()
+    .replace(/[\r\n\t]/g, " ")
+    .split(/[，。！？、,.!?;:；："'`~\-()（）【】\[\]{}<>/\s]+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2 && item.length <= 30);
+  return uniqueStrings(compact).slice(0, 24);
+}
+
+function buildEvidenceSnippet(input: {
+  text: string;
+  query: string;
+  queryKeywords: string[];
+  queryFormulaFragments: string[];
+}) {
+  const source = input.text.replace(/\s+/g, " ").trim();
+  if (!source) return "";
+
+  const needles = uniqueStrings(
+    [input.query.trim(), ...input.queryKeywords, ...input.queryFormulaFragments]
+      .map((item) => item.trim())
+      .filter((item) => item.length >= 2)
+  ).sort((a, b) => b.length - a.length);
+
+  const lower = source.toLowerCase();
+  let focus = -1;
+  for (const needle of needles) {
+    const hit = lower.indexOf(needle.toLowerCase());
+    if (hit >= 0) {
+      focus = hit;
+      break;
+    }
+  }
+
+  if (focus < 0) {
+    return source.length <= EVIDENCE_SNIPPET_LENGTH
+      ? source
+      : `${source.slice(0, EVIDENCE_SNIPPET_LENGTH - 3).trim()}...`;
+  }
+
+  let start = Math.max(0, focus - EVIDENCE_FOCUS_OFFSET);
+  let end = Math.min(source.length, start + EVIDENCE_SNIPPET_LENGTH);
+  if (end - start < EVIDENCE_SNIPPET_LENGTH && start > 0) {
+    start = Math.max(0, end - EVIDENCE_SNIPPET_LENGTH);
+  }
+
+  const snippet = source.slice(start, end).trim();
+  return `${start > 0 ? "..." : ""}${snippet}${end < source.length ? "..." : ""}`;
+}
+
 function decodeBase64Text(contentBase64?: string, mimeType?: string) {
   if (!contentBase64) return "";
   const mime = (mimeType ?? "").toLowerCase();
@@ -136,19 +274,31 @@ async function extractItemText(item: LearningLibraryItem) {
 async function buildChunksForItem(item: LearningLibraryItem, indexedAt: string) {
   const rawText = await extractItemText(item);
   if (!rawText.trim()) return [] as LibraryChunk[];
-  const chunks = splitIntoChunks(rawText);
-  return chunks.map((text, index) => ({
-    id: `lib-chunk-${item.id}-${index + 1}`,
-    itemId: item.id,
-    subject: item.subject,
-    grade: item.grade,
-    contentType: item.contentType,
-    text,
-    chunkIndex: index + 1,
-    knowledgePointIds: item.knowledgePointIds ?? [],
-    sourceUpdatedAt: item.updatedAt,
-    indexedAt
-  }));
+  const sections = splitIntoSections(rawText);
+  const results: LibraryChunk[] = [];
+  let chunkCursor = 0;
+  sections.forEach((section) => {
+    splitIntoChunks(section.text).forEach((text) => {
+      chunkCursor += 1;
+      const formulaFragments = extractFormulaFragments(text);
+      results.push({
+        id: `lib-chunk-${item.id}-${chunkCursor}`,
+        itemId: item.id,
+        subject: item.subject,
+        grade: item.grade,
+        contentType: item.contentType,
+        text,
+        sectionTitle: section.title,
+        hasFormula: formulaFragments.length > 0,
+        formulaFragments,
+        chunkIndex: chunkCursor,
+        knowledgePointIds: item.knowledgePointIds ?? [],
+        sourceUpdatedAt: item.updatedAt,
+        indexedAt
+      });
+    });
+  });
+  return results;
 }
 
 function readChunks() {
@@ -161,40 +311,82 @@ function writeChunks(chunks: LibraryChunk[]) {
 
 function buildChunkScore(params: {
   queryTokens: string[];
+  queryKeywords: string[];
   queryText: string;
+  queryHasFormula: boolean;
+  queryFormulaFragments: string[];
   chunk: LibraryChunk;
   item: LearningLibraryItem;
 }) {
-  const { queryTokens, queryText, chunk, item } = params;
+  const { queryTokens, queryKeywords, queryText, queryHasFormula, queryFormulaFragments, chunk, item } = params;
   const chunkText = normalizeSearchText(chunk.text);
+  const chunkCompact = chunkText.replace(/\s+/g, "");
   const titleText = normalizeSearchText(item.title);
+  const titleCompact = titleText.replace(/\s+/g, "");
+  const sectionText = normalizeSearchText(chunk.sectionTitle ?? "");
+  const sectionCompact = sectionText.replace(/\s+/g, "");
   if (!chunkText) {
     return {
       score: 0,
       matchedTokenCount: 0,
       queryTokenCount: queryTokens.length,
-      exactMatch: false
+      exactMatch: false,
+      chapterMatch: false,
+      formulaMatch: false
     };
   }
 
   let score = 0;
   const matchedTokens = new Set<string>();
+  let chapterMatch = false;
+  let formulaMatch = false;
   queryTokens.forEach((token) => {
     if (!token) return;
-    if (chunkText.includes(token)) {
+    const normalizedToken = normalizeSearchText(token).replace(/\s+/g, "");
+    if (!normalizedToken) return;
+    if (chunkCompact.includes(normalizedToken)) {
       score += token.length >= 4 ? 4 : token.length >= 2 ? 2 : 1;
       matchedTokens.add(token);
     }
-    if (titleText.includes(token)) {
+    if (titleCompact.includes(normalizedToken)) {
       score += 1.4;
       matchedTokens.add(token);
     }
   });
 
-  const exactMatch = Boolean(queryText && chunkText.includes(queryText));
-  if (queryText && chunkText.includes(queryText)) {
+  queryKeywords.forEach((keyword) => {
+    const normalizedKeyword = normalizeSearchText(keyword).replace(/\s+/g, "");
+    if (!normalizedKeyword) return;
+    if (sectionCompact.includes(normalizedKeyword)) {
+      score += 3;
+      matchedTokens.add(keyword);
+      chapterMatch = true;
+    }
+    if (titleCompact.includes(normalizedKeyword)) {
+      score += 1;
+      matchedTokens.add(keyword);
+    }
+  });
+
+  const exactMatch = Boolean(queryText && chunkCompact.includes(queryText));
+  if (queryText && chunkCompact.includes(queryText)) {
     score += 6;
   }
+
+  const chunkFormulas = uniqueStrings((chunk.formulaFragments ?? []).map((item) => normalizeFormula(item))).filter(
+    Boolean
+  );
+  const queryFormulas = uniqueStrings(queryFormulaFragments.map((item) => normalizeFormula(item))).filter(Boolean);
+  if (queryHasFormula && chunk.hasFormula) {
+    score += 1.5;
+  }
+  queryFormulas.forEach((queryFormula) => {
+    if (!queryFormula) return;
+    if (chunkFormulas.some((formula) => formula.includes(queryFormula) || queryFormula.includes(formula))) {
+      score += 4;
+      formulaMatch = true;
+    }
+  });
 
   if (item.contentType === "textbook") {
     score += 0.4;
@@ -204,7 +396,9 @@ function buildChunkScore(params: {
     score: Math.round(score * 100) / 100,
     matchedTokenCount: matchedTokens.size,
     queryTokenCount: queryTokens.length,
-    exactMatch
+    exactMatch,
+    chapterMatch,
+    formulaMatch
   };
 }
 
@@ -226,6 +420,8 @@ function calculateCitationConfidence(input: {
   matchedTokenCount: number;
   queryTokenCount: number;
   exactMatch: boolean;
+  chapterMatch: boolean;
+  formulaMatch: boolean;
   contentType: LibraryCitation["contentType"];
 }) {
   const scorePart = input.maxScore > 0 ? (input.score / input.maxScore) * 62 : 0;
@@ -233,7 +429,9 @@ function calculateCitationConfidence(input: {
     input.queryTokenCount > 0 ? (input.matchedTokenCount / input.queryTokenCount) * 28 : 0;
   const exactMatchBonus = input.exactMatch ? 8 : 0;
   const sourceBonus = input.contentType === "textbook" ? 4 : 0;
-  return clamp(scorePart + coveragePart + exactMatchBonus + sourceBonus, 0, 100);
+  const chapterBonus = input.chapterMatch ? 4 : 0;
+  const formulaBonus = input.formulaMatch ? 4 : 0;
+  return clamp(scorePart + coveragePart + exactMatchBonus + sourceBonus + chapterBonus + formulaBonus, 0, 100);
 }
 
 function buildCitationReason(input: {
@@ -241,6 +439,8 @@ function buildCitationReason(input: {
   matchedTokenCount: number;
   queryTokenCount: number;
   exactMatch: boolean;
+  chapterMatch: boolean;
+  formulaMatch: boolean;
   contentType: LibraryCitation["contentType"];
 }) {
   const reasons: string[] = [];
@@ -249,6 +449,12 @@ function buildCitationReason(input: {
   }
   if (input.queryTokenCount > 0) {
     reasons.push(`关键词覆盖 ${input.matchedTokenCount}/${input.queryTokenCount}`);
+  }
+  if (input.chapterMatch) {
+    reasons.push("命中章节标题/分节结构");
+  }
+  if (input.formulaMatch) {
+    reasons.push("命中公式片段");
   }
   if (input.contentType === "textbook") {
     reasons.push("来源为教材正文");
@@ -347,13 +553,24 @@ export async function retrieveLibraryCitations(input: {
   const itemMap = new Map(targetItems.map((item) => [item.id, item]));
   const chunks = readChunks().filter((chunk) => itemMap.has(chunk.itemId));
   const queryTokens = extractTokens(query);
+  const queryKeywords = extractQueryKeywords(query);
   const queryText = normalizeSearchText(query).replace(/\s+/g, "");
+  const queryFormulaFragments = extractFormulaFragments(query);
+  const queryHasFormula = /[=≈≠≤≥+\-×÷*/%^]/.test(query);
 
   const scored = chunks
     .map((chunk) => {
       const item = itemMap.get(chunk.itemId);
       if (!item) return null;
-      const metrics = buildChunkScore({ queryTokens, queryText, chunk, item });
+      const metrics = buildChunkScore({
+        queryTokens,
+        queryKeywords,
+        queryText,
+        queryHasFormula,
+        queryFormulaFragments,
+        chunk,
+        item
+      });
       if (metrics.score <= 0) return null;
       return {
         chunk,
@@ -361,7 +578,9 @@ export async function retrieveLibraryCitations(input: {
         score: metrics.score,
         matchedTokenCount: metrics.matchedTokenCount,
         queryTokenCount: metrics.queryTokenCount,
-        exactMatch: metrics.exactMatch
+        exactMatch: metrics.exactMatch,
+        chapterMatch: metrics.chapterMatch,
+        formulaMatch: metrics.formulaMatch
       };
     })
     .filter(Boolean) as Array<{
@@ -371,6 +590,8 @@ export async function retrieveLibraryCitations(input: {
     matchedTokenCount: number;
     queryTokenCount: number;
     exactMatch: boolean;
+    chapterMatch: boolean;
+    formulaMatch: boolean;
   }>;
 
   const maxScore = scored.reduce((max, item) => Math.max(max, item.score), 0);
@@ -381,7 +602,7 @@ export async function retrieveLibraryCitations(input: {
       if (b.score !== a.score) return b.score - a.score;
       return b.chunk.indexedAt.localeCompare(a.chunk.indexedAt);
     })
-    .forEach(({ chunk, item, score, matchedTokenCount, queryTokenCount, exactMatch }) => {
+    .forEach(({ chunk, item, score, matchedTokenCount, queryTokenCount, exactMatch, chapterMatch, formulaMatch }) => {
       if (deduped.has(chunk.itemId)) return;
       const confidence = calculateCitationConfidence({
         score,
@@ -389,6 +610,8 @@ export async function retrieveLibraryCitations(input: {
         matchedTokenCount,
         queryTokenCount,
         exactMatch,
+        chapterMatch,
+        formulaMatch,
         contentType: chunk.contentType
       });
       const trustLevel = resolveCitationTrustLevel(confidence);
@@ -399,7 +622,15 @@ export async function retrieveLibraryCitations(input: {
         matchedTokenCount,
         queryTokenCount,
         exactMatch,
+        chapterMatch,
+        formulaMatch,
         contentType: chunk.contentType
+      });
+      const snippet = buildEvidenceSnippet({
+        text: chunk.text,
+        query,
+        queryKeywords,
+        queryFormulaFragments
       });
       deduped.set(chunk.itemId, {
         chunkId: chunk.id,
@@ -408,7 +639,10 @@ export async function retrieveLibraryCitations(input: {
         subject: chunk.subject,
         grade: chunk.grade,
         contentType: chunk.contentType,
-        snippet: chunk.text.slice(0, 220),
+        snippet,
+        sectionTitle: chunk.sectionTitle,
+        formulaFragments: chunk.formulaFragments?.slice(0, 3) ?? [],
+        evidenceType: formulaMatch ? "formula" : chapterMatch ? "chapter" : "keyword",
         score,
         confidence,
         trustLevel,
@@ -471,5 +705,11 @@ export function summarizeCitationGovernance(citations: LibraryCitation[]): Citat
 }
 
 export function toCitationPrompts(citations: LibraryCitation[]) {
-  return citations.map((item, index) => `${index + 1}. 《${item.itemTitle}》：${item.snippet}`);
+  return citations.map((item, index) => {
+    const section = item.sectionTitle ? ` [${item.sectionTitle}]` : "";
+    const formula = item.formulaFragments?.length
+      ? `（公式片段：${item.formulaFragments.slice(0, 2).join("；")}）`
+      : "";
+    return `${index + 1}. 《${item.itemTitle}》${section}：${item.snippet}${formula}`;
+  });
 }
