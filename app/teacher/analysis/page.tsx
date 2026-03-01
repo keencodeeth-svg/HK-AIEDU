@@ -124,6 +124,12 @@ type InterventionCausalityItem = {
   executionRate: number;
   assignmentExecutionCount: number;
   reviewExecutionCount: number;
+  parentLinkedStudents: number;
+  parentExecutedStudents: number;
+  parentExecutionRate: number;
+  parentReceiptDoneCount: number;
+  parentReceiptSkippedCount: number;
+  parentEffectScore: number;
   preAccuracy: number | null;
   postAccuracy: number | null;
   scoreDelta: number | null;
@@ -139,6 +145,12 @@ type InterventionCausalitySummary = {
   improvedActionCount: number;
   evidenceReadyCount: number;
   evidenceReadyRate: number;
+  parentInvolvedActionCount: number;
+  avgParentExecutionRate: number;
+  avgParentEffectScore: number;
+  withParentAvgScoreDelta: number | null;
+  withoutParentAvgScoreDelta: number | null;
+  parentDeltaGap: number | null;
   byAlertType: {
     studentRiskActionCount: number;
     knowledgeRiskActionCount: number;
@@ -149,6 +161,9 @@ type InterventionCausalitySummary = {
     avgExecutionRate: number;
     avgScoreDelta: number;
     improvedActionCount: number;
+    avgParentExecutionRate: number;
+    parentInvolvedActionCount: number;
+    avgParentEffectScore: number;
   }>;
 };
 
@@ -581,6 +596,26 @@ export default function TeacherAnalysisPage() {
               <div className="section-title">知识点风险动作</div>
               <div className="kpi-value">{causalitySummary.byAlertType.knowledgeRiskActionCount}</div>
             </div>
+            <div className="card">
+              <div className="section-title">家长参与动作</div>
+              <div className="kpi-value">{causalitySummary.parentInvolvedActionCount}</div>
+            </div>
+            <div className="card">
+              <div className="section-title">家长平均执行率</div>
+              <div className="kpi-value">{causalitySummary.avgParentExecutionRate}%</div>
+            </div>
+            <div className="card">
+              <div className="section-title">家长平均效果分</div>
+              <div className="kpi-value">{causalitySummary.avgParentEffectScore}</div>
+            </div>
+            <div className="card">
+              <div className="section-title">家长协同分差</div>
+              <div className="kpi-value">{causalitySummary.parentDeltaGap ?? "-"}</div>
+              <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                有家长 {causalitySummary.withParentAvgScoreDelta ?? "-"} / 无家长{" "}
+                {causalitySummary.withoutParentAvgScoreDelta ?? "-"}
+              </div>
+            </div>
           </div>
         ) : null}
         {causalitySummary?.byActionType?.length ? (
@@ -593,6 +628,9 @@ export default function TeacherAnalysisPage() {
                   <span className="pill">平均执行率 {item.avgExecutionRate}%</span>
                   <span className="pill">平均分数变化 {item.avgScoreDelta}</span>
                   <span className="pill">正向动作 {item.improvedActionCount}</span>
+                  <span className="pill">家长执行率 {item.avgParentExecutionRate}%</span>
+                  <span className="pill">家长参与 {item.parentInvolvedActionCount}</span>
+                  <span className="pill">家长效果分 {item.avgParentEffectScore}</span>
                 </div>
               </div>
             ))}
@@ -626,6 +664,12 @@ export default function TeacherAnalysisPage() {
                   </span>
                   <span className="pill">作业执行 {item.assignmentExecutionCount}</span>
                   <span className="pill">复练执行 {item.reviewExecutionCount}</span>
+                  <span className="pill">
+                    家长执行 {item.parentExecutedStudents}/{item.parentLinkedStudents}（{item.parentExecutionRate}%）
+                  </span>
+                  <span className="pill">家长回执完成 {item.parentReceiptDoneCount}</span>
+                  <span className="pill">家长回执跳过 {item.parentReceiptSkippedCount}</span>
+                  <span className="pill">家长效果分 {item.parentEffectScore}</span>
                   <span className="pill">动作后正确率 {item.postAccuracy ?? "-"}%</span>
                   <span className="pill">动作前正确率 {item.preAccuracy ?? "-"}%</span>
                   <span className="pill">分数变化 {item.scoreDelta ?? "-"}</span>

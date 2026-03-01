@@ -1,5 +1,7 @@
 import { getAssignmentsByClassIds, getAssignmentProgress } from "./assignments";
+import { getParentsByStudentId } from "./auth";
 import { getClassesByTeacher, getClassStudentIds } from "./classes";
+import { listParentActionReceiptsByStudents } from "./parent-action-receipts";
 import { getAttemptsByUsers } from "./progress";
 import { getTeacherAlertActions, type TeacherAlertActionType } from "./teacher-alert-actions";
 import { getTeacherAlerts } from "./teacher-alerts";
@@ -32,6 +34,12 @@ export type InterventionCausalityItem = {
   executionRate: number;
   assignmentExecutionCount: number;
   reviewExecutionCount: number;
+  parentLinkedStudents: number;
+  parentExecutedStudents: number;
+  parentExecutionRate: number;
+  parentReceiptDoneCount: number;
+  parentReceiptSkippedCount: number;
+  parentEffectScore: number;
   preAccuracy: number | null;
   postAccuracy: number | null;
   scoreDelta: number | null;
@@ -48,6 +56,12 @@ export type InterventionCausalityReport = {
     improvedActionCount: number;
     evidenceReadyCount: number;
     evidenceReadyRate: number;
+    parentInvolvedActionCount: number;
+    avgParentExecutionRate: number;
+    avgParentEffectScore: number;
+    withParentAvgScoreDelta: number | null;
+    withoutParentAvgScoreDelta: number | null;
+    parentDeltaGap: number | null;
     byAlertType: {
       studentRiskActionCount: number;
       knowledgeRiskActionCount: number;
@@ -58,6 +72,9 @@ export type InterventionCausalityReport = {
       avgExecutionRate: number;
       avgScoreDelta: number;
       improvedActionCount: number;
+      avgParentExecutionRate: number;
+      parentInvolvedActionCount: number;
+      avgParentEffectScore: number;
     }>;
   };
   items: InterventionCausalityItem[];
@@ -71,6 +88,10 @@ function toTs(value: string | null | undefined) {
 function round(value: number, digits = 2) {
   const scale = Math.pow(10, digits);
   return Math.round(value * scale) / scale;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function calcAccuracy(correct: number, total: number) {
@@ -121,6 +142,12 @@ export async function buildInterventionCausalityReport(params: {
         improvedActionCount: 0,
         evidenceReadyCount: 0,
         evidenceReadyRate: 0,
+        parentInvolvedActionCount: 0,
+        avgParentExecutionRate: 0,
+        avgParentEffectScore: 0,
+        withParentAvgScoreDelta: null,
+        withoutParentAvgScoreDelta: null,
+        parentDeltaGap: null,
         byAlertType: {
           studentRiskActionCount: 0,
           knowledgeRiskActionCount: 0
@@ -179,6 +206,24 @@ export async function buildInterventionCausalityReport(params: {
     progressByStudent.set(item.studentId, list);
   });
   const wrongReviewByStudent = new Map(wrongReviewLists.map((item) => [item.studentId, item.items]));
+  const parentLinks = await Promise.all(
+    allStudentIds.map(async (studentId) => ({
+      studentId,
+      parentIds: (await getParentsByStudentId(studentId)).map((parent) => parent.id)
+    }))
+  );
+  const parentIdsByStudent = new Map(parentLinks.map((item) => [item.studentId, item.parentIds]));
+  const parentReceipts = await listParentActionReceiptsByStudents({
+    studentIds: allStudentIds,
+    since: new Date(sinceTs).toISOString(),
+    until: new Date(nowTs + effectWindowMs).toISOString()
+  });
+  const parentReceiptsByStudent = new Map<string, typeof parentReceipts>();
+  parentReceipts.forEach((receipt) => {
+    const list = parentReceiptsByStudent.get(receipt.studentId) ?? [];
+    list.push(receipt);
+    parentReceiptsByStudent.set(receipt.studentId, list);
+  });
 
   const items: InterventionCausalityItem[] = [];
   actions
@@ -206,8 +251,13 @@ export async function buildInterventionCausalityReport(params: {
 
       const windowEndTs = actionTs + effectWindowMs;
       const executedStudentSet = new Set<string>();
+      const parentExecutedStudentSet = new Set<string>();
       let assignmentExecutionCount = 0;
       let reviewExecutionCount = 0;
+      let parentLinkedStudents = 0;
+      let parentReceiptDoneCount = 0;
+      let parentReceiptSkippedCount = 0;
+      let parentEffectScore = 0;
       let preCorrect = 0;
       let preTotal = 0;
       let postCorrect = 0;
@@ -239,6 +289,26 @@ export async function buildInterventionCausalityReport(params: {
           executedStudentSet.add(studentId);
           reviewExecutionCount += 1;
         }
+
+        const linkedParentIds = parentIdsByStudent.get(studentId) ?? [];
+        if (linkedParentIds.length) {
+          parentLinkedStudents += 1;
+        }
+        const linkedParentSet = new Set(linkedParentIds);
+        const relevantReceipts = (parentReceiptsByStudent.get(studentId) ?? []).filter((receipt) => {
+          if (!linkedParentSet.has(receipt.parentId)) return false;
+          const ts = toTs(receipt.completedAt);
+          return Number.isFinite(ts) && ts >= actionTs && ts <= windowEndTs;
+        });
+        if (relevantReceipts.some((receipt) => receipt.status === "done")) {
+          parentExecutedStudentSet.add(studentId);
+        }
+        parentReceiptDoneCount += relevantReceipts.filter((receipt) => receipt.status === "done").length;
+        parentReceiptSkippedCount += relevantReceipts.filter((receipt) => receipt.status === "skipped").length;
+        parentEffectScore += relevantReceipts.reduce(
+          (sum, receipt) => sum + clamp(receipt.effectScore, -100, 100),
+          0
+        );
 
         const studentAttempts = attemptsByStudent.get(studentId) ?? [];
         studentAttempts.forEach((attempt) => {
@@ -285,6 +355,14 @@ export async function buildInterventionCausalityReport(params: {
         executionRate: round((executedStudentSet.size / targetStudentIds.length) * 100, 2),
         assignmentExecutionCount,
         reviewExecutionCount,
+        parentLinkedStudents,
+        parentExecutedStudents: parentExecutedStudentSet.size,
+        parentExecutionRate: parentLinkedStudents
+          ? round((parentExecutedStudentSet.size / parentLinkedStudents) * 100, 2)
+          : 0,
+        parentReceiptDoneCount,
+        parentReceiptSkippedCount,
+        parentEffectScore: round(parentEffectScore, 2),
         preAccuracy,
         postAccuracy,
         scoreDelta,
@@ -306,6 +384,35 @@ export async function buildInterventionCausalityReport(params: {
     : 0;
   const evidenceReadyCount = items.filter((item) => item.preAttemptCount > 0 && item.postAttemptCount > 0).length;
   const evidenceReadyRate = items.length ? round((evidenceReadyCount / items.length) * 100, 2) : 0;
+  const parentLinkedItems = items.filter((item) => item.parentLinkedStudents > 0);
+  const parentInvolvedActionCount = items.filter((item) => item.parentExecutedStudents > 0).length;
+  const avgParentExecutionRate = parentLinkedItems.length
+    ? round(parentLinkedItems.reduce((sum, item) => sum + item.parentExecutionRate, 0) / parentLinkedItems.length, 2)
+    : 0;
+  const parentEffectItems = items.filter(
+    (item) => item.parentReceiptDoneCount > 0 || item.parentReceiptSkippedCount > 0
+  );
+  const avgParentEffectScore = parentEffectItems.length
+    ? round(parentEffectItems.reduce((sum, item) => sum + item.parentEffectScore, 0) / parentEffectItems.length, 2)
+    : 0;
+  const withParentDeltaItems = scoreDeltaItems.filter((item) => item.parentExecutedStudents > 0);
+  const withoutParentDeltaItems = scoreDeltaItems.filter((item) => item.parentExecutedStudents === 0);
+  const withParentAvgScoreDelta = withParentDeltaItems.length
+    ? round(
+        withParentDeltaItems.reduce((sum, item) => sum + (item.scoreDelta ?? 0), 0) / withParentDeltaItems.length,
+        2
+      )
+    : null;
+  const withoutParentAvgScoreDelta = withoutParentDeltaItems.length
+    ? round(
+        withoutParentDeltaItems.reduce((sum, item) => sum + (item.scoreDelta ?? 0), 0) / withoutParentDeltaItems.length,
+        2
+      )
+    : null;
+  const parentDeltaGap =
+    withParentAvgScoreDelta === null || withoutParentAvgScoreDelta === null
+      ? null
+      : round(withParentAvgScoreDelta - withoutParentAvgScoreDelta, 2);
 
   const byAlertType = {
     studentRiskActionCount: items.filter((item) => item.alertType === "student-risk").length,
@@ -320,6 +427,11 @@ export async function buildInterventionCausalityReport(params: {
       scoreDeltaSum: number;
       scoreDeltaCount: number;
       improvedActionCount: number;
+      parentExecutionRateSum: number;
+      parentExecutionRateCount: number;
+      parentInvolvedActionCount: number;
+      parentEffectScoreSum: number;
+      parentEffectScoreCount: number;
     }
   >();
   items.forEach((item) => {
@@ -328,7 +440,12 @@ export async function buildInterventionCausalityReport(params: {
       executionRateSum: 0,
       scoreDeltaSum: 0,
       scoreDeltaCount: 0,
-      improvedActionCount: 0
+      improvedActionCount: 0,
+      parentExecutionRateSum: 0,
+      parentExecutionRateCount: 0,
+      parentInvolvedActionCount: 0,
+      parentEffectScoreSum: 0,
+      parentEffectScoreCount: 0
     };
     current.actionCount += 1;
     current.executionRateSum += item.executionRate;
@@ -339,6 +456,17 @@ export async function buildInterventionCausalityReport(params: {
     if ((item.scoreDelta ?? 0) > 0) {
       current.improvedActionCount += 1;
     }
+    if (item.parentLinkedStudents > 0) {
+      current.parentExecutionRateSum += item.parentExecutionRate;
+      current.parentExecutionRateCount += 1;
+    }
+    if (item.parentExecutedStudents > 0) {
+      current.parentInvolvedActionCount += 1;
+    }
+    if (item.parentReceiptDoneCount > 0 || item.parentReceiptSkippedCount > 0) {
+      current.parentEffectScoreSum += item.parentEffectScore;
+      current.parentEffectScoreCount += 1;
+    }
     actionTypeBuckets.set(item.actionType, current);
   });
 
@@ -348,7 +476,14 @@ export async function buildInterventionCausalityReport(params: {
       actionCount: bucket.actionCount,
       avgExecutionRate: bucket.actionCount ? round(bucket.executionRateSum / bucket.actionCount, 2) : 0,
       avgScoreDelta: bucket.scoreDeltaCount ? round(bucket.scoreDeltaSum / bucket.scoreDeltaCount, 2) : 0,
-      improvedActionCount: bucket.improvedActionCount
+      improvedActionCount: bucket.improvedActionCount,
+      avgParentExecutionRate: bucket.parentExecutionRateCount
+        ? round(bucket.parentExecutionRateSum / bucket.parentExecutionRateCount, 2)
+        : 0,
+      parentInvolvedActionCount: bucket.parentInvolvedActionCount,
+      avgParentEffectScore: bucket.parentEffectScoreCount
+        ? round(bucket.parentEffectScoreSum / bucket.parentEffectScoreCount, 2)
+        : 0
     }))
     .sort((a, b) => {
       if (b.actionCount !== a.actionCount) return b.actionCount - a.actionCount;
@@ -364,6 +499,12 @@ export async function buildInterventionCausalityReport(params: {
       improvedActionCount: items.filter((item) => (item.scoreDelta ?? 0) > 0).length,
       evidenceReadyCount,
       evidenceReadyRate,
+      parentInvolvedActionCount,
+      avgParentExecutionRate,
+      avgParentEffectScore,
+      withParentAvgScoreDelta,
+      withoutParentAvgScoreDelta,
+      parentDeltaGap,
       byAlertType,
       byActionType
     },

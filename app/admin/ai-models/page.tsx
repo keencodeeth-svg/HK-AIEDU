@@ -143,7 +143,23 @@ type QualityCalibrationConfig = {
   globalBias: number;
   providerAdjustments: Record<string, number>;
   kindAdjustments: Record<EvalKind, number>;
+  enabled: boolean;
+  rolloutPercent: number;
+  rolloutSalt: string;
   updatedAt: string;
+  updatedBy?: string;
+};
+
+type QualityCalibrationSnapshot = {
+  id: string;
+  reason: string;
+  createdAt: string;
+  createdBy?: string;
+  config: QualityCalibrationConfig;
+};
+
+type QualityCalibrationPayload = QualityCalibrationConfig & {
+  snapshots?: QualityCalibrationSnapshot[];
 };
 
 type PolicyDraft = {
@@ -202,7 +218,13 @@ export default function AdminAiModelsPage() {
   const [evalReport, setEvalReport] = useState<EvalReport | null>(null);
   const [evalLoading, setEvalLoading] = useState(false);
   const [calibrationConfig, setCalibrationConfig] = useState<QualityCalibrationConfig | null>(null);
+  const [calibrationSnapshots, setCalibrationSnapshots] = useState<QualityCalibrationSnapshot[]>([]);
   const [calibrationLoading, setCalibrationLoading] = useState(false);
+  const [calibrationDraft, setCalibrationDraft] = useState({
+    enabled: true,
+    rolloutPercent: 100,
+    rolloutSalt: "default"
+  });
   const [selectedEvalDatasets, setSelectedEvalDatasets] = useState<EvalDatasetName[]>(
     EVAL_DATASET_OPTIONS.map((item) => item.key)
   );
@@ -255,16 +277,34 @@ export default function AdminAiModelsPage() {
     }
   }
 
+  function syncCalibrationPayload(payload: QualityCalibrationPayload | null) {
+    if (!payload) {
+      setCalibrationConfig(null);
+      setCalibrationSnapshots([]);
+      return;
+    }
+    setCalibrationConfig(payload);
+    setCalibrationSnapshots(payload.snapshots ?? []);
+    setCalibrationDraft({
+      enabled: payload.enabled ?? true,
+      rolloutPercent:
+        typeof payload.rolloutPercent === "number" && Number.isFinite(payload.rolloutPercent)
+          ? payload.rolloutPercent
+          : 100,
+      rolloutSalt: payload.rolloutSalt || "default"
+    });
+  }
+
   async function loadCalibration() {
     setCalibrationLoading(true);
     try {
-      const res = await fetch("/api/admin/ai/quality-calibration", { cache: "no-store" });
+      const res = await fetch("/api/admin/ai/quality-calibration?historyLimit=20", { cache: "no-store" });
       const payload = await res.json();
       if (!res.ok) {
         setError(payload?.error ?? "加载质量校准失败");
         return;
       }
-      setCalibrationConfig(payload?.data ?? null);
+      syncCalibrationPayload((payload?.data ?? null) as QualityCalibrationPayload | null);
     } finally {
       setCalibrationLoading(false);
     }
@@ -306,7 +346,8 @@ export default function AdminAiModelsPage() {
         body: JSON.stringify({
           globalBias: suggestion.recommendedGlobalBias,
           providerAdjustments: suggestion.providerAdjustments,
-          kindAdjustments: suggestion.kindAdjustments
+          kindAdjustments: suggestion.kindAdjustments,
+          reason: "apply_eval_suggestion"
         })
       });
       const payload = await res.json();
@@ -314,8 +355,61 @@ export default function AdminAiModelsPage() {
         setError(payload?.error ?? "应用校准建议失败");
         return;
       }
-      setCalibrationConfig(payload?.data ?? null);
+      syncCalibrationPayload((payload?.data ?? null) as QualityCalibrationPayload | null);
       setMessage("已应用离线评测校准建议");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveCalibrationRollout() {
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/admin/ai/quality-calibration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: calibrationDraft.enabled,
+          rolloutPercent: calibrationDraft.rolloutPercent,
+          rolloutSalt: calibrationDraft.rolloutSalt,
+          reason: "update_rollout_control"
+        })
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        setError(payload?.error ?? "保存灰度配置失败");
+        return;
+      }
+      syncCalibrationPayload((payload?.data ?? null) as QualityCalibrationPayload | null);
+      setMessage("灰度开关配置已保存");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function rollbackCalibration(snapshotId: string) {
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/admin/ai/quality-calibration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "rollback",
+          snapshotId,
+          reason: "manual_rollback"
+        })
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        setError(payload?.error ?? "回滚失败");
+        return;
+      }
+      syncCalibrationPayload((payload?.data ?? null) as QualityCalibrationPayload | null);
+      setMessage("已完成校准回滚");
     } finally {
       setSaving(false);
     }
@@ -846,21 +940,122 @@ export default function AdminAiModelsPage() {
           </div>
 
           {calibrationConfig ? (
-            <div className="card">
-              <div className="section-title">当前质量校准</div>
-              <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 6 }}>
-                全局偏置 {calibrationConfig.globalBias} · 更新时间{" "}
-                {calibrationConfig.updatedAt ? new Date(calibrationConfig.updatedAt).toLocaleString("zh-CN") : "-"}
+            <div className="grid" style={{ gap: 8 }}>
+              <div className="card">
+                <div className="section-title">当前质量校准</div>
+                <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 6 }}>
+                  全局偏置 {calibrationConfig.globalBias} · 开关 {calibrationConfig.enabled ? "开启" : "关闭"} · 灰度{" "}
+                  {calibrationConfig.rolloutPercent}% · 更新时间{" "}
+                  {calibrationConfig.updatedAt ? new Date(calibrationConfig.updatedAt).toLocaleString("zh-CN") : "-"}
+                </div>
+                <div className="pill-list" style={{ marginTop: 8 }}>
+                  {Object.entries(calibrationConfig.providerAdjustments ?? {}).map(([provider, bias]) => (
+                    <span className="pill" key={`provider-${provider}`}>
+                      {provider}: {bias}
+                    </span>
+                  ))}
+                  {!Object.keys(calibrationConfig.providerAdjustments ?? {}).length ? (
+                    <span className="pill">provider 无额外校准</span>
+                  ) : null}
+                </div>
+                <div className="pill-list" style={{ marginTop: 8 }}>
+                  {Object.entries(calibrationConfig.kindAdjustments ?? {}).map(([kind, bias]) => (
+                    <span className="pill" key={`kind-${kind}`}>
+                      {kind}: {bias}
+                    </span>
+                  ))}
+                </div>
               </div>
-              <div className="pill-list" style={{ marginTop: 8 }}>
-                {Object.entries(calibrationConfig.providerAdjustments ?? {}).map(([provider, bias]) => (
-                  <span className="pill" key={`provider-${provider}`}>
-                    {provider}: {bias}
-                  </span>
-                ))}
-                {!Object.keys(calibrationConfig.providerAdjustments ?? {}).length ? (
-                  <span className="pill">provider 无额外校准</span>
-                ) : null}
+
+              <div className="card">
+                <div className="section-title">灰度开关与回滚保护</div>
+                <div className="grid grid-3" style={{ marginTop: 8 }}>
+                  <label style={{ fontSize: 12 }}>
+                    <div className="section-title">校准开关</div>
+                    <select
+                      value={calibrationDraft.enabled ? "enabled" : "disabled"}
+                      onChange={(event) =>
+                        setCalibrationDraft((prev) => ({ ...prev, enabled: event.target.value === "enabled" }))
+                      }
+                      style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+                    >
+                      <option value="enabled">开启</option>
+                      <option value="disabled">关闭</option>
+                    </select>
+                  </label>
+                  <label style={{ fontSize: 12 }}>
+                    <div className="section-title">灰度比例（%）</div>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={calibrationDraft.rolloutPercent}
+                      onChange={(event) =>
+                        setCalibrationDraft((prev) => ({
+                          ...prev,
+                          rolloutPercent: Number(event.target.value || 0)
+                        }))
+                      }
+                      style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+                    />
+                  </label>
+                  <label style={{ fontSize: 12 }}>
+                    <div className="section-title">灰度盐值</div>
+                    <input
+                      value={calibrationDraft.rolloutSalt}
+                      onChange={(event) =>
+                        setCalibrationDraft((prev) => ({
+                          ...prev,
+                          rolloutSalt: event.target.value
+                        }))
+                      }
+                      placeholder="default"
+                      style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+                    />
+                  </label>
+                </div>
+                <div className="cta-row" style={{ marginTop: 10 }}>
+                  <button className="button secondary" type="button" onClick={saveCalibrationRollout} disabled={saving}>
+                    保存灰度配置
+                  </button>
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="section-title">最近快照（可回滚）</div>
+                {calibrationSnapshots.length ? (
+                  <div className="grid" style={{ gap: 8, marginTop: 8 }}>
+                    {calibrationSnapshots.slice(0, 6).map((item) => (
+                      <div
+                        key={item.id}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 8,
+                          padding: 10,
+                          borderRadius: 10,
+                          border: "1px solid var(--stroke)"
+                        }}
+                      >
+                        <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                          {new Date(item.createdAt).toLocaleString("zh-CN")} · {item.reason} · 偏置{" "}
+                          {item.config.globalBias} · 灰度 {item.config.rolloutPercent}%
+                        </div>
+                        <button
+                          className="button ghost"
+                          type="button"
+                          onClick={() => rollbackCalibration(item.id)}
+                          disabled={saving}
+                        >
+                          回滚到此版本
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 8 }}>暂无快照记录。</div>
+                )}
               </div>
             </div>
           ) : (

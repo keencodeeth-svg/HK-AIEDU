@@ -120,9 +120,11 @@
 - [x] AI 配置与日志 DB 优先存储（多实例一致）
 - [x] AI 离线评测集扩展（讲解/作业评语/知识点生成/写作反馈/教案提纲/题目质检）
 - [x] AI 评测到校准闭环（评测建议 `calibrationSuggestion` -> 一键写入质量校准）
+- [x] AI 质量校准灰度开关（enable/rolloutPercent/salt）+ 快照回滚
 - [x] RAG 引用可信度治理（citation confidence/trust/risk + 人工复核提示）
 - [x] AI 陪练长期记忆 V1（历史会话上下文）
 - [x] 运营埋点漏斗 + A/B 灰度发布
+- [x] 教师干预因果看板增强（家长执行参与率/效果分/有无家长协同分差）
 - [ ] 付费套餐与订阅
 
 ## 5. 当前迭代路线图（ROI 优先）
@@ -321,6 +323,7 @@ ZHIPU_MODEL=glm-4.7
   - `GET /api/admin/ai/evals`
   - `GET/POST /api/admin/ai/quality-calibration`
 - 已支持 provider 健康状态与缺失环境变量诊断
+- `quality-calibration` 支持灰度开关、快照历史与回滚操作
 
 ## 10. 关键页面与接口
 

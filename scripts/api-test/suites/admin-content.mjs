@@ -70,6 +70,17 @@ export async function runAdminContentSuite(context) {
     "number",
     "AI quality calibration should include globalBias"
   );
+  assert.equal(
+    typeof aiCalibration.body?.data?.rolloutPercent,
+    "number",
+    "AI quality calibration should include rolloutPercent"
+  );
+  assert.equal(
+    typeof aiCalibration.body?.data?.enabled,
+    "boolean",
+    "AI quality calibration should include enabled switch"
+  );
+  assert.ok(Array.isArray(aiCalibration.body?.data?.snapshots), "AI quality calibration should include snapshots list");
 
   const baselineCalibration = aiCalibration.body?.data ?? null;
   const suggestion = aiEvals.body?.data?.summary?.calibrationSuggestion ?? null;
@@ -92,12 +103,38 @@ export async function runAdminContentSuite(context) {
     "Updated AI quality calibration should include updatedAt"
   );
 
+  const calibrationAfterApply = await apiFetch("/api/admin/ai/quality-calibration");
+  assert.equal(
+    calibrationAfterApply.status,
+    200,
+    `GET /api/admin/ai/quality-calibration after apply failed: ${calibrationAfterApply.raw}`
+  );
+  const rollbackSnapshotId = calibrationAfterApply.body?.data?.snapshots?.[0]?.id;
+  if (rollbackSnapshotId) {
+    const rollbackCalibration = await apiFetch("/api/admin/ai/quality-calibration", {
+      method: "POST",
+      json: {
+        action: "rollback",
+        snapshotId: rollbackSnapshotId,
+        reason: "api_test_rollback"
+      }
+    });
+    assert.equal(
+      rollbackCalibration.status,
+      200,
+      `POST /api/admin/ai/quality-calibration (rollback) failed: ${rollbackCalibration.raw}`
+    );
+  }
+
   const restoreCalibration = await apiFetch("/api/admin/ai/quality-calibration", {
     method: "POST",
     json: {
       globalBias: baselineCalibration?.globalBias ?? 0,
       providerAdjustments: baselineCalibration?.providerAdjustments ?? {},
-      kindAdjustments: baselineCalibration?.kindAdjustments ?? {}
+      kindAdjustments: baselineCalibration?.kindAdjustments ?? {},
+      enabled: baselineCalibration?.enabled ?? true,
+      rolloutPercent: baselineCalibration?.rolloutPercent ?? 100,
+      rolloutSalt: baselineCalibration?.rolloutSalt ?? "default"
     }
   });
   assert.equal(

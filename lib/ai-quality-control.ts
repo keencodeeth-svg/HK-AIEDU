@@ -76,14 +76,11 @@ export function assessAiQuality(input: {
   const calibrated = applyAiQualityCalibration({
     score: baseScore,
     provider: input.provider,
-    kind: input.kind
+    kind: input.kind,
+    scopeKey: `${input.kind}|${provider}|${merged.slice(0, 120)}`
   });
   const confidenceScore = calibrated.score;
-  if (
-    calibrated.adjustments.globalBias !== 0 ||
-    calibrated.adjustments.providerAdjustment !== 0 ||
-    calibrated.adjustments.kindAdjustment !== 0
-  ) {
+  if (calibrated.applied) {
     reasons.push("质量分已应用离线校准参数。");
   }
   const rawRiskLevel: AiQualityRiskLevel =

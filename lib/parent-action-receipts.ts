@@ -115,6 +115,64 @@ export async function listParentActionReceipts(params: {
   return rows.map(mapDb);
 }
 
+export async function listParentActionReceiptsByStudents(params: {
+  studentIds: string[];
+  source?: ParentActionSource;
+  status?: ParentActionStatus;
+  since?: string;
+  until?: string;
+}) {
+  const studentIds = Array.from(new Set((params.studentIds ?? []).map((item) => String(item).trim()).filter(Boolean)));
+  if (!studentIds.length) return [] as ParentActionReceipt[];
+
+  if (!isDbEnabled()) {
+    const studentSet = new Set(studentIds);
+    const sinceTs = params.since ? new Date(params.since).getTime() : Number.NaN;
+    const untilTs = params.until ? new Date(params.until).getTime() : Number.NaN;
+    const list = readJson<ParentActionReceipt[]>(FILE, []);
+    return list
+      .filter((item) => studentSet.has(item.studentId))
+      .filter((item) => (params.source ? item.source === params.source : true))
+      .filter((item) => (params.status ? item.status === params.status : true))
+      .filter((item) => {
+        const ts = new Date(item.completedAt).getTime();
+        if (!Number.isFinite(ts)) return false;
+        if (Number.isFinite(sinceTs) && ts < sinceTs) return false;
+        if (Number.isFinite(untilTs) && ts > untilTs) return false;
+        return true;
+      })
+      .sort((a, b) => b.completedAt.localeCompare(a.completedAt));
+  }
+
+  const where = ["student_id = ANY($1)"];
+  const values: Array<string | number | boolean | null | string[] | number[] | Record<string, any>> = [studentIds];
+
+  if (params.source) {
+    where.push(`source = $${values.length + 1}`);
+    values.push(params.source);
+  }
+  if (params.status) {
+    where.push(`status = $${values.length + 1}`);
+    values.push(params.status);
+  }
+  if (params.since) {
+    where.push(`completed_at >= $${values.length + 1}`);
+    values.push(params.since);
+  }
+  if (params.until) {
+    where.push(`completed_at <= $${values.length + 1}`);
+    values.push(params.until);
+  }
+
+  const rows = await query<DbParentActionReceipt>(
+    `SELECT * FROM parent_action_receipts
+     WHERE ${where.join(" AND ")}
+     ORDER BY completed_at DESC`,
+    values
+  );
+  return rows.map(mapDb);
+}
+
 export async function upsertParentActionReceipt(input: {
   parentId: string;
   studentId: string;
