@@ -67,6 +67,7 @@ export const GET = createLearningRoute({
     }
 
     const classIds = classId && accessible.includes(classId) ? [classId] : accessible;
+    // File list is always limited to caller-accessible classes.
     const data = await getCourseFilesByClassIds(classIds);
     return { data };
   }
@@ -126,6 +127,7 @@ export const POST = createLearningRoute({
         });
         saved.push(record);
       }
+      // Multipart upload path supports batch file uploads in one request.
       return { data: saved };
     }
 

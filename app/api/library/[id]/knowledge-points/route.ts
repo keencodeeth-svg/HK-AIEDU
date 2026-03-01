@@ -50,6 +50,7 @@ export const POST = createLearningRoute({
       badRequest("knowledgePointIds required");
     }
 
+    // Limit bindable knowledge points to the same subject/grade as the library item.
     const scopedKps = (await getKnowledgePoints()).filter(
       (kp) => kp.subject === item.subject && kp.grade === item.grade
     );

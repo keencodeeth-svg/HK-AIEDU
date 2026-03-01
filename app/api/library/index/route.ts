@@ -38,6 +38,7 @@ export const POST = createLearningRoute({
       grade: body.grade?.trim() || undefined
     });
     const requestedItemIds = new Set((body.itemIds ?? []).map((item) => item.trim()).filter(Boolean));
+    // Re-check ACL per item to prevent indexing teacher/private assets that caller cannot retrieve later.
     const scoped = (
       await Promise.all(
         items.map(async (item) => {
@@ -58,6 +59,7 @@ export const POST = createLearningRoute({
 
     const result = await indexLibraryChunks({
       itemIds: scoped.map((item) => item.id),
+      // Default replace=true keeps vector index aligned with latest content edits.
       replace: body.replace !== false
     });
 

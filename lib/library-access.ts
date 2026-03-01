@@ -10,6 +10,7 @@ type UserLike = {
 
 export async function listAccessibleClassIds(user: UserLike) {
   if (user.role === "teacher") {
+    // Teacher reads class scope from authored resources/ownership, not from this helper.
     return [] as string[];
   }
   if (user.role === "student") {
@@ -27,6 +28,7 @@ export async function canAccessLearningLibraryItem(user: UserLike, item: Learnin
     if (!user.schoolId) return false;
     const klass = item.classId ? await getClassById(item.classId) : null;
     if (item.accessScope === "global" && !item.classId) return true;
+    // School admin can only access resources bound to classes within same school tenant.
     return Boolean(klass && klass.schoolId === user.schoolId);
   }
   if (item.accessScope === "global") return true;

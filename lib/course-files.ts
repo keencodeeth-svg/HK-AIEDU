@@ -129,6 +129,7 @@ export async function createCourseFile(input: {
     contentStorageProvider = stored.provider;
     contentStorageKey = stored.key;
     if (!shouldKeepInlineContent("FILE_INLINE_CONTENT", false)) {
+      // Default path stores payload in object storage and keeps metadata row lean.
       contentBase64 = undefined;
     }
   }

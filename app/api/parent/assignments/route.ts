@@ -169,6 +169,7 @@ export const GET = createLearningRoute({
           : null
       };
     });
+    // Assignment plan cards are merged with execution receipts to form parent闭环视图.
     const completedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "done").length;
     const skippedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "skipped").length;
     const pendingCount = Math.max(0, actionItemsWithReceipt.length - completedCount - skippedCount);

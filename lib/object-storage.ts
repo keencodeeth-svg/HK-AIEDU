@@ -40,6 +40,7 @@ function getObjectStorageRoot() {
   if (configured) {
     return configured;
   }
+  // Default local path keeps test/deploy environments functional without external object storage.
   return path.join(process.cwd(), ".runtime-data", "objects");
 }
 
@@ -103,5 +104,6 @@ export async function deleteObject(key?: string | null) {
     if (fsError.code !== "ENOENT") {
       throw error;
     }
+    // Missing object is treated as already-deleted for idempotent cleanup flows.
   }
 }

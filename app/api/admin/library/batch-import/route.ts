@@ -125,6 +125,7 @@ const bodySchema = v.object<{
 );
 
 function normalizeStem(text: string) {
+  // Use punctuation/whitespace-insensitive fingerprinting to reduce near-duplicate imports.
   return text
     .toLowerCase()
     .replace(/\s+/g, "")
@@ -229,6 +230,7 @@ export const POST = createAdminRoute({
 
     const contentType = normalizeContentType(item.contentType?.trim());
     const sourceType = normalizeSourceType(item.sourceType?.trim());
+    // Textbooks are constrained to file uploads so reader/download/share features stay consistent.
     if (contentType === "textbook" && sourceType !== "file") {
       textbookFailed.push({ index, reason: "textbook requires file source" });
       continue;
@@ -303,6 +305,7 @@ export const POST = createAdminRoute({
     }
 
     const stemKey = `${subject}|${grade}|${normalizeStem(stem)}`;
+    // Optional guard: skip same-subject/grade stem duplicates in a single batch to avoid noisy imports.
     if (skipExistingQuestionStem && seenStemKeys.has(stemKey)) {
       questionFailed.push({ index, reason: "duplicate stem skipped" });
       continue;

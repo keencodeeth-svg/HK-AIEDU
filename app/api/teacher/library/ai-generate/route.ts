@@ -106,6 +106,7 @@ export const POST = createLearningRoute({
         })
       )
     ).filter((item): item is LearningLibraryItem => Boolean(item));
+    // RAG grounding is restricted to teacher-accessible resources for this class scope.
     const citations = await retrieveLibraryCitations({
       query: `${topic}\n${kpTitles.join("、")}`,
       subject: klass.subject,
@@ -114,6 +115,7 @@ export const POST = createLearningRoute({
       itemIds: accessibleItems.map((item) => item.id)
     });
     const citationGovernance = summarizeCitationGovernance(citations);
+    // Prefer high/medium-trust citations in prompt; still return all citations for transparency.
     const trustedCitations = citations.filter((item) => item.trustLevel !== "low");
 
     const outline =

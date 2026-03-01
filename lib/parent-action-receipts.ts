@@ -131,6 +131,7 @@ export async function upsertParentActionReceipt(input: {
   const status = input.status ?? "done";
   const estimatedMinutes = clamp(input.estimatedMinutes ?? 0, 0, 240);
   const effectScore = clamp(input.effectScore ?? 0, -100, 100);
+  // Upsert by (parent, student, source, actionItem) keeps one latest execution receipt per action card.
 
   if (!isDbEnabled()) {
     const list = readJson<ParentActionReceipt[]>(FILE, []);
@@ -240,6 +241,7 @@ export function summarizeParentActionReceipts(
       .map((date) => toDateKey(date))
   );
   let streakDays = 0;
+  // Streak counts consecutive calendar days with at least one "done" receipt.
   const cursor = new Date(now);
   cursor.setHours(0, 0, 0, 0);
   while (streakDays < 90) {

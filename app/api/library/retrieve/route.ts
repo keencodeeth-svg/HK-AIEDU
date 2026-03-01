@@ -60,6 +60,7 @@ export const GET = createLearningRoute({
         })
       )
     ).filter((item): item is LibraryCitation => Boolean(item));
+    // Retrieval is post-filtered by ACL to avoid leaking inaccessible citation snippets.
 
     return {
       data: accessible,

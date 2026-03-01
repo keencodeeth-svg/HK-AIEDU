@@ -79,6 +79,7 @@ export const POST = createLearningRoute({
     if (!quote) {
       badRequest("quote required");
     }
+    // Annotation binds to user + item so personal notes remain isolated per reader.
 
     const annotation = await addLearningLibraryAnnotation({
       itemId: item.id,

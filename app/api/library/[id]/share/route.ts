@@ -39,6 +39,7 @@ export const POST = createLearningRoute({
     }
 
     const origin = new URL(request.url).origin;
+    // Share url points to tokenized public endpoint with read-only payload.
     return {
       data: {
         shareToken: shared.shareToken,

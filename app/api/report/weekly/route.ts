@@ -165,6 +165,7 @@ export const GET = createLearningRoute({
           : null
       };
     });
+    // Weekly report renders action cards with latest parent execution receipt.
     const completedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "done").length;
     const skippedCount = actionItemsWithReceipt.filter((item) => item.receipt?.status === "skipped").length;
     const pendingCount = Math.max(0, actionItemsWithReceipt.length - completedCount - skippedCount);

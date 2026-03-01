@@ -167,6 +167,7 @@ export const GET = createLearningRoute({
           return false;
         }
         if (user.role === "teacher" && item.ownerId === user.id) {
+          // Teacher can always see own class-scoped drafts/resources.
           return true;
         }
         return classIdSet.has(item.classId);
@@ -198,6 +199,7 @@ export const GET = createLearningRoute({
     }
 
     return {
+      // Non-admin response keeps same shape; admin branch only preserves explicit type narrowing.
       data: pageItems.map((item) => toLibraryListItem(item, lightList)),
       meta: {
         total,

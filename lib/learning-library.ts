@@ -193,12 +193,14 @@ function decodeTextFromBase64(contentBase64?: string, mimeType?: string) {
 function shouldStoreLibraryFileInObjectStorage() {
   if (process.env.LIBRARY_OBJECT_STORAGE_ENABLED === "false") return false;
   if (process.env.LIBRARY_OBJECT_STORAGE_ENABLED === "true") return true;
+  // Default-on to reduce DB/json payload size for uploaded textbooks/courseware.
   return true;
 }
 
 function shouldKeepInlineLibraryFileContent() {
   if (process.env.LIBRARY_INLINE_FILE_CONTENT === "true") return true;
   if (process.env.LIBRARY_INLINE_FILE_CONTENT === "false") return false;
+  // Default-off keeps list/detail APIs lighter while still recoverable via storage key.
   return false;
 }
 
@@ -271,6 +273,7 @@ export async function extractLibraryKnowledgePointIds(input: {
     .filter(Boolean);
 
   const knowledgePointIds = uniqueStrings([...seedIds, ...ruleMatched, ...aiMatchedIds]).slice(0, 12);
+  // Merge seed + rule + AI candidates to balance precision and recall.
   const extractedKnowledgePoints = knowledgePointIds
     .map((id) => scopedById.get(id)?.title ?? "")
     .filter(Boolean);
@@ -429,6 +432,7 @@ export async function createLearningLibraryItem(input: {
     contentStorageProvider = stored.provider;
     contentStorageKey = stored.key;
     if (!shouldKeepInlineLibraryFileContent()) {
+      // Keep only pointer when inline retention is disabled.
       contentBase64 = undefined;
     }
   }
@@ -611,6 +615,7 @@ export async function deleteLearningLibraryItem(id: string) {
     [id]
   );
   if (rows.length > 0) {
+    // Delete detached object payload after metadata deletion succeeds.
     await deleteObject(target?.contentStorageKey);
   }
   return rows.length > 0;

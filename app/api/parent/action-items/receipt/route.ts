@@ -125,6 +125,7 @@ export const POST = createLearningRoute({
       badRequest("skipped status requires note");
     }
     const effectScore = calculateEffectScore({ status, estimatedMinutes });
+    // Effect score is heuristic and intended for trend tracking, not grading.
 
     const receipt = await upsertParentActionReceipt({
       parentId: user.id,
