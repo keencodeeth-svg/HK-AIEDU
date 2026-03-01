@@ -63,6 +63,7 @@ export function createApiRoute<
     const cachePreset = config.cache ?? "private-realtime";
     const headers = buildRouteHeaders(config.domain, cachePreset);
     const roles = normalizeRoles(config.role);
+    // Auth lookup is lazy: only execute when the route declares role constraints.
     const currentUser = roles.length ? await getCurrentUser() : null;
 
     if (roles.length) {
@@ -90,11 +91,13 @@ export function createApiRoute<
     });
 
     if (result instanceof Response) {
+      // Preserve raw Response behavior while enforcing unified domain/cache headers.
       headers.forEach((value, key) => {
         result.headers.set(key, value);
       });
       return result;
     }
+    // Non-Response payloads are wrapped into normalized API envelope.
     const response = apiSuccess(result, {
       requestId: meta.requestId,
       traceId: meta.traceId,

@@ -97,6 +97,7 @@ type ClassScope = {
 };
 
 function matchesClassScope(item: ClassItem, scope?: ClassScope) {
+  // Centralized tenant filter for JSON mode to match DB-mode WHERE school_id semantics.
   if (!scope?.schoolId) return true;
   return (item.schoolId ?? null) === scope.schoolId;
 }
@@ -296,6 +297,7 @@ export async function addStudentToClass(
   studentId: string,
   options?: { enforceSchoolMatch?: boolean }
 ): Promise<boolean> {
+  // Default is strict tenant isolation; selected internal flows can opt out explicitly.
   const enforceSchoolMatch = options?.enforceSchoolMatch ?? true;
   if (!isDbEnabled()) {
     if (enforceSchoolMatch) {
@@ -321,6 +323,7 @@ export async function addStudentToClass(
     return true;
   }
   if (enforceSchoolMatch) {
+    // Resolve both sides in one query to avoid race conditions across separate reads.
     const tenancy = await queryOne<{ class_school_id: string | null; student_school_id: string | null }>(
       `SELECT c.school_id as class_school_id, u.school_id as student_school_id
        FROM classes c
@@ -351,6 +354,7 @@ export async function addStudentToClass(
 }
 
 export async function forceAddStudentToClass(classId: string, studentId: string): Promise<boolean> {
+  // Last-resort idempotent insert used by approval flow to tolerate historical dirty data.
   if (!isDbEnabled()) {
     const classStudents = readJson<ClassStudent[]>(CLASS_STUDENT_FILE, []);
     const exists = classStudents.some((item) => item.classId === classId && item.studentId === studentId);
@@ -475,6 +479,7 @@ export async function createJoinRequest(classId: string, studentId: string): Pro
     `INSERT INTO class_join_requests (id, class_id, student_id, status, created_at)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (class_id, student_id) DO UPDATE SET
+      -- Re-open only rejected requests; approved/pending keep existing status.
        status = CASE WHEN class_join_requests.status = 'rejected' THEN 'pending' ELSE class_join_requests.status END,
        created_at = EXCLUDED.created_at
      RETURNING *`,

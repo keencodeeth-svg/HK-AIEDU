@@ -35,6 +35,7 @@ export async function generateQuestionDraft(payload: GenerateQuestionPayload) {
   });
   if (!llm?.text) return null;
   const parsed = extractJson(llm.text);
+  // Normalize/validate model output before persistence to avoid malformed题目进入题库.
   return normalizeQuestionDraft(parsed);
 }
 
@@ -83,6 +84,7 @@ export async function generateVariantDrafts(payload: {
   count?: number;
   difficulty?: "easy" | "medium" | "hard";
 }): Promise<QuestionDraft[] | null> {
+  // Keep count bounded to control latency/cost and improve structured JSON stability.
   const count = Math.min(Math.max(Number(payload.count) || 2, 1), 4);
   const context = [
     `学科：${payload.subject}`,
@@ -161,6 +163,7 @@ export async function generateQuestionCheck(payload: {
 }
 
 export async function generateKnowledgePointsDraft(payload: GenerateKnowledgePointsPayload) {
+  // Keep count bounded to control latency/cost and improve structured JSON stability.
   const count = Math.min(Math.max(Number(payload.count) || 5, 1), 10);
   const context = [
     `学科：${payload.subject}`,
@@ -204,6 +207,7 @@ export async function generateKnowledgePointsDraft(payload: GenerateKnowledgePoi
 }
 
 export async function generateKnowledgeTreeDraft(payload: GenerateKnowledgeTreePayload) {
+  // Bounds reduce hallucinated tree depth and keep output parseable for bulk import.
   const unitCount = Math.min(Math.max(Number(payload.unitCount) || 6, 1), 12);
   const chaptersPerUnit = Math.min(Math.max(Number(payload.chaptersPerUnit) || 2, 1), 4);
   const pointsPerChapter = Math.min(Math.max(Number(payload.pointsPerChapter) || 4, 2), 8);

@@ -32,6 +32,7 @@ export function evaluateExamRisk(input: {
   score?: number;
   total?: number;
 }) {
+  // Heuristic risk model for MVP anti-cheat; designed for explainability over complexity.
   const antiCheatLevel = input.antiCheatLevel ?? "basic";
   const blurCount = Math.max(0, Number(input.blurCount ?? 0));
   const visibilityHiddenCount = Math.max(0, Number(input.visibilityHiddenCount ?? 0));
@@ -79,6 +80,7 @@ export function evaluateExamRisk(input: {
   }
 
   if (antiCheatLevel === "off") {
+    // Keep signals but lower sensitivity when anti-cheat is disabled.
     riskScore = Math.round(riskScore * 0.8);
   }
 

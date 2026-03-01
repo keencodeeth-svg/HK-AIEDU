@@ -104,6 +104,7 @@ function mapDbPack(row: DbExamReviewPack): ExamReviewPack {
 }
 
 function buildRootCauses(input: { wrongQuestions: ExamReviewWrongQuestion[]; wrongCount: number }) {
+  // Rule-based cause detection keeps output stable and explainable for parents/teachers.
   const causes: string[] = [];
   const unansweredCount = input.wrongQuestions.filter((item) => !item.yourAnswer?.trim()).length;
   const hardCount = input.wrongQuestions.filter((item) => item.difficulty === "hard").length;
@@ -228,6 +229,7 @@ export async function buildExamReviewPack(input: {
   ];
 
   const sevenDayPlan: ExamReviewPlanItem[] = [
+    // Fixed cadence aligned with 24h/72h/7d review rhythm in wrong-question loop.
     { day: 1, title: "D1 错因复盘", focus: "逐题复盘本次错题并整理错因", estimatedMinutes: 20 },
     {
       day: 2,

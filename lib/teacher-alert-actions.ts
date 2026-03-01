@@ -94,6 +94,7 @@ export async function upsertTeacherAlertAction(params: {
     `INSERT INTO teacher_alert_actions (id, teacher_id, alert_id, action_type, detail, created_at)
      VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (teacher_id, alert_id) DO UPDATE SET
+       -- Keep one latest action snapshot per alert for quick dashboard reads.
        action_type = EXCLUDED.action_type,
        detail = EXCLUDED.detail,
        created_at = EXCLUDED.created_at

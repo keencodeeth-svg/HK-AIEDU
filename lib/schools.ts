@@ -43,6 +43,7 @@ function nowIso() {
 }
 
 export function normalizeSchoolCode(code: string) {
+  // Keep school code canonical so API/UI/DB lookups stay case- and symbol-insensitive.
   return code.replace(/[^a-z0-9]/gi, "").toUpperCase();
 }
 
@@ -124,6 +125,7 @@ export async function createSchool(input: { name: string; code?: string }): Prom
 }
 
 export async function ensureDefaultSchool(): Promise<School> {
+  // A stable default tenant lets legacy users/classes without school metadata continue to work.
   const existingById = await getSchoolById(DEFAULT_SCHOOL_ID);
   if (existingById) return existingById;
 
@@ -169,6 +171,7 @@ export async function resolveSchoolIdByCodeOrDefault(input?: {
 }) {
   const schoolCode = input?.schoolCode?.trim();
   if (schoolCode) {
+    // Explicit school code always takes precedence; no implicit remapping.
     const school = await getSchoolByCode(schoolCode);
     return school?.id ?? null;
   }

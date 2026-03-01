@@ -66,6 +66,7 @@ export const POST = createExamRoute({
       blurCountDelta,
       visibilityHiddenCountDelta
     });
+    // Return cumulative counters so client can reconcile local telemetry state.
 
     return {
       data: aggregate

@@ -110,6 +110,7 @@ export const POST = createLearningRoute({
         questionIds: questions.map((item) => item.id)
       });
     } catch {
+      // If quality storage is degraded, keep paper generation available and mark degraded state.
       qualityGovernanceDegraded = true;
       qualityMetrics = [];
     }
@@ -118,6 +119,7 @@ export const POST = createLearningRoute({
     const activePool = includeIsolated ? questions : questions.filter((item) => !isolatedSet.has(item.id));
     const isolatedExcludedCount = includeIsolated ? 0 : questions.length - activePool.length;
     const selectedPool =
+      // If excluding isolation would produce too few questions, fallback to full pool to avoid hard failure.
       !includeIsolated && activePool.length < count && questions.length >= count ? questions : activePool;
     const isolationFallbackUsed = !includeIsolated && selectedPool === questions && activePool.length < count;
     const selected = shuffle(selectedPool).slice(0, count);
@@ -130,6 +132,7 @@ export const POST = createLearningRoute({
       : knowledgePoints.filter((kp) => kp.subject === subject && kp.grade === grade);
 
     if (mode === "ai" && generated.length < count) {
+      // AI only fills shortage after selecting bank questions; bank remains the primary source.
       const missing = count - generated.length;
 
       for (let i = 0; i < missing; i += 1) {
@@ -169,6 +172,7 @@ export const POST = createLearningRoute({
     const aiConfigured = hasConfiguredLlmProvider("chat");
 
     if (result.length === 0) {
+      // Return actionable root causes so teachers can self-recover (filters/knowledge points/model chain).
       const reasons: string[] = [];
       if (questions.length === 0) {
         reasons.push("题库中没有匹配学科/年级/筛选条件的题目");

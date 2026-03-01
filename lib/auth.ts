@@ -130,6 +130,7 @@ export async function createSession(user: User) {
     return { id, expiresAt };
   }
 
+  // Enforce one active session per user to keep cookie/session behavior deterministic.
   await query("DELETE FROM sessions WHERE user_id = $1", [user.id]);
   await query(
     "INSERT INTO sessions (id, user_id, role, expires_at) VALUES ($1, $2, $3, $4)",
@@ -146,6 +147,7 @@ export async function getSessionByToken(token?: string | null) {
     const session = sessions.find((item) => item.id === token);
     if (!session) return null;
     if (new Date(session.expiresAt).getTime() < Date.now()) {
+      // Lazy cleanup: remove expired session at read time to avoid background jobs in MVP mode.
       await removeSession(token);
       return null;
     }
@@ -155,6 +157,7 @@ export async function getSessionByToken(token?: string | null) {
   const row = await queryOne<DbSession>("SELECT * FROM sessions WHERE id = $1", [token]);
   if (!row) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) {
+    // Keep DB and cookie state aligned when an expired token is presented.
     await removeSession(token);
     return null;
   }

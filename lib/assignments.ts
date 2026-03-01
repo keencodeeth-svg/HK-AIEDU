@@ -414,6 +414,7 @@ export async function createAssignment(input: {
     writeJson(ASSIGNMENT_ITEM_FILE, items);
 
     const students = await getClassStudentIds(input.classId);
+    // Pre-create per-student progress to make teacher dashboards immediately consistent.
     for (const studentId of students) {
       await createAssignmentProgress(assignment.id, studentId);
     }
@@ -449,6 +450,7 @@ export async function createAssignment(input: {
   }
 
   const students = await getClassStudentIds(input.classId);
+  // Pre-create per-student progress to make teacher dashboards immediately consistent.
   for (const studentId of students) {
     await createAssignmentProgress(id, studentId);
   }
@@ -476,6 +478,7 @@ export async function completeAssignmentProgress(input: {
   total: number | null;
 }): Promise<AssignmentProgress> {
   const completedAt = new Date().toISOString();
+  // Completion update is idempotent and can be safely retried after submission write.
 
   if (!isDbEnabled()) {
     const list = readJson<AssignmentProgress[]>(ASSIGNMENT_PROGRESS_FILE, []);

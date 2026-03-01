@@ -68,6 +68,7 @@ export const GET = createLearningRoute({
       })
       .sort((a, b) => a.ratio - b.ratio)
       .slice(0, 5);
+    // Insights overview reuses alert engine outputs to keep one consistent risk truth source.
 
     const alertsOverview = await getTeacherAlerts({
       teacherId: user.id,
@@ -168,6 +169,7 @@ export const GET = createLearningRoute({
         activeAlerts: alertsOverview.summary.activeAlerts,
         highRiskAlerts: alertsOverview.summary.highRiskAlerts,
         parentCollaboration: {
+          // Parent collaboration metrics measure advice -> execution -> effect loop.
           totalParentCount: totalParentSet.size,
           activeParentCount7d: activeParentSet.size,
           coveredStudentCount: coveredStudentSet.size,

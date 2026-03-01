@@ -45,6 +45,7 @@ export const POST = createLearningRoute({
     const submissionText = submission?.submissionText?.trim();
 
     if (assignment.submissionType === "quiz") {
+      // Quiz assignments use objective scoring path, not attachment/essay review path.
       badRequest("该作业为在线题目，不支持 AI 批改");
     }
     if (assignment.submissionType === "upload" && !hasUploads) {
@@ -89,6 +90,7 @@ export const POST = createLearningRoute({
     const result = {
       ...review,
       quality,
+      // Surface human-check requirement directly in API response for UI highlighting.
       manualReviewRule: quality.needsHumanReview ? "建议教师先人工复核关键评分项再下发。" : ""
     };
 

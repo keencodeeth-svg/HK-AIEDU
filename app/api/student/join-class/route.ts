@@ -33,6 +33,7 @@ export const POST = createLearningRoute({
       badRequest("missing code");
     }
 
+    // Student join code lookup is tenant-scoped to prevent cross-school join by leaked codes.
     const klass = await getClassByJoinCode(code, user.schoolId ? { schoolId: user.schoolId } : undefined);
     if (!klass) {
       notFound("邀请码无效");
@@ -43,6 +44,7 @@ export const POST = createLearningRoute({
       return { status: "joined", message: "你已在班级中" };
     }
 
+    // Auto-join executes immediately; approval mode enters teacher review queue.
     if (klass.joinMode === "auto") {
       const joined = await addStudentToClass(klass.id, user.id, { enforceSchoolMatch: true });
       if (!joined) {

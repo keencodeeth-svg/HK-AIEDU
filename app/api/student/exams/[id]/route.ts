@@ -69,6 +69,7 @@ export const GET = createExamRoute({
     );
 
     if (!submission && assignment.status !== "submitted" && availability.canEnter) {
+      // Auto-enter marks session in-progress so timing/risk models have a stable start anchor.
       assignment = await markExamAssignmentInProgress({
         paperId: paper.id,
         studentId: user.id

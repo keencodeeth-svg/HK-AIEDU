@@ -42,6 +42,7 @@ export const POST = createAdminRoute({
   const skipped: { index: number; reason: string }[] = [];
 
   const existing = await getKnowledgePoints();
+  // Build full-scope key to prevent cross-batch duplicate imports.
   const existingKeys = new Set(
     existing.map((kp) => normalizeKey(kp.subject, kp.grade, kp.unit ?? "未分单元", kp.chapter, kp.title))
   );

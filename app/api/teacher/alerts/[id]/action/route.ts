@@ -187,6 +187,7 @@ export const POST = createLearningRoute({
     };
 
     if (actionType === "mark_done") {
+      // mark_done only acknowledges alert, without creating remediation tasks.
       acknowledgedAt = await acknowledgeAction();
       status = "acknowledged";
     } else if (actionType === "notify_student") {
@@ -194,6 +195,7 @@ export const POST = createLearningRoute({
     } else if (actionType === "assign_review") {
       await assignReviewTasks();
     } else if (actionType === "auto_chain") {
+      // auto_chain performs full loop: task assignment + reminder + acknowledge.
       await assignReviewTasks();
       await sendReminderNotifications();
       acknowledgedAt = await acknowledgeAction();
@@ -230,6 +232,7 @@ export const POST = createLearningRoute({
           }
         })
       : null;
+    // Persist baseline snapshot for 24h/72h impact tracking.
 
     await addAdminLog({
       adminId: user.id,

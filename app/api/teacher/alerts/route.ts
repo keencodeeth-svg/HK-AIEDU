@@ -30,6 +30,7 @@ export const GET = createLearningRoute({
     }
 
     const includeAcknowledged = query.includeAcknowledged !== "false";
+    // Include acknowledged by default so teachers can audit handled alerts.
     const overview = await getTeacherAlerts({
       teacherId: user.id,
       classId,

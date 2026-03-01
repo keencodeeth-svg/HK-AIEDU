@@ -51,6 +51,7 @@ export const POST = createAdminRoute({
     const existing = (await getKnowledgePoints()).filter(
       (kp) => kp.subject === subject && kp.grade === grade
     );
+    // Deduplicate by title+chapter before persistence to avoid repeated AI artifacts.
     const existingKeys = new Set(existing.map((kp) => normalizeKey(kp.title, kp.chapter)));
 
     const created: Array<{ id: string }> = [];

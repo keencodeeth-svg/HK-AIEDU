@@ -51,6 +51,8 @@ export const POST = createLearningRoute({
     await decideJoinRequest(record.id, "approved");
     let joined = await addStudentToClass(record.classId, record.studentId, { enforceSchoolMatch: true });
     if (!joined) {
+      // Backward-compatible recovery path for legacy records:
+      // 1) check existing membership, 2) retry without strict match, 3) force idempotent insert.
       const existingStudentIds = await getClassStudentIds(record.classId);
       const alreadyInClass = existingStudentIds.includes(record.studentId);
       if (!alreadyInClass) {

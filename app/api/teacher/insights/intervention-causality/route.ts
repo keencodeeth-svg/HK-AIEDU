@@ -25,8 +25,8 @@ export const GET = createLearningRoute({
       classId: query.classId,
       days: query.days
     });
+    // Report quantifies action -> execution -> score change for intervention ROI tracking.
 
     return { data: report };
   }
 });
-

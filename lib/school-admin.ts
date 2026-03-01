@@ -76,6 +76,7 @@ export async function getSchoolOverview(schoolId: string): Promise<SchoolOvervie
   }
 
   const rows = await query<DbOverviewRow>(
+    // Single-roundtrip aggregate query keeps dashboard response stable and cheap.
     `SELECT
       (SELECT COUNT(*) FROM users WHERE school_id = $1 AND role = 'teacher') as teacher_count,
       (SELECT COUNT(*) FROM users WHERE school_id = $1 AND role = 'student') as student_count,
@@ -121,6 +122,7 @@ export async function listSchoolUsers(
         [schoolId, role]
       )
     : await query<DbSchoolUser>(
+        // Restrict to explicit roles so tenant user APIs never leak platform-admin accounts.
         `SELECT id, name, email, role, grade, created_at
          FROM users
          WHERE school_id = $1 AND role = ANY($2)
@@ -159,6 +161,7 @@ export async function listSchoolClasses(schoolId: string): Promise<SchoolClassRe
   }
 
   const rows = await query<DbSchoolClass>(
+    // Count DISTINCT to avoid over-counting from joins with both students and assignments.
     `SELECT
       c.id,
       c.name,

@@ -207,6 +207,7 @@ export async function upsertTeacherAlertImpact(input: {
       (id, action_id, teacher_id, alert_id, class_id, student_ids, baseline, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (action_id) DO UPDATE SET
+       -- One impact baseline per action id to keep longitudinal comparisons stable.
        teacher_id = EXCLUDED.teacher_id,
        alert_id = EXCLUDED.alert_id,
        class_id = EXCLUDED.class_id,
@@ -307,6 +308,7 @@ export function buildTeacherAlertImpactReport(params: {
   current: CurrentAlertSnapshot | null;
 }): TeacherAlertImpactReport {
   if (!params.record) {
+    // Untracked actions still return a normalized shape so UI can render deterministically.
     return {
       tracked: false,
       actionId: null,

@@ -87,6 +87,7 @@ function parseAlertId(alertId: string, classIds: string[]): ParsedAlertTarget | 
       if (!body.startsWith(`${classId}-`)) continue;
       const tail = body.slice(classId.length + 1);
       if (!tail) continue;
+      // Alert id embeds target metadata; parse to recover target set without extra storage.
       if (type === "student-risk") {
         return { type, classId, studentId: tail } satisfies ParsedAlertTarget;
       }
@@ -248,11 +249,13 @@ export async function buildInterventionCausalityReport(params: {
           const ts = toTs(attempt.createdAt);
           if (!Number.isFinite(ts)) return;
           if (ts >= actionTs - effectWindowMs && ts < actionTs) {
+            // Pre window: baseline evidence before intervention.
             preTotal += 1;
             preCorrect += attempt.correct ? 1 : 0;
             return;
           }
           if (ts >= actionTs && ts <= windowEndTs) {
+            // Post window: impact evidence after intervention.
             postTotal += 1;
             postCorrect += attempt.correct ? 1 : 0;
           }

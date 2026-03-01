@@ -42,6 +42,7 @@ export const POST = createLearningRoute({
         overdueDays: 0,
         includeParents: true
       };
+      // When no custom rule exists, use conservative default reminder policy.
       if (!rule.enabled) continue;
       const assignments = await getAssignmentsByClass(klass.id);
       const studentIds = await getClassStudentIds(klass.id);
@@ -71,6 +72,7 @@ export const POST = createLearningRoute({
           sentStudents += 1;
 
           if (rule.includeParents) {
+            // Parent reminders are optional and controlled by class-level notification rule.
             const parents = await getParentsByStudentId(studentId);
             for (const parent of parents) {
               await createNotification({ userId: parent.id, title, content, type });

@@ -34,6 +34,7 @@ export const POST = createAiRoute({
       subject: body.subject,
       grade: body.grade
     });
+    // Route-level quality snapshot feeds runtime observability and admin diagnostics.
     const quality = assessAiQuality({
       kind: "assist",
       taskType: "assist",

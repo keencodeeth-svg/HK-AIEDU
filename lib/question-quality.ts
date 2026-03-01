@@ -64,6 +64,7 @@ function clampInt(value: number, min = 0, max = 100) {
 }
 
 function normalizeText(text: string) {
+  // Canonical text for fuzzy duplicate detection (ignore whitespace/punctuation noise).
   return text
     .toLowerCase()
     .replace(/\s+/g, "")
@@ -92,6 +93,7 @@ function buildCharSet(text: string) {
 }
 
 function calcSimilarity(a: string, b: string) {
+  // Lightweight character-set overlap keeps quality checks fast without external NLP dependencies.
   const setA = buildCharSet(a);
   const setB = buildCharSet(b);
   if (!setA.size || !setB.size) return 0;
@@ -193,6 +195,7 @@ function upsertQualityMetricToFile(metric: QuestionQualityMetric) {
 }
 
 function isRecoverableQualityStoreError(error: unknown) {
+  // Gracefully degrade when quality-metrics table is not migrated yet.
   const message = error instanceof Error ? error.message : String(error ?? "");
   const lower = message.toLowerCase();
   return (
@@ -348,6 +351,7 @@ export function evaluateQuestionQuality(
   answerConsistency = clampInt(answerConsistency);
 
   const comparableCandidates = candidates.filter((candidate) => {
+    // Duplicate/conflict checks compare within same subject/grade to reduce false positives.
     if (input.subject && candidate.subject !== input.subject) return false;
     if (input.grade && candidate.grade !== input.grade) return false;
     return true;
@@ -380,6 +384,7 @@ export function evaluateQuestionQuality(
     answerConsistency,
     answerConflict: duplicate.answerConflict
   });
+  // High-risk items are isolated by default and surfaced to admin for manual review.
   const isolated = riskLevel === "high";
   const isolationReason = buildIsolationReason({
     riskLevel,
@@ -419,6 +424,7 @@ export async function getQuestionQualityMetric(questionId: string) {
     if (!isRecoverableQualityStoreError(error)) {
       throw error;
     }
+    // Temporary file fallback keeps admin quality governance available in degraded environments.
     const list = readQualityMetricsFromFile();
     return list.find((item) => item.questionId === questionId) ?? null;
   }
@@ -467,6 +473,7 @@ export async function listQuestionQualityMetrics(params: {
     if (!isRecoverableQualityStoreError(error)) {
       throw error;
     }
+    // Temporary file fallback keeps admin quality governance available in degraded environments.
     const list = readQualityMetricsFromFile();
     const filtered = list.filter((item) => {
       if (ids && !ids.includes(item.questionId)) return false;
@@ -566,6 +573,7 @@ export async function upsertQuestionQualityMetric(
     if (!isRecoverableQualityStoreError(error)) {
       throw error;
     }
+    // Temporary file fallback keeps admin quality governance available in degraded environments.
     upsertQualityMetricToFile(fallbackMetric);
     return fallbackMetric;
   }
@@ -648,6 +656,7 @@ export async function deleteQuestionQualityMetric(questionId: string) {
     if (!isRecoverableQualityStoreError(error)) {
       throw error;
     }
+    // Temporary file fallback keeps admin quality governance available in degraded environments.
     const list = readQualityMetricsFromFile();
     const next = list.filter((item) => item.questionId !== questionId);
     try {

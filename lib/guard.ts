@@ -33,6 +33,7 @@ export function assertSameSchool(
   user: { role: UserRole; schoolId?: string },
   resourceSchoolId: string | null | undefined
 ) {
+  // Platform admin can operate cross-tenant; all other roles are school-scoped.
   if (user.role === "admin") return;
   if (!resourceSchoolId || !user.schoolId || user.schoolId !== resourceSchoolId) {
     forbidden("跨学校访问已禁止");

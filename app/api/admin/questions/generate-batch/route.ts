@@ -91,6 +91,7 @@ export const POST = createAdminRoute({
     let attempts = 0;
 
     while (!draft && attempts < 3) {
+      // Retry a few times to avoid duplicate stems from stochastic model sampling.
       attempts += 1;
       const next = await generateQuestionDraft({
         subject,
@@ -136,6 +137,7 @@ export const POST = createAdminRoute({
       question: next,
       candidates: qualityCandidates
     });
+    // Feed newly created question back into candidate pool to reduce same-batch duplicates/conflicts.
     qualityCandidates.push(next);
     created.push({
       id: next.id,

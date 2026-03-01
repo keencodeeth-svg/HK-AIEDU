@@ -89,6 +89,7 @@ export const POST = createLearningRoute({
         summary: summaryLine,
         weakPoints: weakPoints.map((item) => item.title)
       })) ?? {
+        // Deterministic fallback keeps report endpoint usable when model chain is unavailable.
         report: `本阶段共覆盖 ${studentIds.length} 名学生，作业完成率 ${completionRate}%，总体正确率 ${accuracy}%。建议聚焦薄弱知识点并安排针对练习。`,
         highlights: [`作业完成率 ${completionRate}%`, `总体正确率 ${accuracy}%`],
         reminders: weakPoints.map((item) => `重点关注：${item.title}`)

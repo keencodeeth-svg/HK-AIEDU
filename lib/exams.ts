@@ -340,9 +340,11 @@ export async function ensureExamAssignmentsForPaper(paperId: string): Promise<Ex
   if (!paper) return [];
 
   if (paper.publishMode === "targeted") {
+    // Targeted publish already writes explicit assignees; do not auto-expand by class roster.
     return getExamAssignmentsByPaper(paperId);
   }
 
+  // Teacher-assigned mode lazily syncs assignments with current class roster.
   const students = await getClassStudentIds(paper.classId);
   if (!students.length) {
     return getExamAssignmentsByPaper(paperId);
@@ -483,6 +485,7 @@ export async function createAndPublishExam(input: {
   const now = new Date().toISOString();
   const id = `exam-paper-${crypto.randomBytes(6).toString("hex")}`;
   const scorePerQuestion = Math.max(1, Number(input.scorePerQuestion ?? 1));
+  // Keep exam paper deterministic even if caller passes duplicate questionIds/studentIds.
   const uniqueQuestionIds = Array.from(new Set(input.questionIds)).filter((questionId) => questionId.trim());
   const publishMode = input.publishMode ?? "teacher_assigned";
   const antiCheatLevel = input.antiCheatLevel ?? "basic";
@@ -521,6 +524,7 @@ export async function createAndPublishExam(input: {
     writeJson(EXAM_PAPER_ITEM_FILE, items);
 
     const students = await getClassStudentIds(input.classId);
+    // Guard against stale/invalid student ids by intersecting with class membership.
     const targetStudents =
       publishMode === "targeted" ? assignedStudentIds.filter((id) => students.includes(id)) : students;
     if (targetStudents.length) {
@@ -583,6 +587,7 @@ export async function createAndPublishExam(input: {
   }
 
   const students = await getClassStudentIds(input.classId);
+  // Guard against stale/invalid student ids by intersecting with class membership.
   const targetStudents =
     publishMode === "targeted" ? assignedStudentIds.filter((id) => students.includes(id)) : students;
   for (const studentId of targetStudents) {
@@ -634,6 +639,7 @@ export async function markExamAssignmentInProgress(input: {
   const now = new Date().toISOString();
   const existing = await ensureExamAssignment(input.paperId, input.studentId);
   if (existing.status === "submitted") {
+    // Submitted is terminal: autosave/enter exam must not reopen finished attempts.
     return existing;
   }
 
@@ -687,6 +693,7 @@ export async function markExamAssignmentSubmitted(input: {
 }): Promise<ExamAssignment> {
   const now = new Date().toISOString();
   const existing = await ensureExamAssignment(input.paperId, input.studentId);
+  // Submission write also stamps final scoring snapshot onto assignment for teacher dashboards.
 
   if (!isDbEnabled()) {
     const list = readJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, []);
@@ -757,6 +764,7 @@ export async function upsertExamSubmission(input: {
   total: number;
 }): Promise<ExamSubmission> {
   const submittedAt = new Date().toISOString();
+  // Idempotent upsert allows repeated submit requests without creating duplicate attempts.
 
   if (!isDbEnabled()) {
     const list = readJson<ExamSubmission[]>(EXAM_SUBMISSION_FILE, []);

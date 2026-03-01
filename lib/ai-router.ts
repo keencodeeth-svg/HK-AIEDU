@@ -33,6 +33,7 @@ function normalizeMessageContentToText(content: string | any[]) {
 }
 
 function buildCustomPrompt(messages: ChatMessage[]) {
+  // Fallback prompt format for custom endpoints that do not support chat-completions schema.
   return messages
     .map((item) => `${item.role.toUpperCase()}: ${normalizeMessageContentToText(item.content)}`)
     .join("\n")
@@ -87,6 +88,7 @@ async function runWithTimeout<T>(runner: () => Promise<T>, timeoutMs: number) {
       error: error instanceof Error ? error.message : "runner error"
     }));
   const timeout = new Promise<{ value: T | null; timeout: true; error: string }>((resolve) => {
+    // Hard timeout keeps one slow provider from blocking the whole fallback chain.
     setTimeout(() => resolve({ value: null, timeout: true, error: "timeout" }), timeoutMs);
   });
   return Promise.race([wrapped, timeout]);
@@ -159,7 +161,7 @@ function recordAiCallLogSafe(input: Parameters<typeof recordAiCallLog>[0]) {
   try {
     recordAiCallLog(input);
   } catch {
-    // observability should never block ai business flow
+    // Observability failures must never block business responses.
   }
 }
 
@@ -325,6 +327,7 @@ export async function callRoutedLLM(params: {
   const timeoutMs = policy.timeoutMs;
 
   if (requestChars > policy.budgetLimit) {
+    // Reject over-budget requests early so we do not burn provider quota on huge prompts.
     recordAiCallLogSafe({
       taskType,
       provider: "policy",
@@ -344,6 +347,7 @@ export async function callRoutedLLM(params: {
 
   for (let providerIndex = 0; providerIndex < chain.length; providerIndex += 1) {
     const provider = chain[providerIndex];
+    // "mock" is a diagnostic-only provider, never used for production answer generation.
     if (provider === "mock") continue;
 
     for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -377,6 +381,7 @@ export async function callRoutedLLM(params: {
       }
 
       if (outcome.stopProvider) {
+        // Timeout/quality-rejection on one provider skips retries and moves to next provider.
         break;
       }
     }
@@ -406,6 +411,7 @@ export async function probeLlmProviders(input: {
     }
 
     const startedAt = Date.now();
+    // Probe intentionally routes through the same runtime path as real traffic.
     const response = await callRoutedLLM({
       chain: [provider],
       taskType: "probe",

@@ -38,6 +38,7 @@ export const GET = createLearningRoute({
     const scored = progress.filter(
       (item) => typeof item.score === "number" && typeof item.total === "number" && (item.total ?? 0) > 0
     );
+    // Aggregate by ratio so mixed total-score assignments remain comparable.
     const scoreSum = scored.reduce((sum, item) => sum + (item.score ?? 0), 0);
     const totalSum = scored.reduce((sum, item) => sum + (item.total ?? 0), 0);
     const avgScore = totalSum ? Math.round((scoreSum / totalSum) * 100) : 0;
@@ -65,6 +66,7 @@ export const GET = createLearningRoute({
 
     let questionStats: Array<{ id: string; stem: string; correct: number; total: number; ratio: number }> = [];
     if (assignment.submissionType === "quiz") {
+      // Per-question stats only apply to objective quiz assignments.
       const items = await getAssignmentItems(assignment.id);
       const questions = await getQuestions();
       const questionMap = new Map(questions.map((item) => [item.id, item]));

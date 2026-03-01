@@ -45,6 +45,7 @@ function buildCoachMemorySnapshot(params: {
   subject?: string;
   grade?: string;
 }): CoachMemorySnapshot {
+  // Memory is scoped by subject/grade so hints do not leak across learning contexts.
   const scoped = params.history.filter((item) => {
     if (!item.tags?.includes("coach_session")) return false;
     const subjectTag = getTagValue(item.tags, "subject:");
@@ -114,6 +115,7 @@ export const POST = createAiRoute({
         };
       }
     } else {
+      // Non-student roles can use coach but do not persist long-term learning memory.
       memorySnapshot = {
         recentSessionCount: 0,
         recentQuestions: [],
@@ -163,7 +165,7 @@ export const POST = createAiRoute({
           tags
         });
       } catch {
-        // ignore history write failure to keep coach path available
+        // History persistence failure should not block real-time coaching.
       }
     }
 

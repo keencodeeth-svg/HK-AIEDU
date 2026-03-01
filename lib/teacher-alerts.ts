@@ -124,6 +124,7 @@ type DbAlertAck = {
 const ALERT_ACK_FILE = "teacher-alert-acks.json";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RECENT_WINDOW_DAYS = 7;
+// Unified threshold so student-risk and knowledge-risk alerts share one trigger baseline.
 const ALERT_TRIGGER_SCORE = 40;
 
 function clamp(value: number, min: number, max: number) {
@@ -229,6 +230,7 @@ export async function getTeacherAlerts(params: {
   classId?: string;
   includeAcknowledged?: boolean;
 }) {
+  // Default includes acknowledged alerts so dashboards can show full handling history.
   const includeAcknowledged = params.includeAcknowledged !== false;
   const allClasses = await getClassesByTeacher(params.teacherId);
   const targetClasses = params.classId
@@ -472,6 +474,7 @@ export async function getTeacherAlerts(params: {
       classRiskScores.push(score);
 
       if (score < ALERT_TRIGGER_SCORE) {
+        // Below threshold remains visible in raw metrics but does not materialize as alert item.
         return;
       }
 
@@ -554,6 +557,7 @@ export async function getTeacherAlerts(params: {
     Array.from(kpStats.entries())
       .map(([kpId, stat]) => {
         const ratio = calcAccuracy(stat.correct, stat.total);
+        // Knowledge-point risk prioritizes low accuracy with enough sample size.
         const riskScore = clamp(Math.round((75 - ratio) * 1.6 + Math.min(20, stat.total)), 0, 100);
         return { kpId, ratio, total: stat.total, riskScore };
       })
@@ -652,6 +656,7 @@ export async function getTeacherAlerts(params: {
         ackNote: ack.note ?? null
       };
     })
+    // Active alerts come first, then acknowledged alerts by risk score.
     .filter((alert) => includeAcknowledged || alert.status === "active")
     .sort((a, b) => {
       if (a.status !== b.status) return a.status === "active" ? -1 : 1;

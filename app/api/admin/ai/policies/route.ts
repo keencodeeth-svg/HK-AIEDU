@@ -76,6 +76,7 @@ const updateBodySchema = v.object<{
 );
 
 async function buildPayload() {
+  // Force refresh so admin panel always reads latest policy (DB/file) snapshot.
   await refreshAiTaskPolicies();
   return {
     tasks: listAiTaskOptions(),
@@ -105,6 +106,7 @@ export const POST = createAdminRoute({
     const body = await parseJson(request, updateBodySchema);
 
     if (body.reset) {
+      // Reset supports per-task or full reset depending on taskType presence.
       const taskType = asTaskType(body.taskType);
       if (body.taskType && !taskType) {
         badRequest("invalid taskType");
@@ -121,6 +123,7 @@ export const POST = createAdminRoute({
     }
 
     if (body.policies?.length) {
+      // Batch update reduces panel round-trips and keeps policy changes atomic at UI level.
       const validPolicies = body.policies.map((item, index) => {
         const taskType = asTaskType(item.taskType);
         if (!taskType) {

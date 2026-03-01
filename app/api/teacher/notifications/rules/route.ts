@@ -32,6 +32,7 @@ export const GET = createLearningRoute({
 
     const classes = await getClassesByTeacher(user.id);
     const rules = await getRulesByClassIds(classes.map((item) => item.id));
+    // Rules are returned per teacher-owned class; missing class rules use runtime defaults.
     return { classes, rules };
   }
 });
@@ -57,6 +58,7 @@ export const POST = createLearningRoute({
       overdueDays: Number(body.overdueDays ?? 0),
       includeParents: body.includeParents ?? true
     });
+    // Upsert keeps one latest reminder rule per class.
     return { data: rule };
   }
 });

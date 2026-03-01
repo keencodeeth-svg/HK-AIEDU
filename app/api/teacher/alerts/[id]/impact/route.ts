@@ -50,6 +50,7 @@ export const GET = createLearningRoute({
           }
         : null
     });
+    // Impact endpoint merges saved baseline and latest alert snapshot into one report.
 
     return {
       data: {

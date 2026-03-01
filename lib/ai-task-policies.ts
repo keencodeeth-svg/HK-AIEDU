@@ -240,6 +240,7 @@ async function syncPolicyStoreFromDb(force = false) {
 
   const now = Date.now();
   if (!force && policyStoreCacheSyncedAt && now - policyStoreCacheSyncedAt < POLICY_STORE_CACHE_TTL_MS) {
+    // Short TTL avoids per-request DB hits while keeping policy edits near-real-time.
     return;
   }
   if (policyStoreSyncing) {
@@ -254,6 +255,7 @@ async function syncPolicyStoreFromDb(force = false) {
       );
       const nextStore: AiTaskPolicyStore = {};
       if (!rows.length) {
+        // First DB boot: migrate file-based policy history into table to preserve prior tuning.
         const fileStore = readPolicyStoreFromFile();
         const entries = Object.entries(fileStore) as Array<[AiTaskType, AiTaskPolicyRecord]>;
         await Promise.all(
@@ -521,6 +523,7 @@ export function recordAiCallLog(input: Omit<AiCallLog, "id" | "createdAt">) {
   if (!isDbEnabled()) {
     const list = readJson<AiCallLog[]>(AI_CALL_LOGS_FILE, []);
     list.push(item);
+    // Keep bounded local logs to avoid unbounded json growth in file-mode deployments.
     const next = list.length > MAX_CALL_LOGS ? list.slice(list.length - MAX_CALL_LOGS) : list;
     writeJson(AI_CALL_LOGS_FILE, next);
     return;

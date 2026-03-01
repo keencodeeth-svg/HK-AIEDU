@@ -88,6 +88,7 @@ export const GET = createExamRoute({
 
   const data = await Promise.all(
     papers.map(async (paper) => {
+      // Ensure assignment rows are backfilled before computing teacher dashboard metrics.
       const assignments = await ensureExamAssignmentsForPaper(paper.id);
       const submitted = assignments.filter((item) => item.status === "submitted").length;
       const scored = assignments.filter(
@@ -164,6 +165,7 @@ export const POST = createExamRoute({
       const isolatedSelected = questionIds.filter((id) => isolatedSet.has(id));
       isolatedExcludedCount = isolatedSelected.length;
       if (isolatedSelected.length) {
+        // Explicit questionIds must respect isolation policy unless teacher opts in.
         badRequest(`题目包含隔离池高风险题（${isolatedSelected.length} 题），请先移除或显式开启 includeIsolated`);
       }
     }
@@ -186,6 +188,7 @@ export const POST = createExamRoute({
     isolatedExcludedCount = includeIsolated ? 0 : pool.length - activePool.length;
     const selectedPool =
       !includeIsolated && activePool.length < count && pool.length >= count ? pool : activePool;
+    // Shortage fallback avoids hard failure when non-isolated pool is temporarily too small.
     isolationFallbackUsed = !includeIsolated && selectedPool === pool && activePool.length < count;
     if (selectedPool.length < count) {
       badRequest("题库数量不足，无法生成考试");
@@ -197,6 +200,7 @@ export const POST = createExamRoute({
   const publishMode = body.publishMode ?? "teacher_assigned";
   const targetStudentIds = Array.from(new Set(body.studentIds ?? []));
   if (publishMode === "targeted") {
+    // Targeted mode must stay within current class roster for tenant/class isolation.
     if (!targetStudentIds.length) {
       badRequest("studentIds required when publishMode is targeted");
     }

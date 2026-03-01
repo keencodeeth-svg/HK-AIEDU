@@ -58,6 +58,7 @@ function assertExamTimeNotExceeded(input: {
       : Number.POSITIVE_INFINITY;
   const effectiveDeadline = Math.min(endDeadline, durationDeadline);
   const graceMs = Math.max(0, Number(input.graceMs ?? 0));
+  // Dual-deadline: both global endAt and per-student duration can close autosave.
   if (Number.isFinite(effectiveDeadline) && now > effectiveDeadline + graceMs) {
     badRequest("考试作答时间已结束");
   }
@@ -117,6 +118,7 @@ export const POST = createExamRoute({
       studentId: user.id,
       answers
     });
+    // Transition to in_progress on first autosave to anchor startedAt for timing/risk analysis.
     const assignment = await markExamAssignmentInProgress({
       paperId: paper.id,
       studentId: user.id

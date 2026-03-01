@@ -453,6 +453,7 @@ export async function generateAssistAnswer(payload: AssistPayload): Promise<Assi
     customPrompt: `${SYSTEM_PROMPT}\n${userPrompt}`
   });
   if (llm?.text) {
+    // Primary path: routed model answer + light structured scaffolding for UI rendering.
     return {
       answer: llm.text,
       steps: ["识别题干关键点", "匹配知识点", "给出清晰步骤"],
@@ -464,6 +465,7 @@ export async function generateAssistAnswer(payload: AssistPayload): Promise<Assi
   }
 
   if (relatedQuestion) {
+    // Secondary path: retrieval fallback when model chain is unavailable.
     return {
       answer: relatedQuestion.explanation,
       steps: ["看清题目条件", "列出关键关系", "逐步计算"],
@@ -474,6 +476,7 @@ export async function generateAssistAnswer(payload: AssistPayload): Promise<Assi
   }
 
   const kpNames = relatedKps.map((kp) => kp.title);
+  // Last-resort fallback keeps tutoring endpoint usable even without model + retrieval hit.
   const fallback = kpNames.length
     ? `这道题可能属于：${kpNames.join("、")}。建议先回顾该知识点，再按步骤解题。`
     : "先找出题目中的数量关系，然后一步步推理。";

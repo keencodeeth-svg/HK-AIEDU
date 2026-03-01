@@ -43,6 +43,7 @@ export const POST = createAdminRoute({
   }
 
   const deduped = new Map<string, { subject: string; grade: string }>();
+  // Normalize subject-grade pairs so preview generation stays idempotent for repeated inputs.
   combos.forEach((combo) => {
     if (!isAllowedSubject(combo.subject)) return;
     const key = `${combo.subject}|${combo.grade}`;
@@ -58,6 +59,7 @@ export const POST = createAdminRoute({
   const failed: { subject: string; grade: string; reason: string }[] = [];
 
   for (const combo of combos) {
+    // Preview endpoint only returns generated tree draft; no persistence side-effects.
     const draft = await generateKnowledgeTreeDraft({
       subject: combo.subject,
       grade: combo.grade,

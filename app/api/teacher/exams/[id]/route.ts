@@ -55,6 +55,7 @@ export const GET = createExamRoute({
             new Set([...assignmentMap.keys(), ...submissionMap.keys(), ...eventMap.keys()]).values()
           )
         : students.map((student) => student.id);
+    // Targeted mode roster is derived from observed records to remain backward-compatible.
 
     const roster = targetStudentIds
       .map((studentId) => {
@@ -165,6 +166,7 @@ export const PATCH = createExamRoute({
     }
 
     const body = await parseJson(request, updateStatusBodySchema);
+    // Only state mutation allowed here is close/reopen; question roster remains immutable.
     const nextStatus = body.action === "close" ? "closed" : "published";
     if (paper.status === nextStatus) {
       badRequest(nextStatus === "closed" ? "考试已关闭" : "考试已开放");

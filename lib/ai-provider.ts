@@ -33,6 +33,7 @@ export type LlmProviderHealth = {
 };
 
 const PROVIDER_PREFIX: Record<Exclude<LlmProvider, "mock" | "custom" | "compatible">, string> = {
+  // Unified env namespace per provider, e.g. DEEPSEEK_API_KEY / KIMI_MODEL.
   zhipu: "ZHIPU",
   deepseek: "DEEPSEEK",
   kimi: "KIMI",
@@ -220,6 +221,7 @@ function getProviderCapabilityHealth(
 export function getLlmProviderHealth(input: { providers?: string[] } = {}) {
   const normalized = normalizeProviderChain(input.providers);
   const providers = normalized.length
+    // Health endpoint checks all known providers when no explicit chain is passed in.
     ? normalized
     : (["zhipu", "deepseek", "kimi", "minimax", "seedance", "compatible", "custom", "mock"] as LlmProvider[]);
 
@@ -256,11 +258,13 @@ export function getProviderConfig(
   const defaults = PROVIDER_DEFAULTS[provider];
   const baseUrl = firstNonEmpty(
     process.env[`${prefix}_BASE_URL`],
+    // Keep legacy zhipu deployments working via generic LLM_* fallback.
     provider === "zhipu" ? process.env.LLM_BASE_URL : "",
     defaults.baseUrl
   );
   const apiKey = firstNonEmpty(
     process.env[`${prefix}_API_KEY`],
+    // Keep legacy zhipu deployments working via generic LLM_* fallback.
     provider === "zhipu" ? process.env.LLM_API_KEY : ""
   );
   const model = firstNonEmpty(

@@ -92,6 +92,7 @@ export const GET = createLearningRoute({
     const data = await Promise.all(
       assignments.map(async (assignment) => {
         const progress = await getAssignmentProgress(assignment.id);
+        // Keep completion stats derived from progress table to match student-side状态机.
         const completed = progress.filter((item) => item.status === "completed").length;
         const klass = classMap.get(assignment.classId);
         const moduleTitle = assignment.moduleId ? moduleMap.get(assignment.moduleId)?.title ?? "" : "";
@@ -151,6 +152,7 @@ export const POST = createLearningRoute({
 
     if (submissionType === "quiz" && mode === "ai") {
       if (!hasConfiguredLlmProvider("chat")) {
+        // Graceful fallback: keep teacher workflow available when model chain is unavailable.
         fallbackMode = "bank";
       }
     }
@@ -186,6 +188,7 @@ export const POST = createLearningRoute({
         let draft = null;
         let attempts = 0;
         while (!draft && attempts < 3) {
+          // Retry a few times to avoid duplicate stems from stochastic generation.
           attempts += 1;
           const next = await generateQuestionDraft({
             subject: klass.subject,
@@ -248,6 +251,7 @@ export const POST = createLearningRoute({
         badRequest(hint);
       }
 
+      // Bank mode is deterministic random sampling from current filtered pool.
       const selected = sampleQuestions(pool, questionCount);
       questionIds = selected.map((item) => item.id);
     }
@@ -265,6 +269,7 @@ export const POST = createLearningRoute({
     });
 
     const studentIds = await getClassStudentIds(klass.id);
+    // Notify both students and parents to close assignment delivery loop.
     for (const studentId of studentIds) {
       await createNotification({
         userId: studentId,

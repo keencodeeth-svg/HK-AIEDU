@@ -46,6 +46,7 @@ export const GET = createExamRoute({
             new Set([...assignmentMap.keys(), ...submissionMap.keys(), ...eventMap.keys()]).values()
           )
         : students.map((student) => student.id);
+    // Export includes anti-cheat counters for post-exam audit and follow-up interviews.
 
     const header = ["学生姓名", "邮箱", "状态", "得分", "总分", "得分率", "提交时间", "离屏次数", "切屏次数"];
     const rows = targetStudentIds

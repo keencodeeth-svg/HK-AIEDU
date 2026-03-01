@@ -51,6 +51,7 @@ export const POST = createAdminRoute({
     const existing = (await getKnowledgePoints()).filter(
       (kp) => kp.subject === subject && kp.grade === grade
     );
+    // Deduplicate at unit+chapter+title granularity to protect imported historical trees.
     const existingKeys = new Set(existing.map((kp) => normalizeKey(kp.unit ?? "未分单元", kp.chapter, kp.title)));
 
     const created: Array<{ id: string }> = [];

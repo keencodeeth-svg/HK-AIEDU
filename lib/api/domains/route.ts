@@ -21,6 +21,7 @@ export type DomainRouteConfig<
 };
 
 export function createDomainRoute(domain: ApiDomain) {
+  // Domain wrapper centralizes cache/security conventions and tags route ownership.
   return function <
     TParams extends Record<string, string> = Record<string, string>,
     TQuery = Record<string, never>,
@@ -33,4 +34,3 @@ export function createDomainRoute(domain: ApiDomain) {
     });
   };
 }
-

@@ -40,6 +40,7 @@ export const POST = createAdminRoute({
       allQuestions
     );
 
+    // Persist metric when questionId is provided so quality panel can query latest governance state.
     const metric = await upsertQuestionQualityMetric({
       questionId: question.id,
       ...snapshot
@@ -78,6 +79,7 @@ export const POST = createAdminRoute({
     },
     allQuestions
   );
+  // Ad-hoc preview mode: evaluate arbitrary draft without writing persistence.
 
     return {
       data: {

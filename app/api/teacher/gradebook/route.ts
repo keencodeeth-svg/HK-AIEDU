@@ -54,6 +54,7 @@ export const GET = createLearningRoute({
       const dueTime = new Date(assignment.dueDate).getTime();
       const pending = total - completed;
       const overdue = dueTime < now ? pending : 0;
+      // Overdue is derived from unfinished students at current time, not historical due misses.
       return { assignmentId: assignment.id, completed, total, overdue };
     });
 
@@ -93,6 +94,7 @@ export const GET = createLearningRoute({
           typeof record?.total === "number" &&
           record.total > 0
         ) {
+          // Gradebook averages are quiz-only to avoid mixing upload/essay scoring scales.
           studentScore += record.score;
           studentTotal += record.total;
         }
@@ -159,6 +161,7 @@ export const GET = createLearningRoute({
         };
       })
       .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+    // Trend is ordered by due date to reflect teacher planning timeline.
 
     return {
       classes,

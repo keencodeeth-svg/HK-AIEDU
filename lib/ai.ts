@@ -58,6 +58,7 @@ function getProviderChain() {
   if (normalized.length) {
     return normalized;
   }
+  // Keep runtime alive even when config is empty: caller still gets deterministic fallback.
   return ["mock"] as LlmProvider[];
 }
 
@@ -70,6 +71,7 @@ export function getCurrentLlmProviderChain() {
 }
 
 export function hasConfiguredLlmProvider(capability: LlmCapability = "chat") {
+  // "mock" does not count as configured provider for business features requiring real generation.
   return getProviderChain().some((provider) => {
     if (provider === "mock") return false;
     if (provider === "custom") {

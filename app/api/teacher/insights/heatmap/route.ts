@@ -68,6 +68,7 @@ export const GET = createLearningRoute({
         };
       })
       .sort((a, b) => a.ratio - b.ratio);
+    // Heatmap sorts by lowest ratio first to surface weakest knowledge points on top.
 
     return {
       data: {

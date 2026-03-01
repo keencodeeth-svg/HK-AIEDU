@@ -20,6 +20,7 @@ export function resolveExamAvailability(
   const endAtMs = toTimestamp(input.endAt);
 
   if (input.status === "closed") {
+    // Manual teacher close has highest priority over time window checks.
     return {
       stage: "closed" as ExamAvailabilityStage,
       canEnter: false,
@@ -31,6 +32,7 @@ export function resolveExamAvailability(
   }
 
   if (startAtMs !== null && startAtMs > nowMs) {
+    // Before start: student cannot enter or submit.
     return {
       stage: "upcoming" as ExamAvailabilityStage,
       canEnter: false,
@@ -42,6 +44,7 @@ export function resolveExamAvailability(
   }
 
   if (endAtMs !== null && endAtMs <= nowMs) {
+    // After deadline: keep exam visible but lock interaction.
     return {
       stage: "ended" as ExamAvailabilityStage,
       canEnter: false,
@@ -53,6 +56,7 @@ export function resolveExamAvailability(
   }
 
   return {
+    // Open stage means both enter and submit are allowed.
     stage: "open" as ExamAvailabilityStage,
     canEnter: true,
     canSubmit: true,

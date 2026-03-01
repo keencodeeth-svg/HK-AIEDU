@@ -67,6 +67,7 @@ function assertExamTimeNotExceeded(input: {
       : Number.POSITIVE_INFINITY;
   const effectiveDeadline = Math.min(endDeadline, durationDeadline);
   const graceMs = Math.max(0, Number(input.graceMs ?? 0));
+  // Dual-deadline: both global endAt and per-student duration can close submission.
   if (Number.isFinite(effectiveDeadline) && now > effectiveDeadline + graceMs) {
     badRequest("考试作答时间已结束");
   }
@@ -162,6 +163,7 @@ export const POST = createExamRoute({
 
     const questionMap = new Map((await getQuestions()).map((item) => [item.id, item]));
     if (existingSubmission) {
+      // Submit endpoint is idempotent: return stored result for repeated submit requests.
       const existingReviewPack = await getExamReviewPack(paper.id, user.id);
       const rescored = scoreExamByItems({
         items,
@@ -206,6 +208,7 @@ export const POST = createExamRoute({
 
     const body = await parseJson(request, submitBodySchema);
     const inputAnswers = normalizeAnswers(body.answers);
+    // If frontend misses final payload, fallback to latest autosave draft.
     const draft = await getExamAnswerDraft(paper.id, user.id);
     const answers = inputAnswers ?? draft?.answers ?? {};
     const rescored = scoreExamByItems({
@@ -249,6 +252,7 @@ export const POST = createExamRoute({
         })
       )
     );
+    // Queue wrong-review tasks to integrate exam mistakes into spaced-repetition loop.
     const queuedReviewCount = queued.filter((item) => Boolean(item)).length;
     const reviewPackData = await buildExamReviewPack({
       wrongDetails: wrongDetails.map((item) => ({

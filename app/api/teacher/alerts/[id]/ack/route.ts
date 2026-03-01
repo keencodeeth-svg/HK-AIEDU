@@ -43,6 +43,7 @@ export const POST = createLearningRoute({
       alertId: parsed.id,
       note: body.note
     });
+    // Ack endpoint only changes alert status/note; no side-effect task creation.
 
     return {
       data: {

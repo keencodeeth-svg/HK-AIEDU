@@ -30,12 +30,14 @@ export const GET = createLearningRoute({
     }
 
     if (user.role === "school_admin") {
+      // School admin only sees classes under its own tenant.
       if (!user.schoolId) return { data: [] };
       const classes = await getClasses({ schoolId: user.schoolId });
       return { data: classes };
     }
 
     if (user.role === "admin") {
+      // Platform admin keeps global visibility for运营与运维场景.
       const classes = await getClasses();
       return { data: classes };
     }

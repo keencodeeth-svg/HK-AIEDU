@@ -20,6 +20,7 @@ export const GET = createLearningRoute({
     }
     const requestedSchoolId = query.schoolId?.trim();
     if (user.role === "school_admin") {
+      // School admin is hard-scoped to its own tenant regardless of query params.
       if (!user.schoolId) {
         forbidden("school not bound");
       }
@@ -30,6 +31,7 @@ export const GET = createLearningRoute({
     }
 
     if (!requestedSchoolId) {
+      // Platform admin must make tenant context explicit for safety.
       badRequest("schoolId required for platform admin");
     }
     return { data: await listSchoolClasses(requestedSchoolId) };

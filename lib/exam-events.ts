@@ -113,6 +113,7 @@ export async function incrementExamEventCounters(input: {
      )
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (paper_id, student_id) DO UPDATE SET
+       -- Counter increments are additive to preserve event history across tabs/requests.
        blur_count = exam_events.blur_count + EXCLUDED.blur_count,
        visibility_hidden_count = exam_events.visibility_hidden_count + EXCLUDED.visibility_hidden_count,
        last_event_at = EXCLUDED.last_event_at,
