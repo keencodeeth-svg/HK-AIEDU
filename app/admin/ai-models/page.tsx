@@ -99,6 +99,53 @@ type AiMetrics = {
   rows: MetricsRow[];
 };
 
+type EvalDatasetName =
+  | "explanation"
+  | "homework_review"
+  | "knowledge_points_generate"
+  | "writing_feedback"
+  | "lesson_outline"
+  | "question_check";
+
+type EvalKind = "assist" | "coach" | "explanation" | "writing" | "assignment_review";
+
+type CalibrationSuggestion = {
+  sampleCount: number;
+  recommendedGlobalBias: number;
+  providerAdjustments: Record<string, number>;
+  kindAdjustments: Record<EvalKind, number>;
+  note: string;
+};
+
+type EvalDatasetReport = {
+  dataset: EvalDatasetName;
+  total: number;
+  passed: number;
+  passRate: number;
+  averageScore: number;
+  highRiskCount: number;
+};
+
+type EvalReport = {
+  generatedAt: string;
+  datasets: EvalDatasetReport[];
+  summary: {
+    totalCases: number;
+    passedCases: number;
+    passRate: number;
+    averageScore: number;
+    highRiskCount: number;
+    calibrationSuggestion: CalibrationSuggestion;
+  };
+};
+
+type QualityCalibrationConfig = {
+  globalBias: number;
+  providerAdjustments: Record<string, number>;
+  kindAdjustments: Record<EvalKind, number>;
+  updatedAt: string;
+};
+
 type PolicyDraft = {
   providerChain: string;
   timeoutMs: number;
@@ -114,6 +161,15 @@ const EMPTY_DRAFT: PolicyDraft = {
   budgetLimit: 1800,
   minQualityScore: 70
 };
+
+const EVAL_DATASET_OPTIONS: Array<{ key: EvalDatasetName; label: string }> = [
+  { key: "explanation", label: "题目讲解" },
+  { key: "homework_review", label: "作业评语" },
+  { key: "knowledge_points_generate", label: "知识点生成" },
+  { key: "writing_feedback", label: "写作反馈" },
+  { key: "lesson_outline", label: "教案提纲" },
+  { key: "question_check", label: "题目质检" }
+];
 
 function toChainInput(value: string[]) {
   return value.join(", ");
@@ -143,6 +199,13 @@ export default function AdminAiModelsPage() {
   const [policyDraft, setPolicyDraft] = useState<PolicyDraft>(EMPTY_DRAFT);
   const [metrics, setMetrics] = useState<AiMetrics | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
+  const [evalReport, setEvalReport] = useState<EvalReport | null>(null);
+  const [evalLoading, setEvalLoading] = useState(false);
+  const [calibrationConfig, setCalibrationConfig] = useState<QualityCalibrationConfig | null>(null);
+  const [calibrationLoading, setCalibrationLoading] = useState(false);
+  const [selectedEvalDatasets, setSelectedEvalDatasets] = useState<EvalDatasetName[]>(
+    EVAL_DATASET_OPTIONS.map((item) => item.key)
+  );
 
   async function loadConfig() {
     setLoading(true);
@@ -192,8 +255,83 @@ export default function AdminAiModelsPage() {
     }
   }
 
+  async function loadCalibration() {
+    setCalibrationLoading(true);
+    try {
+      const res = await fetch("/api/admin/ai/quality-calibration", { cache: "no-store" });
+      const payload = await res.json();
+      if (!res.ok) {
+        setError(payload?.error ?? "加载质量校准失败");
+        return;
+      }
+      setCalibrationConfig(payload?.data ?? null);
+    } finally {
+      setCalibrationLoading(false);
+    }
+  }
+
+  async function runOfflineEval() {
+    setEvalLoading(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const query = selectedEvalDatasets.length ? `?datasets=${selectedEvalDatasets.join(",")}` : "";
+      const res = await fetch(`/api/admin/ai/evals${query}`, { cache: "no-store" });
+      const payload = await res.json();
+      if (!res.ok) {
+        setError(payload?.error ?? "离线评测失败");
+        return;
+      }
+      setEvalReport(payload?.data ?? null);
+      setMessage("离线评测已完成");
+    } finally {
+      setEvalLoading(false);
+    }
+  }
+
+  async function applyEvalCalibrationSuggestion() {
+    if (!evalReport?.summary?.calibrationSuggestion) {
+      setError("请先运行离线评测，再应用校准建议");
+      return;
+    }
+
+    const suggestion = evalReport.summary.calibrationSuggestion;
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/admin/ai/quality-calibration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          globalBias: suggestion.recommendedGlobalBias,
+          providerAdjustments: suggestion.providerAdjustments,
+          kindAdjustments: suggestion.kindAdjustments
+        })
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        setError(payload?.error ?? "应用校准建议失败");
+        return;
+      }
+      setCalibrationConfig(payload?.data ?? null);
+      setMessage("已应用离线评测校准建议");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggleEvalDataset(dataset: EvalDatasetName) {
+    setSelectedEvalDatasets((prev) => {
+      if (prev.includes(dataset)) {
+        return prev.filter((item) => item !== dataset);
+      }
+      return [...prev, dataset];
+    });
+  }
+
   useEffect(() => {
-    Promise.all([loadConfig(), loadPolicies(), loadMetrics()]);
+    Promise.all([loadConfig(), loadPolicies(), loadMetrics(), loadCalibration()]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -660,6 +798,110 @@ export default function AdminAiModelsPage() {
         ) : (
           <p style={{ color: "var(--ink-1)" }}>尚未执行连通性测试。</p>
         )}
+      </Card>
+
+      <Card title="离线评测与质量校准" tag="Eval">
+        <div className="grid" style={{ gap: 10 }}>
+          <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+            选择数据集运行离线评测，系统会输出质量校准建议，可直接一键应用。
+          </div>
+          <div className="grid grid-3">
+            {EVAL_DATASET_OPTIONS.map((dataset) => (
+              <label
+                key={dataset.key}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: 10,
+                  borderRadius: 10,
+                  border: "1px solid var(--stroke)",
+                  fontSize: 12
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedEvalDatasets.includes(dataset.key)}
+                  onChange={() => toggleEvalDataset(dataset.key)}
+                />
+                <span>{dataset.label}</span>
+              </label>
+            ))}
+          </div>
+          <div className="cta-row">
+            <button className="button secondary" type="button" onClick={runOfflineEval} disabled={evalLoading}>
+              {evalLoading ? "评测中..." : "运行离线评测"}
+            </button>
+            <button
+              className="button primary"
+              type="button"
+              onClick={applyEvalCalibrationSuggestion}
+              disabled={saving || !evalReport}
+            >
+              应用评测校准建议
+            </button>
+            <button className="button ghost" type="button" onClick={loadCalibration} disabled={calibrationLoading}>
+              {calibrationLoading ? "加载中..." : "刷新校准配置"}
+            </button>
+          </div>
+
+          {calibrationConfig ? (
+            <div className="card">
+              <div className="section-title">当前质量校准</div>
+              <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 6 }}>
+                全局偏置 {calibrationConfig.globalBias} · 更新时间{" "}
+                {calibrationConfig.updatedAt ? new Date(calibrationConfig.updatedAt).toLocaleString("zh-CN") : "-"}
+              </div>
+              <div className="pill-list" style={{ marginTop: 8 }}>
+                {Object.entries(calibrationConfig.providerAdjustments ?? {}).map(([provider, bias]) => (
+                  <span className="pill" key={`provider-${provider}`}>
+                    {provider}: {bias}
+                  </span>
+                ))}
+                {!Object.keys(calibrationConfig.providerAdjustments ?? {}).length ? (
+                  <span className="pill">provider 无额外校准</span>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: "var(--ink-1)" }}>尚未加载校准配置。</div>
+          )}
+
+          {evalReport ? (
+            <div className="grid" style={{ gap: 8 }}>
+              <div className="pill-list">
+                <span className="pill">样本 {evalReport.summary.totalCases}</span>
+                <span className="pill">通过率 {evalReport.summary.passRate}%</span>
+                <span className="pill">均分 {evalReport.summary.averageScore}</span>
+                <span className="pill">高风险 {evalReport.summary.highRiskCount}</span>
+                <span className="pill">建议偏置 {evalReport.summary.calibrationSuggestion.recommendedGlobalBias}</span>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                评测时间：{new Date(evalReport.generatedAt).toLocaleString("zh-CN")} · 建议说明：
+                {evalReport.summary.calibrationSuggestion.note}
+              </div>
+              <div className="grid" style={{ gap: 8 }}>
+                {evalReport.datasets.map((dataset) => (
+                  <div className="card" key={dataset.dataset}>
+                    <div className="section-title">{dataset.dataset}</div>
+                    <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                      样本 {dataset.total} · 通过 {dataset.passed} · 通过率 {dataset.passRate}% · 均分 {dataset.averageScore} ·
+                      高风险 {dataset.highRiskCount}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="card" style={{ fontSize: 12, color: "var(--ink-1)" }}>
+                <div>建议 provider 校准：{JSON.stringify(evalReport.summary.calibrationSuggestion.providerAdjustments)}</div>
+                <div style={{ marginTop: 4 }}>
+                  建议 kind 校准：{JSON.stringify(evalReport.summary.calibrationSuggestion.kindAdjustments)}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: "var(--ink-1)" }}>尚未运行离线评测。</div>
+          )}
+        </div>
       </Card>
 
       <Card title="AI 调用指标" tag="Metrics">

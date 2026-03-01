@@ -63,6 +63,49 @@ export async function runAdminContentSuite(context) {
     "AI evals should include calibrationSuggestion.recommendedGlobalBias"
   );
 
+  const aiCalibration = await apiFetch("/api/admin/ai/quality-calibration");
+  assert.equal(aiCalibration.status, 200, `GET /api/admin/ai/quality-calibration failed: ${aiCalibration.raw}`);
+  assert.equal(
+    typeof aiCalibration.body?.data?.globalBias,
+    "number",
+    "AI quality calibration should include globalBias"
+  );
+
+  const baselineCalibration = aiCalibration.body?.data ?? null;
+  const suggestion = aiEvals.body?.data?.summary?.calibrationSuggestion ?? null;
+  const applyEvalCalibration = await apiFetch("/api/admin/ai/quality-calibration", {
+    method: "POST",
+    json: {
+      globalBias: suggestion?.recommendedGlobalBias ?? 0,
+      providerAdjustments: suggestion?.providerAdjustments ?? {},
+      kindAdjustments: suggestion?.kindAdjustments ?? {}
+    }
+  });
+  assert.equal(
+    applyEvalCalibration.status,
+    200,
+    `POST /api/admin/ai/quality-calibration (apply suggestion) failed: ${applyEvalCalibration.raw}`
+  );
+  assert.equal(
+    typeof applyEvalCalibration.body?.data?.updatedAt,
+    "string",
+    "Updated AI quality calibration should include updatedAt"
+  );
+
+  const restoreCalibration = await apiFetch("/api/admin/ai/quality-calibration", {
+    method: "POST",
+    json: {
+      globalBias: baselineCalibration?.globalBias ?? 0,
+      providerAdjustments: baselineCalibration?.providerAdjustments ?? {},
+      kindAdjustments: baselineCalibration?.kindAdjustments ?? {}
+    }
+  });
+  assert.equal(
+    restoreCalibration.status,
+    200,
+    `POST /api/admin/ai/quality-calibration (restore) failed: ${restoreCalibration.raw}`
+  );
+
   const tightenAssistBudget = await apiFetch("/api/admin/ai/policies", {
     method: "POST",
     json: {
