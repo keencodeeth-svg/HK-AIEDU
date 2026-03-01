@@ -1,5 +1,11 @@
 import { callRoutedLLM } from "./ai-router";
 import { GENERATE_PROMPT } from "./ai-prompts";
+import {
+  asJsonObject,
+  getJsonObjectArrayField,
+  getStringArrayField,
+  getStringField
+} from "./ai-json";
 import { extractJson, normalizeQuestionDraft, normalizeTitle } from "./ai-utils";
 import type {
   GenerateKnowledgePointsPayload,
@@ -66,13 +72,12 @@ export async function generateWrongExplanation(payload: {
     customPrompt: `${GENERATE_PROMPT}\n${userPrompt}`
   });
   if (!llm?.text) return null;
-  const parsed = extractJson(llm.text);
-  if (!parsed || typeof parsed !== "object") return null;
-  const analysis = String((parsed as any).analysis ?? "").trim();
-  const hintsRaw = Array.isArray((parsed as any).hints) ? (parsed as any).hints : [];
-  const hints = hintsRaw.map((item: any) => String(item).trim()).filter(Boolean);
+  const parsed = asJsonObject(extractJson(llm.text));
+  if (!parsed) return null;
+  const analysis = getStringField(parsed, "analysis");
+  const hints = getStringArrayField(parsed, "hints", 3);
   if (!analysis) return null;
-  return { analysis, hints: hints.slice(0, 3) };
+  return { analysis, hints };
 }
 
 export async function generateVariantDrafts(payload: {
@@ -108,11 +113,14 @@ export async function generateVariantDrafts(payload: {
   if (!llm?.text) return null;
   const parsed = extractJson(llm.text);
   if (!parsed) return null;
-  const rawItems = Array.isArray((parsed as any).items) ? (parsed as any).items : Array.isArray(parsed) ? parsed : [];
-  if (!rawItems.length) return null;
+  const parsedObject = asJsonObject(parsed);
+  const rawItems = parsedObject ? (Array.isArray(parsedObject.items) ? parsedObject.items : []) : [];
+  const itemCandidates = rawItems.length ? rawItems : Array.isArray(parsed) ? parsed : [];
+  const normalizedCandidates = itemCandidates.map((item) => asJsonObject(item)).filter((item) => Boolean(item));
+  if (!normalizedCandidates.length) return null;
 
   const drafts: QuestionDraft[] = [];
-  rawItems.forEach((item: any) => {
+  normalizedCandidates.forEach((item) => {
     const draft = normalizeQuestionDraft(item);
     if (draft) drafts.push(draft);
   });
@@ -145,17 +153,17 @@ export async function generateQuestionCheck(payload: {
     customPrompt: `${GENERATE_PROMPT}\n${userPrompt}`
   });
   if (!llm?.text) return null;
-  const parsed = extractJson(llm.text);
-  if (!parsed || typeof parsed !== "object") return null;
+  const parsed = asJsonObject(extractJson(llm.text));
+  if (!parsed) return null;
 
-  const issues = Array.isArray((parsed as any).issues) ? (parsed as any).issues : [];
-  const riskRaw = String((parsed as any).risk ?? "low").toLowerCase();
+  const issues = getStringArrayField(parsed, "issues", 20);
+  const riskRaw = getStringField(parsed, "risk").toLowerCase();
   const risk = ["low", "medium", "high"].includes(riskRaw) ? (riskRaw as "low" | "medium" | "high") : "low";
-  const suggestedAnswer = String((parsed as any).suggestedAnswer ?? "").trim();
-  const notes = String((parsed as any).notes ?? "").trim();
+  const suggestedAnswer = getStringField(parsed, "suggestedAnswer");
+  const notes = getStringField(parsed, "notes");
 
   return {
-    issues: issues.map((item: any) => String(item).trim()).filter(Boolean),
+    issues,
     risk,
     suggestedAnswer: suggestedAnswer || undefined,
     notes: notes || undefined
@@ -186,15 +194,21 @@ export async function generateKnowledgePointsDraft(payload: GenerateKnowledgePoi
   const parsed = extractJson(llm.text);
   if (!parsed) return null;
 
-  const rawItems = Array.isArray(parsed) ? parsed : Array.isArray(parsed.items) ? parsed.items : [];
-  if (!rawItems.length) return null;
+  const parsedObject = asJsonObject(parsed);
+  const rawItems = Array.isArray(parsed)
+    ? parsed
+    : parsedObject && Array.isArray(parsedObject.items)
+      ? parsedObject.items
+      : [];
+  const normalizedItems = rawItems.map((item) => asJsonObject(item)).filter((item): item is Record<string, unknown> => Boolean(item));
+  if (!normalizedItems.length) return null;
 
   const seen = new Set<string>();
   const items: KnowledgePointDraft[] = [];
 
-  for (const item of rawItems) {
-    const title = normalizeTitle(String(item?.title ?? "")).trim();
-    const chapter = String(item?.chapter ?? payload.chapter ?? "未归类").trim();
+  for (const item of normalizedItems) {
+    const title = normalizeTitle(getStringField(item, "title")).trim();
+    const chapter = getStringField(item, "chapter") || payload.chapter || "未归类";
     if (!title) continue;
     const key = `${title}|${chapter}`;
     if (seen.has(key)) continue;
@@ -231,24 +245,29 @@ export async function generateKnowledgeTreeDraft(payload: GenerateKnowledgeTreeP
   const parsed = extractJson(llm.text);
   if (!parsed) return null;
 
-  const rawUnits = Array.isArray((parsed as any).units) ? (parsed as any).units : Array.isArray(parsed) ? parsed : [];
-  if (!rawUnits.length) return null;
+  const parsedObject = asJsonObject(parsed);
+  const rawUnits = parsedObject ? getJsonObjectArrayField(parsedObject, "units") : [];
+  const normalizedUnits = rawUnits.length
+    ? rawUnits
+    : Array.isArray(parsed)
+      ? parsed.map((item) => asJsonObject(item)).filter((item): item is Record<string, unknown> => Boolean(item))
+      : [];
+  if (!normalizedUnits.length) return null;
 
   const units: KnowledgeTreeDraft["units"] = [];
 
-  for (const rawUnit of rawUnits) {
-    const unitTitle = normalizeTitle(String(rawUnit?.title ?? "")).trim();
+  for (const rawUnit of normalizedUnits) {
+    const unitTitle = normalizeTitle(getStringField(rawUnit, "title")).trim();
     if (!unitTitle) continue;
-    const rawChapters = Array.isArray(rawUnit?.chapters) ? rawUnit.chapters : [];
+    const rawChapters = getJsonObjectArrayField(rawUnit, "chapters");
     const chapters: KnowledgeTreeDraft["units"][number]["chapters"] = [];
 
     for (const rawChapter of rawChapters) {
-      const chapterTitle = normalizeTitle(String(rawChapter?.title ?? "")).trim();
+      const chapterTitle = normalizeTitle(getStringField(rawChapter, "title")).trim();
       if (!chapterTitle) continue;
-      const rawPoints = Array.isArray(rawChapter?.points) ? rawChapter.points : [];
-      const points = rawPoints
-        .map((point: any) => ({ title: normalizeTitle(String(point?.title ?? "")).trim() }))
-        .filter((point: any) => point.title);
+      const points = getJsonObjectArrayField(rawChapter, "points")
+        .map((point) => ({ title: normalizeTitle(getStringField(point, "title")).trim() }))
+        .filter((point) => point.title);
 
       if (!points.length) continue;
       const trimmedPoints = points.slice(0, pointsPerChapter);

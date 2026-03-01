@@ -685,6 +685,13 @@
   gap: 0.08em;
 }
 
+.math-root-index {
+  font-size: 0.68em;
+  line-height: 1;
+  margin-right: 0.02em;
+  transform: translateY(-0.28em);
+}
+
 .math-root-body {
   border-top: 1px solid currentColor;
   padding: 0.02em 0.12em 0;

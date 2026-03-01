@@ -57,49 +57,142 @@ function normalizeMathExpression(value: string) {
   return value.trim().replace(/\\,/g, " ").replace(/\\;/g, " ").replace(/\\!/g, "");
 }
 
-function formatMathToHtml(raw: string) {
-  let html = escapeHtml(normalizeMathExpression(raw));
-  LATEX_SYMBOLS.forEach(([pattern, replacement]) => {
-    html = html.replace(pattern, replacement);
-  });
+function skipSpaces(input: string, index: number) {
+  let cursor = index;
+  while (cursor < input.length && /\s/.test(input[cursor])) {
+    cursor += 1;
+  }
+  return cursor;
+}
 
+function readBraceBlock(input: string, startIndex: number) {
+  const start = skipSpaces(input, startIndex);
+  if (start >= input.length || input[start] !== "{") return null;
+  let depth = 0;
+  let cursor = start;
+  while (cursor < input.length) {
+    const ch = input[cursor];
+    if (ch === "{") depth += 1;
+    if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return {
+          value: input.slice(start + 1, cursor),
+          endIndex: cursor + 1
+        };
+      }
+    }
+    cursor += 1;
+  }
+  return null;
+}
+
+function parseLatexStructure(input: string, mode: "html" | "plain"): string {
+  let output = "";
+  let cursor = 0;
+
+  while (cursor < input.length) {
+    if (input.startsWith("\\frac", cursor) || input.startsWith("\\dfrac", cursor) || input.startsWith("\\tfrac", cursor)) {
+      const commandLength = input.startsWith("\\dfrac", cursor) || input.startsWith("\\tfrac", cursor) ? 6 : 5;
+      const numerator = readBraceBlock(input, cursor + commandLength);
+      if (!numerator) {
+        output += mode === "html" ? escapeHtml(input[cursor]) : input[cursor];
+        cursor += 1;
+        continue;
+      }
+      const denominator = readBraceBlock(input, numerator.endIndex);
+      if (!denominator) {
+        output += mode === "html" ? escapeHtml(input[cursor]) : input[cursor];
+        cursor += 1;
+        continue;
+      }
+      const top = parseLatexStructure(numerator.value, mode);
+      const bottom = parseLatexStructure(denominator.value, mode);
+      output +=
+        mode === "html"
+          ? `<span class="math-frac"><span class="math-frac-top">${top}</span><span class="math-frac-bottom">${bottom}</span></span>`
+          : `(${top})/(${bottom})`;
+      cursor = denominator.endIndex;
+      continue;
+    }
+
+    if (input.startsWith("\\sqrt", cursor)) {
+      let nextCursor = cursor + "\\sqrt".length;
+      let indexText = "";
+      nextCursor = skipSpaces(input, nextCursor);
+      if (input[nextCursor] === "[") {
+        const end = input.indexOf("]", nextCursor + 1);
+        if (end !== -1) {
+          indexText = input.slice(nextCursor + 1, end).trim();
+          nextCursor = end + 1;
+        }
+      }
+      const body = readBraceBlock(input, nextCursor);
+      if (!body) {
+        output += mode === "html" ? escapeHtml(input[cursor]) : input[cursor];
+        cursor += 1;
+        continue;
+      }
+      const renderedBody = parseLatexStructure(body.value, mode);
+      if (mode === "html") {
+        const renderedIndex = indexText ? `<sup class="math-root-index">${escapeHtml(indexText)}</sup>` : "";
+        output += `<span class="math-root">${renderedIndex}√<span class="math-root-body">${renderedBody}</span></span>`;
+      } else {
+        output += indexText ? `root(${indexText},${renderedBody})` : `sqrt(${renderedBody})`;
+      }
+      cursor = body.endIndex;
+      continue;
+    }
+
+    const char = input[cursor];
+    output += mode === "html" ? escapeHtml(char) : char;
+    cursor += 1;
+  }
+
+  return output;
+}
+
+function applySymbolSubstitutions(input: string) {
+  let output = input;
+  LATEX_SYMBOLS.forEach(([pattern, replacement]) => {
+    output = output.replace(pattern, replacement);
+  });
+  return output;
+}
+
+function formatMathSupSub(input: string, mode: "html" | "plain") {
+  let output = input;
   for (let i = 0; i < 8; i += 1) {
-    const previous = html;
-    html = html.replace(
-      /\\frac\{([^{}]+)\}\{([^{}]+)\}/g,
-      `<span class="math-frac"><span class="math-frac-top">$1</span><span class="math-frac-bottom">$2</span></span>`
-    );
-    html = html.replace(/\\sqrt\{([^{}]+)\}/g, `<span class="math-root">√<span class="math-root-body">$1</span></span>`);
-    html = html.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)\^\{([^{}]+)\}/g, `$1<sup>$2</sup>`);
-    html = html.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)\^([A-Za-z0-9+\-]+)/g, `$1<sup>$2</sup>`);
-    html = html.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)_\{([^{}]+)\}/g, `$1<sub>$2</sub>`);
-    html = html.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)_([A-Za-z0-9+\-]+)/g, `$1<sub>$2</sub>`);
-    if (html === previous) {
+    const previous = output;
+    if (mode === "html") {
+      output = output.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)\^\{([^{}]+)\}/g, `$1<sup>$2</sup>`);
+      output = output.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)\^([A-Za-z0-9+\-]+)/g, `$1<sup>$2</sup>`);
+      output = output.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)_\{([^{}]+)\}/g, `$1<sub>$2</sub>`);
+      output = output.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)_([A-Za-z0-9+\-]+)/g, `$1<sub>$2</sub>`);
+    } else {
+      output = output.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)\^\{([^{}]+)\}/g, "$1^($2)");
+      output = output.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)\^([A-Za-z0-9+\-]+)/g, "$1^$2");
+      output = output.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)_\{([^{}]+)\}/g, "$1_($2)");
+      output = output.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)_([A-Za-z0-9+\-]+)/g, "$1_$2");
+    }
+    if (output === previous) {
       break;
     }
   }
+  return output;
+}
 
-  return html;
+function formatMathToHtml(raw: string) {
+  const parsed = parseLatexStructure(normalizeMathExpression(raw), "html");
+  const symbolNormalized = applySymbolSubstitutions(parsed);
+  return formatMathSupSub(symbolNormalized, "html");
 }
 
 function formatMathToPlain(raw: string) {
-  let text = normalizeMathExpression(raw);
-  for (let i = 0; i < 8; i += 1) {
-    const previous = text;
-    text = text.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1)/($2)");
-    text = text.replace(/\\sqrt\{([^{}]+)\}/g, "sqrt($1)");
-    text = text.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)\^\{([^{}]+)\}/g, "$1^($2)");
-    text = text.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)\^([A-Za-z0-9+\-]+)/g, "$1^$2");
-    text = text.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)_\{([^{}]+)\}/g, "$1_($2)");
-    text = text.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)_([A-Za-z0-9+\-]+)/g, "$1_$2");
-    if (text === previous) {
-      break;
-    }
-  }
-  LATEX_SYMBOLS.forEach(([pattern, replacement]) => {
-    text = text.replace(pattern, replacement);
-  });
-  return text.replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
+  const parsed = parseLatexStructure(normalizeMathExpression(raw), "plain");
+  const symbolNormalized = applySymbolSubstitutions(parsed);
+  const superscriptNormalized = formatMathSupSub(symbolNormalized, "plain");
+  return superscriptNormalized.replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
 }
 
 function splitMathDelimitedSegments(input: string): MathSegment[] {

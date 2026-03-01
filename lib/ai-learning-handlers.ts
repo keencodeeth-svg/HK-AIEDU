@@ -2,6 +2,14 @@ import { retrieveKnowledgePoints, retrieveSimilarQuestion } from "./rag";
 import { getEffectiveAiProviderChain } from "./ai-config";
 import { normalizeProviderChain } from "./ai-provider";
 import { callRoutedLLM } from "./ai-router";
+import {
+  asJsonObject,
+  clampScore,
+  getJsonObjectArrayField,
+  getJsonObjectField,
+  getStringArrayField,
+  getStringField
+} from "./ai-json";
 import { GENERATE_PROMPT, SYSTEM_PROMPT } from "./ai-prompts";
 import { buildExplainFallback, buildHomeworkFallback, extractJson } from "./ai-utils";
 import type {
@@ -13,6 +21,10 @@ import type {
   WritingFeedback,
   WrongReviewScript
 } from "./ai-types";
+
+type VisionPromptPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
 
 function getPrimaryProvider() {
   const normalized = normalizeProviderChain(getEffectiveAiProviderChain());
@@ -52,11 +64,11 @@ export async function generateExplainVariants(payload: {
     customPrompt: `${SYSTEM_PROMPT}\n${userPrompt}`
   });
   if (!llm?.text) return buildExplainFallback(payload);
-  const parsed = extractJson(llm.text);
-  if (!parsed || typeof parsed !== "object") return buildExplainFallback(payload);
-  const textExplain = String((parsed as any).text ?? "").trim();
-  const visual = String((parsed as any).visual ?? "").trim();
-  const analogy = String((parsed as any).analogy ?? "").trim();
+  const parsed = asJsonObject(extractJson(llm.text));
+  if (!parsed) return buildExplainFallback(payload);
+  const textExplain = getStringField(parsed, "text");
+  const visual = getStringField(parsed, "visual");
+  const analogy = getStringField(parsed, "analogy");
   if (!textExplain || !visual || !analogy) return buildExplainFallback(payload);
   return { text: textExplain, visual, analogy, provider: llm.provider, quality: llm.quality };
 }
@@ -92,7 +104,7 @@ export async function generateHomeworkReview(payload: {
 
   const userText = `${context}\n请对作业进行批改，输出 JSON：${isEssay ? essaySchema : homeworkSchema}。不要输出多余文本。`;
 
-  const content: any[] = [{ type: "text", text: userText }];
+  const content: VisionPromptPart[] = [{ type: "text", text: userText }];
   payload.images.slice(0, 4).forEach((img) => {
     content.push({ type: "image_url", image_url: { url: `data:${img.mimeType};base64,${img.base64}` } });
   });
@@ -119,8 +131,8 @@ export async function generateHomeworkReview(payload: {
     });
   }
 
-  const parsed = extractJson(llm.text);
-  if (!parsed || typeof parsed !== "object") {
+  const parsed = asJsonObject(extractJson(llm.text));
+  if (!parsed) {
     return buildHomeworkFallback({
       subject: payload.subject,
       grade: payload.grade,
@@ -131,43 +143,32 @@ export async function generateHomeworkReview(payload: {
     });
   }
 
-  const score = Math.max(0, Math.min(100, Math.round(Number((parsed as any).score ?? 0))));
-  const summary = String((parsed as any).summary ?? "").trim();
-  const strengths = Array.isArray((parsed as any).strengths)
-    ? (parsed as any).strengths.map((item: any) => String(item).trim()).filter(Boolean)
-    : [];
-  const issues = Array.isArray((parsed as any).issues)
-    ? (parsed as any).issues.map((item: any) => String(item).trim()).filter(Boolean)
-    : [];
-  const suggestions = Array.isArray((parsed as any).suggestions)
-    ? (parsed as any).suggestions.map((item: any) => String(item).trim()).filter(Boolean)
-    : [];
-  const rubricRaw = Array.isArray((parsed as any).rubric) ? (parsed as any).rubric : [];
-  const rubric = rubricRaw
-    .map((item: any) => ({
-      item: String(item.item ?? "").trim(),
-      score: Math.max(0, Math.min(100, Math.round(Number(item.score ?? 0)))),
-      comment: String(item.comment ?? "").trim()
+  const score = clampScore(parsed.score, 0);
+  const summary = getStringField(parsed, "summary");
+  const strengths = getStringArrayField(parsed, "strengths", 5);
+  const issues = getStringArrayField(parsed, "issues", 5);
+  const suggestions = getStringArrayField(parsed, "suggestions", 5);
+  const rubric = getJsonObjectArrayField(parsed, "rubric")
+    .map((item) => ({
+      item: getStringField(item, "item"),
+      score: clampScore(item.score, 0),
+      comment: getStringField(item, "comment")
     }))
-    .filter((item: any) => item.item);
+    .filter((item) => item.item);
 
-  const writing = (parsed as any).writing ?? null;
-  const writingScores = writing?.scores ?? {};
+  const writing = getJsonObjectField(parsed, "writing");
+  const writingScores = writing ? getJsonObjectField(writing, "scores") : null;
   const writingBlock = writing
     ? {
         scores: {
-          structure: Math.max(0, Math.min(100, Math.round(Number(writingScores.structure ?? 0)))),
-          grammar: Math.max(0, Math.min(100, Math.round(Number(writingScores.grammar ?? 0)))),
-          vocab: Math.max(0, Math.min(100, Math.round(Number(writingScores.vocab ?? 0))))
+          structure: clampScore(writingScores?.structure, 0),
+          grammar: clampScore(writingScores?.grammar, 0),
+          vocab: clampScore(writingScores?.vocab, 0)
         },
-        summary: String(writing.summary ?? "").trim() || "写作结构清晰，可继续优化用词与细节。",
-        strengths: Array.isArray(writing.strengths)
-          ? writing.strengths.map((item: any) => String(item).trim()).filter(Boolean).slice(0, 5)
-          : [],
-        improvements: Array.isArray(writing.improvements)
-          ? writing.improvements.map((item: any) => String(item).trim()).filter(Boolean).slice(0, 5)
-          : [],
-        corrected: String(writing.corrected ?? "").trim() || undefined
+        summary: getStringField(writing, "summary") || "写作结构清晰，可继续优化用词与细节。",
+        strengths: getStringArrayField(writing, "strengths", 5),
+        improvements: getStringArrayField(writing, "improvements", 5),
+        corrected: getStringField(writing, "corrected") || undefined
       }
     : undefined;
 
@@ -204,34 +205,24 @@ export async function generateWritingFeedback(payload: {
     customPrompt: `${GENERATE_PROMPT}\n${userPrompt}`
   });
   if (!llm?.text) return null;
-  const parsed = extractJson(llm.text);
-  if (!parsed || typeof parsed !== "object") return null;
+  const parsed = asJsonObject(extractJson(llm.text));
+  if (!parsed) return null;
 
-  const scores = (parsed as any).scores ?? {};
-  const normalizeScore = (value: any) => {
-    const num = Number(value);
-    if (Number.isNaN(num)) return 0;
-    return Math.max(0, Math.min(100, Math.round(num)));
-  };
-
-  const summary = String((parsed as any).summary ?? "").trim();
-  const strengths = Array.isArray((parsed as any).strengths)
-    ? (parsed as any).strengths.map((item: any) => String(item).trim()).filter(Boolean)
-    : [];
-  const improvements = Array.isArray((parsed as any).improvements)
-    ? (parsed as any).improvements.map((item: any) => String(item).trim()).filter(Boolean)
-    : [];
-  const corrected = String((parsed as any).corrected ?? "").trim();
+  const scores = getJsonObjectField(parsed, "scores");
+  const summary = getStringField(parsed, "summary");
+  const strengths = getStringArrayField(parsed, "strengths", 3);
+  const improvements = getStringArrayField(parsed, "improvements", 3);
+  const corrected = getStringField(parsed, "corrected");
 
   return {
     scores: {
-      structure: normalizeScore(scores.structure),
-      grammar: normalizeScore(scores.grammar),
-      vocab: normalizeScore(scores.vocab)
+      structure: clampScore(scores?.structure, 0),
+      grammar: clampScore(scores?.grammar, 0),
+      vocab: clampScore(scores?.vocab, 0)
     },
     summary: summary || "已完成基础批改，请参考评分与建议进行修改。",
-    strengths: strengths.slice(0, 3),
-    improvements: improvements.slice(0, 3),
+    strengths,
+    improvements,
     corrected: corrected || undefined,
     quality: llm.quality
   } as WritingFeedback;
@@ -272,18 +263,14 @@ export async function extractKnowledgePointCandidates(payload: {
     return { points: [], provider: primaryProvider } as KnowledgePointExtraction;
   }
 
-  const parsed = extractJson(llm.text);
-  if (!parsed || typeof parsed !== "object") {
+  const parsed = asJsonObject(extractJson(llm.text));
+  if (!parsed) {
     return { points: [], provider: llm.provider, quality: llm.quality } as KnowledgePointExtraction;
   }
 
-  const pointsRaw = Array.isArray((parsed as any).points) ? (parsed as any).points : [];
   const points = Array.from(
     new Set(
-      pointsRaw
-        .map((item: any) => String(item ?? "").trim())
-        .filter(Boolean)
-        .slice(0, 10)
+      getStringArrayField(parsed, "points", 10)
     )
   );
 
@@ -322,25 +309,21 @@ export async function generateLessonOutline(payload: {
     customPrompt: `${GENERATE_PROMPT}\n${userPrompt}`
   });
   if (!llm?.text) return null;
-  const parsed = extractJson(llm.text);
-  if (!parsed || typeof parsed !== "object") return null;
-  const objectives = Array.isArray((parsed as any).objectives) ? (parsed as any).objectives : [];
-  const keyPoints = Array.isArray((parsed as any).keyPoints) ? (parsed as any).keyPoints : [];
-  const slides = Array.isArray((parsed as any).slides) ? (parsed as any).slides : [];
-  const blackboardSteps = Array.isArray((parsed as any).blackboardSteps) ? (parsed as any).blackboardSteps : [];
+  const parsed = asJsonObject(extractJson(llm.text));
+  if (!parsed) return null;
 
-  const cleanSlides = slides
-    .map((item: any) => ({
-      title: String(item?.title ?? "").trim(),
-      bullets: Array.isArray(item?.bullets) ? item.bullets.map((b: any) => String(b).trim()).filter(Boolean) : []
+  const cleanSlides = getJsonObjectArrayField(parsed, "slides")
+    .map((item) => ({
+      title: getStringField(item, "title"),
+      bullets: getStringArrayField(item, "bullets", 12)
     }))
-    .filter((item: any) => item.title);
+    .filter((item) => item.title);
 
   return {
-    objectives: objectives.map((item: any) => String(item).trim()).filter(Boolean),
-    keyPoints: keyPoints.map((item: any) => String(item).trim()).filter(Boolean),
+    objectives: getStringArrayField(parsed, "objectives", 12),
+    keyPoints: getStringArrayField(parsed, "keyPoints", 12),
     slides: cleanSlides,
-    blackboardSteps: blackboardSteps.map((item: any) => String(item).trim()).filter(Boolean)
+    blackboardSteps: getStringArrayField(parsed, "blackboardSteps", 20)
   } as LessonOutline;
 }
 
@@ -369,17 +352,13 @@ export async function generateWrongReviewScript(payload: {
     customPrompt: `${GENERATE_PROMPT}\n${userPrompt}`
   });
   if (!llm?.text) return null;
-  const parsed = extractJson(llm.text);
-  if (!parsed || typeof parsed !== "object") return null;
-
-  const agenda = Array.isArray((parsed as any).agenda) ? (parsed as any).agenda : [];
-  const script = Array.isArray((parsed as any).script) ? (parsed as any).script : [];
-  const reminders = Array.isArray((parsed as any).reminders) ? (parsed as any).reminders : [];
+  const parsed = asJsonObject(extractJson(llm.text));
+  if (!parsed) return null;
 
   return {
-    agenda: agenda.map((item: any) => String(item).trim()).filter(Boolean),
-    script: script.map((item: any) => String(item).trim()).filter(Boolean),
-    reminders: reminders.map((item: any) => String(item).trim()).filter(Boolean)
+    agenda: getStringArrayField(parsed, "agenda", 10),
+    script: getStringArrayField(parsed, "script", 30),
+    reminders: getStringArrayField(parsed, "reminders", 10)
   } as WrongReviewScript;
 }
 
@@ -406,17 +385,15 @@ export async function generateLearningReport(payload: {
     customPrompt: `${GENERATE_PROMPT}\n${userPrompt}`
   });
   if (!llm?.text) return null;
-  const parsed = extractJson(llm.text);
-  if (!parsed || typeof parsed !== "object") return null;
-  const report = String((parsed as any).report ?? "").trim();
-  const highlights = Array.isArray((parsed as any).highlights) ? (parsed as any).highlights : [];
-  const reminders = Array.isArray((parsed as any).reminders) ? (parsed as any).reminders : [];
+  const parsed = asJsonObject(extractJson(llm.text));
+  if (!parsed) return null;
+  const report = getStringField(parsed, "report");
 
   if (!report) return null;
   return {
     report,
-    highlights: highlights.map((item: any) => String(item).trim()).filter(Boolean),
-    reminders: reminders.map((item: any) => String(item).trim()).filter(Boolean),
+    highlights: getStringArrayField(parsed, "highlights", 10),
+    reminders: getStringArrayField(parsed, "reminders", 10),
     quality: llm.quality
   } as LearningReport;
 }
