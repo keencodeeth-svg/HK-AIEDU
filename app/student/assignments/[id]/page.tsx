@@ -5,7 +5,9 @@ import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
 import MathText from "@/components/MathText";
+import MathViewControls from "@/components/MathViewControls";
 import { ASSIGNMENT_TYPE_LABELS, SUBJECT_LABELS } from "@/lib/constants";
+import { useMathViewSettings } from "@/lib/math-view-settings";
 
 type AssignmentDetail = {
   assignment: {
@@ -68,6 +70,7 @@ export default function StudentAssignmentDetailPage({ params }: { params: { id: 
   const [uploading, setUploading] = useState(false);
   const [submissionText, setSubmissionText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const mathView = useMathViewSettings("student-assignment");
 
   const loadUploads = useCallback(async () => {
     const res = await fetch(`/api/student/assignments/${params.id}/uploads`);
@@ -177,7 +180,7 @@ export default function StudentAssignmentDetailPage({ params }: { params: { id: 
   const hasText = Boolean(submissionText.trim());
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid math-view-surface" style={{ gap: 18, ...mathView.style }}>
       <div className="section-head">
         <div>
           <h2>作业详情</h2>
@@ -187,6 +190,14 @@ export default function StudentAssignmentDetailPage({ params }: { params: { id: 
         </div>
         <span className="chip">{alreadyCompleted ? "已完成" : "进行中"}</span>
       </div>
+      <MathViewControls
+        fontScale={mathView.fontScale}
+        lineMode={mathView.lineMode}
+        onDecrease={mathView.decreaseFontScale}
+        onIncrease={mathView.increaseFontScale}
+        onReset={mathView.resetView}
+        onLineModeChange={mathView.setLineMode}
+      />
 
       <Card title="作业信息" tag="概览">
         <div className="grid grid-2">
@@ -309,7 +320,7 @@ export default function StudentAssignmentDetailPage({ params }: { params: { id: 
               data.questions.map((question, index) => (
                 <div className="card" key={question.id}>
                   <div className="section-title">
-                    {index + 1}. <MathText text={question.stem} />
+                    {index + 1}. <MathText text={question.stem} showCopyActions />
                   </div>
                   <div style={{ display: "grid", gap: 6 }}>
                     {question.options.map((option) => (
@@ -358,7 +369,7 @@ export default function StudentAssignmentDetailPage({ params }: { params: { id: 
               return (
                 <div className="card" key={detail.questionId}>
                   <div className="section-title">
-                    <MathText text={question?.stem ?? "题目"} />
+                    <MathText text={question?.stem ?? "题目"} showCopyActions />
                   </div>
                   <div className="pill-list" style={{ marginTop: 8 }}>
                     <span className="pill">
@@ -370,7 +381,7 @@ export default function StudentAssignmentDetailPage({ params }: { params: { id: 
                     <span className="pill">{detail.correct ? "回答正确" : "回答错误"}</span>
                   </div>
                   <p style={{ marginTop: 8 }}>
-                    解析：<MathText text={detail.explanation} />
+                    解析：<MathText text={detail.explanation} showCopyActions />
                   </p>
                 </div>
               );
@@ -394,7 +405,7 @@ export default function StudentAssignmentDetailPage({ params }: { params: { id: 
               return (
                 <div className="card" key={item.questionId}>
                   <div className="section-title">
-                    <MathText text={question?.stem ?? "题目"} />
+                    <MathText text={question?.stem ?? "题目"} showCopyActions />
                   </div>
                   <div className="pill-list" style={{ marginTop: 8 }}>
                     <span className="pill">错因标签：{item.wrongTag || "未标注"}</span>
@@ -515,7 +526,7 @@ export default function StudentAssignmentDetailPage({ params }: { params: { id: 
               .map((item: any) => (
                 <div className="card" key={item.id}>
                   <div className="section-title">
-                    <MathText text={item.stem} />
+                    <MathText text={item.stem} showCopyActions />
                   </div>
                   <div className="pill-list" style={{ marginTop: 8 }}>
                     <span className="pill">
@@ -526,7 +537,7 @@ export default function StudentAssignmentDetailPage({ params }: { params: { id: 
                     </span>
                   </div>
                   <p style={{ marginTop: 8 }}>
-                    解析：<MathText text={item.explanation} />
+                    解析：<MathText text={item.explanation} showCopyActions />
                   </p>
                 </div>
               ))}

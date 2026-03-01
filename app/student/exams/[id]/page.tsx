@@ -5,7 +5,9 @@ import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
 import MathText from "@/components/MathText";
+import MathViewControls from "@/components/MathViewControls";
 import { SUBJECT_LABELS } from "@/lib/constants";
+import { useMathViewSettings } from "@/lib/math-view-settings";
 
 type ExamDetail = {
   exam: {
@@ -161,6 +163,7 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
   const [reviewPackLoading, setReviewPackLoading] = useState(false);
   const [clock, setClock] = useState(Date.now());
   const [timeupTriggered, setTimeupTriggered] = useState(false);
+  const mathView = useMathViewSettings("student-exam");
   const examEventRef = useRef({ blurCountDelta: 0, visibilityHiddenCountDelta: 0 });
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -606,7 +609,7 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
   const answerCount = Object.values(answers).filter((value) => value && value.trim()).length;
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid math-view-surface" style={{ gap: 18, ...mathView.style }}>
       <div className="section-head">
         <div>
           <h2>{data.exam.title}</h2>
@@ -624,6 +627,14 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
                 : "不可作答"}
         </span>
       </div>
+      <MathViewControls
+        fontScale={mathView.fontScale}
+        lineMode={mathView.lineMode}
+        onDecrease={mathView.decreaseFontScale}
+        onIncrease={mathView.increaseFontScale}
+        onReset={mathView.resetView}
+        onLineModeChange={mathView.setLineMode}
+      />
 
       <Card title="考试信息" tag="概览">
         <div className="grid grid-2">
@@ -698,7 +709,7 @@ export default function StudentExamDetailPage({ params }: { params: { id: string
           {data.questions.map((question, index) => (
             <div className="card" key={question.id}>
               <div className="section-title">
-                {index + 1}. <MathText text={question.stem} />
+                {index + 1}. <MathText text={question.stem} showCopyActions />
               </div>
               <div style={{ marginTop: 6, display: "grid", gap: 6 }}>
                 {question.options.map((option) => (

@@ -6,7 +6,9 @@ import Image from "next/image";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
 import MathText from "@/components/MathText";
+import MathViewControls from "@/components/MathViewControls";
 import { ASSIGNMENT_TYPE_LABELS, SUBJECT_LABELS } from "@/lib/constants";
+import { useMathViewSettings } from "@/lib/math-view-settings";
 
 type ReviewPayload = {
   assignment: { id: string; title: string; dueDate: string; submissionType?: "quiz" | "upload" | "essay" };
@@ -60,6 +62,7 @@ export default function TeacherAssignmentReviewPage({
   const [error, setError] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiReview, setAiReview] = useState<any>(null);
+  const mathView = useMathViewSettings("teacher-assignment-review");
 
   const load = useCallback(async () => {
     setError(null);
@@ -170,7 +173,7 @@ export default function TeacherAssignmentReviewPage({
   }
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid math-view-surface" style={{ gap: 18, ...mathView.style }}>
       <div className="section-head">
         <div>
           <h2>作业批改</h2>
@@ -180,6 +183,14 @@ export default function TeacherAssignmentReviewPage({
         </div>
         <span className="chip">学生：{data.student.name}</span>
       </div>
+      <MathViewControls
+        fontScale={mathView.fontScale}
+        lineMode={mathView.lineMode}
+        onDecrease={mathView.decreaseFontScale}
+        onIncrease={mathView.increaseFontScale}
+        onReset={mathView.resetView}
+        onLineModeChange={mathView.setLineMode}
+      />
 
       <Card title="作业概览" tag="概览">
         <div className="grid grid-2">
@@ -360,7 +371,7 @@ export default function TeacherAssignmentReviewPage({
             ? wrongQuestions.map((question, index) => (
                 <div className="card" key={question.id}>
                   <div className="section-title">
-                    {index + 1}. <MathText text={question.stem} />
+                    {index + 1}. <MathText text={question.stem} showCopyActions />
                   </div>
                   <div className="pill-list" style={{ marginTop: 8 }}>
                     <span className="pill">
@@ -371,7 +382,7 @@ export default function TeacherAssignmentReviewPage({
                     </span>
                   </div>
                   <p style={{ marginTop: 8 }}>
-                    解析：<MathText text={question.explanation} />
+                    解析：<MathText text={question.explanation} showCopyActions />
                   </p>
                   <label>
                     <div className="section-title">错因标签</div>

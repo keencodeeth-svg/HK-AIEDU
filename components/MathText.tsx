@@ -1,3 +1,5 @@
+"use client";
+
 import { Fragment } from "react";
 
 type MathTextProps = {
@@ -5,6 +7,7 @@ type MathTextProps = {
   as?: "div" | "span" | "p";
   className?: string;
   autoDetect?: boolean;
+  showCopyActions?: boolean;
 };
 
 type MathSegment = {
@@ -76,6 +79,26 @@ function formatMathToHtml(raw: string) {
   }
 
   return html;
+}
+
+function formatMathToPlain(raw: string) {
+  let text = normalizeMathExpression(raw);
+  for (let i = 0; i < 8; i += 1) {
+    const previous = text;
+    text = text.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1)/($2)");
+    text = text.replace(/\\sqrt\{([^{}]+)\}/g, "sqrt($1)");
+    text = text.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)\^\{([^{}]+)\}/g, "$1^($2)");
+    text = text.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)\^([A-Za-z0-9+\-]+)/g, "$1^$2");
+    text = text.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)_\{([^{}]+)\}/g, "$1_($2)");
+    text = text.replace(/([A-Za-z0-9)\]α-ωΑ-ΩπθΔΣ∑∫]+)_([A-Za-z0-9+\-]+)/g, "$1_$2");
+    if (text === previous) {
+      break;
+    }
+  }
+  LATEX_SYMBOLS.forEach(([pattern, replacement]) => {
+    text = text.replace(pattern, replacement);
+  });
+  return text.replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
 }
 
 function splitMathDelimitedSegments(input: string): MathSegment[] {
@@ -210,15 +233,96 @@ function renderSegments(segments: MathSegment[], autoDetect: boolean) {
   return nodes;
 }
 
-export default function MathText({ text, as = "span", className, autoDetect = true }: MathTextProps) {
+function formatTextToPlain(input: string, autoDetect: boolean) {
+  const segments = splitMathDelimitedSegments(input);
+  return segments
+    .map((segment) => {
+      if (segment.kind === "math") {
+        return formatMathToPlain(segment.content);
+      }
+      if (!autoDetect) {
+        return segment.content;
+      }
+      return splitInlineAutoMathSegments(segment.content)
+        .map((item) => (item.kind === "math" ? formatMathToPlain(item.content) : item.content))
+        .join("");
+    })
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function copyToClipboard(value: string) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  if (typeof document === "undefined") return;
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
+export default function MathText({
+  text,
+  as = "span",
+  className,
+  autoDetect = true,
+  showCopyActions = false
+}: MathTextProps) {
   const content = String(text ?? "");
   const segments = splitMathDelimitedSegments(content);
   const classes = ["math-text", className].filter(Boolean).join(" ");
+  const plainText = formatTextToPlain(content, autoDetect);
+  const hasContent = Boolean(content.trim());
+  const copyActions = showCopyActions && hasContent ? (
+    <span className="math-copy-actions">
+      <button
+        type="button"
+        className="math-copy-btn"
+        onClick={() => {
+          void copyToClipboard(content);
+        }}
+      >
+        复制 LaTeX
+      </button>
+      <button
+        type="button"
+        className="math-copy-btn"
+        onClick={() => {
+          void copyToClipboard(plainText || content);
+        }}
+      >
+        复制纯文本
+      </button>
+    </span>
+  ) : null;
   if (as === "div") {
-    return <div className={classes}>{renderSegments(segments, autoDetect)}</div>;
+    return (
+      <div className={classes}>
+        {renderSegments(segments, autoDetect)}
+        {copyActions}
+      </div>
+    );
   }
   if (as === "p") {
-    return <p className={classes}>{renderSegments(segments, autoDetect)}</p>;
+    return (
+      <p className={classes}>
+        {renderSegments(segments, autoDetect)}
+        {copyActions}
+      </p>
+    );
   }
-  return <span className={classes}>{renderSegments(segments, autoDetect)}</span>;
+  return (
+    <span className={classes}>
+      {renderSegments(segments, autoDetect)}
+      {copyActions}
+    </span>
+  );
 }

@@ -5,7 +5,9 @@ import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
 import MathText from "@/components/MathText";
+import MathViewControls from "@/components/MathViewControls";
 import { SUBJECT_LABELS } from "@/lib/constants";
+import { useMathViewSettings } from "@/lib/math-view-settings";
 
 type ExamDetail = {
   exam: {
@@ -78,6 +80,7 @@ export default function TeacherExamDetailPage({ params }: { params: { id: string
   const [publishingReviewPack, setPublishingReviewPack] = useState(false);
   const [publishMessage, setPublishMessage] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
+  const mathView = useMathViewSettings("teacher-exam-detail");
 
   const load = useCallback(async () => {
     setError(null);
@@ -181,7 +184,7 @@ export default function TeacherExamDetailPage({ params }: { params: { id: string
   }
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid math-view-surface" style={{ gap: 18, ...mathView.style }}>
       <div className="section-head">
         <div>
           <h2>{data.exam.title}</h2>
@@ -193,6 +196,14 @@ export default function TeacherExamDetailPage({ params }: { params: { id: string
           {data.exam.status === "closed" ? "已关闭" : "进行中"} · 提交 {data.summary.submitted}/{data.summary.assigned}
         </span>
       </div>
+      <MathViewControls
+        fontScale={mathView.fontScale}
+        lineMode={mathView.lineMode}
+        onDecrease={mathView.decreaseFontScale}
+        onIncrease={mathView.increaseFontScale}
+        onReset={mathView.resetView}
+        onLineModeChange={mathView.setLineMode}
+      />
 
       <Card title="考试概览" tag="概览">
         <div className="grid grid-2">
@@ -362,7 +373,7 @@ export default function TeacherExamDetailPage({ params }: { params: { id: string
             {data.questions.map((question, index) => (
               <div className="card" key={question.id}>
                 <div className="section-title">
-                  {index + 1}. <MathText text={question.stem} />
+                  {index + 1}. <MathText text={question.stem} showCopyActions />
                 </div>
                 <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-1)" }}>分值：{question.score}</div>
               </div>

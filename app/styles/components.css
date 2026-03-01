@@ -485,6 +485,91 @@
   line-height: 1.75;
 }
 
+.math-view-surface {
+  --math-scale: 1;
+  --math-line-height: 1.75;
+}
+
+.math-view-surface .math-text {
+  font-size: calc(1em * var(--math-scale));
+  line-height: var(--math-line-height);
+}
+
+.math-copy-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.math-copy-btn {
+  border: 1px solid rgba(130, 157, 190, 0.34);
+  border-radius: 999px;
+  background: linear-gradient(160deg, rgba(248, 252, 255, 0.95), rgba(229, 238, 249, 0.88));
+  color: var(--brand-0);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  box-shadow: var(--shadow-soft);
+}
+
+.math-copy-btn:hover {
+  border-color: rgba(60, 117, 199, 0.45);
+  background: linear-gradient(160deg, rgba(252, 254, 255, 0.98), rgba(234, 242, 250, 0.92));
+}
+
+.math-view-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(135, 159, 190, 0.28);
+  border-radius: 14px;
+  padding: 8px 10px;
+  background: linear-gradient(160deg, rgba(249, 253, 255, 0.96), rgba(231, 240, 250, 0.9));
+  box-shadow: var(--shadow-soft);
+}
+
+.math-view-controls-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-1);
+}
+
+.math-view-controls-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.math-view-control-value {
+  min-width: 50px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-1);
+}
+
+.math-view-control-btn {
+  border: 1px solid rgba(137, 163, 196, 0.35);
+  border-radius: 999px;
+  background: linear-gradient(160deg, rgba(248, 252, 255, 0.96), rgba(229, 238, 249, 0.9));
+  color: var(--brand-0);
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+  box-shadow: var(--shadow-soft);
+}
+
+.math-view-control-btn.active {
+  border-color: rgba(60, 117, 199, 0.48);
+  background: linear-gradient(155deg, rgba(219, 234, 255, 0.96), rgba(198, 222, 252, 0.92));
+}
+
+.math-view-control-btn.ghost {
+  background: transparent;
+}
+
 .math-inline,
 .math-display {
   display: inline-flex;

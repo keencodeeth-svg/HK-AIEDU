@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Card from "@/components/Card";
 import MathText from "@/components/MathText";
+import MathViewControls from "@/components/MathViewControls";
 import { GRADE_OPTIONS, SUBJECT_OPTIONS } from "@/lib/constants";
 import { trackEvent } from "@/lib/analytics-client";
+import { useMathViewSettings } from "@/lib/math-view-settings";
 
 type Question = {
   id: string;
@@ -99,6 +101,7 @@ export default function PracticePage() {
   const [explainMode, setExplainMode] = useState<"text" | "visual" | "analogy">("text");
   const [explainPack, setExplainPack] = useState<ExplainPack | null>(null);
   const [explainLoading, setExplainLoading] = useState(false);
+  const mathView = useMathViewSettings("student-practice");
 
   useEffect(() => {
     fetch("/api/knowledge-points")
@@ -402,7 +405,7 @@ export default function PracticePage() {
   };
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
+    <div className="grid math-view-surface" style={{ gap: 18, ...mathView.style }}>
       <div className="section-head">
         <div>
           <h2>智能练习</h2>
@@ -410,6 +413,14 @@ export default function PracticePage() {
         </div>
         <span className="chip">{modeLabel[mode] ?? "练习模式"}</span>
       </div>
+      <MathViewControls
+        fontScale={mathView.fontScale}
+        lineMode={mathView.lineMode}
+        onDecrease={mathView.decreaseFontScale}
+        onIncrease={mathView.increaseFontScale}
+        onReset={mathView.resetView}
+        onLineModeChange={mathView.setLineMode}
+      />
 
       <Card title="练习设置" tag="配置">
         <div className="grid grid-3" style={{ marginTop: 12 }}>
@@ -521,7 +532,7 @@ export default function PracticePage() {
 
       {question ? (
         <Card title="题目" tag="作答">
-          <MathText as="p" text={question.stem} />
+          <MathText as="p" text={question.stem} showCopyActions />
           {question.recommendation?.reason ? (
             <div style={{ marginTop: 8, fontSize: 12, color: "var(--ink-1)" }}>
               推荐原因：{question.recommendation.reason}
@@ -606,6 +617,7 @@ export default function PracticePage() {
               as="div"
               className="explain-content"
               text={explainPack ? explainPack[explainMode] : result.explanation}
+              showCopyActions
             />
           )}
           {typeof result.masteryScore === "number" ? (
@@ -668,7 +680,7 @@ export default function PracticePage() {
 
       {variantPack ? (
         <Card title="错题讲解" tag="纠错">
-          <MathText as="p" text={variantPack.analysis} />
+          <MathText as="p" text={variantPack.analysis} showCopyActions />
           {variantPack.hints?.length ? (
             <div className="grid" style={{ gap: 6, marginTop: 10 }}>
               <div className="badge">提示</div>
@@ -689,7 +701,7 @@ export default function PracticePage() {
               return (
                 <div className="card" key={`${variant.stem}-${index}`}>
                   <div className="section-title">变式题 {index + 1}</div>
-                  <MathText as="p" text={variant.stem} />
+                  <MathText as="p" text={variant.stem} showCopyActions />
                   <div className="grid" style={{ gap: 8, marginTop: 10 }}>
                     {variant.options.map((option) => (
                       <label className="card" key={option} style={{ cursor: "pointer" }}>
@@ -729,7 +741,7 @@ export default function PracticePage() {
                       <div>
                         正确答案：<MathText text={variant.answer} />
                       </div>
-                      <MathText as="div" text={variant.explanation} />
+                      <MathText as="div" text={variant.explanation} showCopyActions />
                     </div>
                   ) : null}
                 </div>
