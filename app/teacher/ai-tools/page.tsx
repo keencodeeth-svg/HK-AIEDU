@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Card from "@/components/Card";
+import MathText from "@/components/MathText";
 import { SUBJECT_LABELS } from "@/lib/constants";
 
 type ClassItem = {
@@ -607,7 +608,7 @@ export default function TeacherAiToolsPage() {
               {paperResult.questions.map((item, index) => (
                 <div className="card" key={item.id}>
                   <div className="section-title">
-                    {index + 1}. {item.stem}
+                    {index + 1}. <MathText text={item.stem} />
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
                     {item.unit ? `${item.unit} / ` : ""}
@@ -615,10 +616,14 @@ export default function TeacherAiToolsPage() {
                   </div>
                   <ul style={{ margin: "8px 0 0 16px" }}>
                     {item.options.map((opt) => (
-                      <li key={opt}>{opt}</li>
+                      <li key={opt}>
+                        <MathText text={opt} />
+                      </li>
                     ))}
                   </ul>
-                  <div style={{ marginTop: 6, fontSize: 12 }}>答案：{item.answer}</div>
+                  <div style={{ marginTop: 6, fontSize: 12 }}>
+                    答案：<MathText text={item.answer} />
+                  </div>
                 </div>
               ))}
             </div>
@@ -783,7 +788,7 @@ export default function TeacherAiToolsPage() {
               <div className="section-title">讲评话术</div>
               <div className="grid" style={{ gap: 8 }}>
                 {wrongResult.script.script?.map((item: string) => (
-                  <div key={item}>{item}</div>
+                  <MathText as="div" key={item} text={item} />
                 ))}
               </div>
             </div>
@@ -906,7 +911,7 @@ export default function TeacherAiToolsPage() {
               <ul style={{ margin: "8px 0 0 16px" }}>
                 {(reviewPackResult.exemplarQuestions ?? []).map((item: any) => (
                   <li key={`${item.knowledgePointId}-${item.questionId ?? "fallback"}`}>
-                    {item.title}：{item.stem}
+                    {item.title}：<MathText text={item.stem} />
                     {item.questionId ? (
                       <div className="pill-list" style={{ marginTop: 4 }}>
                         <span className="pill">风险 {aiRiskLabel(item.qualityRiskLevel)}</span>

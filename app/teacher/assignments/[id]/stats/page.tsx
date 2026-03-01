@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
+import MathText from "@/components/MathText";
 import { ASSIGNMENT_TYPE_LABELS, SUBJECT_LABELS } from "@/lib/constants";
 
 export default function AssignmentStatsPage({ params }: { params: { id: string } }) {
@@ -118,7 +119,9 @@ export default function AssignmentStatsPage({ params }: { params: { id: string }
           <div className="grid" style={{ gap: 10 }}>
             {data.questionStats.map((item: any) => (
               <div className="card" key={item.id}>
-                <div className="section-title">{item.stem}</div>
+                <div className="section-title">
+                  <MathText text={item.stem} />
+                </div>
                 <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
                   正确 {item.correct}/{item.total} · 正确率 {item.ratio}%
                 </div>

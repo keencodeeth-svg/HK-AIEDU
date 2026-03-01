@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Card from "@/components/Card";
+import MathText from "@/components/MathText";
 import { SUBJECT_LABELS } from "@/lib/constants";
 import {
   difficultyLabel,
@@ -675,27 +676,29 @@ export default function QuestionsListPanel({
                 题型 {questionTypeLabel[selectedQuestion.questionType ?? "choice"] ?? selectedQuestion.questionType ?? "选择题"} ·
                 ID {selectedQuestion.id}
               </div>
-              <div style={{ marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.7 }}>{selectedQuestion.stem}</div>
+              <div style={{ marginTop: 10 }}>
+                <MathText as="div" text={selectedQuestion.stem} />
+              </div>
               {selectedQuestion.options.length ? (
                 <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
                   {selectedQuestion.options.map((option) => (
                     <div key={`${selectedQuestion.id}-opt-${option}`} className="card" style={{ padding: 8 }}>
-                      {option}
+                      <MathText text={option} />
                     </div>
                   ))}
                 </div>
               ) : null}
               <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8 }}>
-                <span className="badge">正确答案：{selectedQuestion.answer}</span>
+                <span className="badge">
+                  正确答案：<MathText text={selectedQuestion.answer} />
+                </span>
                 <span className="badge">知识点ID：{selectedQuestion.knowledgePointId}</span>
               </div>
               <div style={{ marginTop: 10 }}>
                 <div className="section-title" style={{ marginTop: 0 }}>
                   解析
                 </div>
-                <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.7 }}>
-                  {selectedQuestion.explanation?.trim() || "暂无解析"}
-                </div>
+                <MathText as="div" text={selectedQuestion.explanation?.trim() || "暂无解析"} />
               </div>
               {selectedQuestion.tags?.length ? (
                 <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -776,7 +779,7 @@ export default function QuestionsListPanel({
                                   overflow: "hidden"
                                 }}
                               >
-                                {item.stem}
+                                <MathText text={item.stem} />
                               </div>
                               <div style={{ marginTop: 4, fontSize: 12, color: "var(--ink-1)" }}>
                                 {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级 · 难度{" "}
@@ -786,7 +789,9 @@ export default function QuestionsListPanel({
                               </div>
                             </div>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end" }}>
-                              <span className="badge">答案：{item.answer}</span>
+                              <span className="badge">
+                                答案：<MathText text={item.answer} />
+                              </span>
                               <button
                                 className="button secondary"
                                 type="button"
@@ -844,7 +849,7 @@ export default function QuestionsListPanel({
                             overflow: "hidden"
                           }}
                         >
-                          {item.stem}
+                          <MathText text={item.stem} />
                         </div>
                         <div style={{ fontSize: 12, color: "var(--ink-1)", lineHeight: 1.5 }}>
                           {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级 · 难度{" "}
@@ -870,7 +875,9 @@ export default function QuestionsListPanel({
                           <button className="button secondary" type="button" onClick={() => setSelectedQuestion(item)}>
                             查看详情
                           </button>
-                          <div className="badge">答案：{item.answer}</div>
+                          <div className="badge">
+                            答案：<MathText text={item.answer} />
+                          </div>
                           <button
                             className="button ghost"
                             type="button"

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Card from "@/components/Card";
+import MathText from "@/components/MathText";
 import { SUBJECT_LABELS } from "@/lib/constants";
 
 type ClassItem = {
@@ -761,7 +762,9 @@ export default function TeacherAnalysisPage() {
           ) : null}
           {favorites.slice(0, 6).map((item) => (
             <div className="card" key={item.id}>
-              <div className="section-title">{item.question?.stem ?? "题目"}</div>
+              <div className="section-title">
+                <MathText text={item.question?.stem ?? "题目"} />
+              </div>
               <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
                 {item.question?.knowledgePointTitle ?? "知识点"} · {item.question?.grade ?? "-"} 年级
               </div>

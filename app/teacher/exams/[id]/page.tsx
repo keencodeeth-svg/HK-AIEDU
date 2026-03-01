@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
+import MathText from "@/components/MathText";
 import { SUBJECT_LABELS } from "@/lib/constants";
 
 type ExamDetail = {
@@ -361,7 +362,7 @@ export default function TeacherExamDetailPage({ params }: { params: { id: string
             {data.questions.map((question, index) => (
               <div className="card" key={question.id}>
                 <div className="section-title">
-                  {index + 1}. {question.stem}
+                  {index + 1}. <MathText text={question.stem} />
                 </div>
                 <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-1)" }}>分值：{question.score}</div>
               </div>

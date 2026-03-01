@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Card from "@/components/Card";
 import Stat from "@/components/Stat";
 import EduIcon from "@/components/EduIcon";
+import MathText from "@/components/MathText";
 
 export default function ParentPage() {
   const [report, setReport] = useState<any>(null);
@@ -451,7 +452,9 @@ export default function ParentPage() {
           <div className="grid" style={{ gap: 8, marginTop: 12 }}>
             {favorites.slice(0, 5).map((item) => (
               <div className="card" key={item.id}>
-                <div className="section-title">{item.question?.stem ?? "题目"}</div>
+                <div className="section-title">
+                  <MathText text={item.question?.stem ?? "题目"} />
+                </div>
                 <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
                   {item.question?.knowledgePointTitle ?? "知识点"} · {item.question?.grade ?? "-"} 年级
                 </div>

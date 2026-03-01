@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
+import MathText from "@/components/MathText";
 import { ASSIGNMENT_TYPE_LABELS, SUBJECT_LABELS } from "@/lib/constants";
 
 type ReviewPayload = {
@@ -359,13 +360,19 @@ export default function TeacherAssignmentReviewPage({
             ? wrongQuestions.map((question, index) => (
                 <div className="card" key={question.id}>
                   <div className="section-title">
-                    {index + 1}. {question.stem}
+                    {index + 1}. <MathText text={question.stem} />
                   </div>
                   <div className="pill-list" style={{ marginTop: 8 }}>
-                    <span className="pill">学生答案：{question.answer || "未作答"}</span>
-                    <span className="pill">正确答案：{question.correctAnswer}</span>
+                    <span className="pill">
+                      学生答案：<MathText text={question.answer || "未作答"} />
+                    </span>
+                    <span className="pill">
+                      正确答案：<MathText text={question.correctAnswer} />
+                    </span>
                   </div>
-                  <p style={{ marginTop: 8 }}>解析：{question.explanation}</p>
+                  <p style={{ marginTop: 8 }}>
+                    解析：<MathText text={question.explanation} />
+                  </p>
                   <label>
                     <div className="section-title">错因标签</div>
                     <select
