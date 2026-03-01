@@ -456,6 +456,11 @@ export default function TeacherAiToolsPage() {
     );
   }
 
+  const checkPreviewOptions = checkForm.options.map((item) => item.trim()).filter(Boolean);
+  const hasCheckPreview = Boolean(
+    checkForm.stem.trim() || checkPreviewOptions.length || checkForm.answer.trim() || checkForm.explanation.trim()
+  );
+
   return (
     <div className="grid" style={{ gap: 18 }}>
       <div className="section-head">
@@ -1087,6 +1092,35 @@ export default function TeacherAiToolsPage() {
             {loading ? "检查中..." : "开始纠错"}
           </button>
         </form>
+        {hasCheckPreview ? (
+          <div className="card" style={{ marginTop: 12, display: "grid", gap: 8 }}>
+            <div className="section-title">公式预览</div>
+            <div>
+              <div style={{ fontSize: 12, color: "var(--ink-1)" }}>题干</div>
+              <MathText as="div" text={checkForm.stem || "（未填写）"} />
+            </div>
+            {checkPreviewOptions.length ? (
+              <div>
+                <div style={{ fontSize: 12, color: "var(--ink-1)" }}>选项</div>
+                <ul style={{ margin: "6px 0 0 16px" }}>
+                  {checkPreviewOptions.map((item) => (
+                    <li key={item}>
+                      <MathText text={item} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <div>
+              <div style={{ fontSize: 12, color: "var(--ink-1)" }}>答案</div>
+              <MathText text={checkForm.answer || "（未填写）"} />
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: "var(--ink-1)" }}>解析</div>
+              <MathText as="div" text={checkForm.explanation || "（未填写）"} />
+            </div>
+          </div>
+        ) : null}
         {checkError ? <div className="status-note error" style={{ marginTop: 8 }}>{checkError}</div> : null}
 
         {checkResult ? (

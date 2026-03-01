@@ -2,6 +2,7 @@
 
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import Card from "@/components/Card";
+import MathText from "@/components/MathText";
 import { GRADE_OPTIONS, SUBJECT_OPTIONS } from "@/lib/constants";
 import type { AiQuestionForm, KnowledgePoint, QuestionForm } from "../types";
 
@@ -42,6 +43,14 @@ export default function QuestionsToolsPanel({
   knowledgePoints,
   onCreate
 }: Props) {
+  const previewOptions = form.options
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const hasPreviewContent = Boolean(
+    form.stem.trim() || previewOptions.length || form.answer.trim() || form.explanation.trim()
+  );
+
   return (
     <div className="grid grid-2" style={{ alignItems: "start" }}>
       <Card title="批量导入题库（CSV）" tag="导入">
@@ -288,6 +297,35 @@ export default function QuestionsToolsPanel({
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             />
           </label>
+          {hasPreviewContent ? (
+            <div className="card" style={{ display: "grid", gap: 8 }}>
+              <div className="section-title">公式预览</div>
+              <div>
+                <div style={{ fontSize: 12, color: "var(--ink-1)" }}>题干</div>
+                <MathText as="div" text={form.stem || "（未填写）"} />
+              </div>
+              {previewOptions.length ? (
+                <div>
+                  <div style={{ fontSize: 12, color: "var(--ink-1)" }}>选项</div>
+                  <ul style={{ margin: "6px 0 0 16px" }}>
+                    {previewOptions.map((option) => (
+                      <li key={option}>
+                        <MathText text={option} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              <div>
+                <div style={{ fontSize: 12, color: "var(--ink-1)" }}>答案</div>
+                <MathText text={form.answer || "（未填写）"} />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "var(--ink-1)" }}>解析</div>
+                <MathText as="div" text={form.explanation || "（未填写）"} />
+              </div>
+            </div>
+          ) : null}
           <label>
             <div className="section-title">标签（逗号或 | 分隔）</div>
             <input
