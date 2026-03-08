@@ -2619,3 +2619,151 @@ html[data-density="compact"] .main {
 #assignment-feedback {
   scroll-margin-top: 96px;
 }
+
+.exam-stage-banner {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(100, 149, 237, 0.2);
+  background: linear-gradient(160deg, rgba(246, 251, 255, 0.98), rgba(228, 239, 252, 0.92));
+  box-shadow: var(--shadow-soft);
+}
+
+.exam-stage-kicker {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand-0);
+}
+
+.exam-stage-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--ink-0);
+}
+
+.exam-stage-description {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-1);
+}
+
+.exam-meta-line {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-1);
+}
+
+.exam-meta-line.error {
+  color: #b42318;
+}
+
+.exam-inline-actions {
+  align-items: center;
+}
+
+.exam-answer-form {
+  display: grid;
+  gap: 14px;
+}
+
+.exam-answer-progress-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 172, 201, 0.24);
+  background: linear-gradient(160deg, rgba(252, 254, 255, 0.96), rgba(233, 242, 250, 0.92));
+  box-shadow: var(--shadow-soft);
+}
+
+.exam-answer-progress-meta {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-1);
+}
+
+.exam-answer-jump-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.exam-answer-jump-chip {
+  min-width: 38px;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 172, 201, 0.28);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--ink-0);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: var(--shadow-soft);
+}
+
+.exam-answer-jump-chip.answered {
+  border-color: rgba(52, 168, 83, 0.32);
+  background: rgba(222, 248, 229, 0.82);
+  color: #146c2e;
+}
+
+.exam-answer-jump-chip.pending {
+  border-color: rgba(244, 174, 73, 0.36);
+  background: rgba(255, 246, 214, 0.9);
+  color: #9a5d0a;
+}
+
+.exam-question-card {
+  display: grid;
+  gap: 10px;
+  scroll-margin-top: 96px;
+}
+
+.exam-question-card.answered {
+  border-color: rgba(60, 117, 199, 0.32);
+}
+
+.exam-question-options {
+  display: grid;
+  gap: 8px;
+}
+
+.exam-question-option {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.exam-question-status {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-1);
+}
+
+.exam-result-summary {
+  margin-bottom: 10px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-1);
+}
+
+.exam-result-next-actions {
+  margin: 12px 0;
+}
+
+#exam-overview,
+#exam-answer-sheet,
+#exam-result,
+#exam-review-pack {
+  scroll-margin-top: 96px;
+}

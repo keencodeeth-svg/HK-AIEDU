@@ -20,6 +20,7 @@ export type ExamDetail = {
     status: "pending" | "in_progress" | "submitted";
     startedAt?: string;
     submittedAt?: string;
+    autoSavedAt?: string;
     score?: number;
     total?: number;
   };
