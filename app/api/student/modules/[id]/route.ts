@@ -16,7 +16,7 @@ export const GET = createLearningRoute({
   handler: async ({ params }) => {
     const parsed = parseParams(params, moduleParamsSchema);
     const moduleId = parsed.id;
-    const { student, moduleRecord } = await requireStudentModule(moduleId);
+    const { student, klass, moduleRecord } = await requireStudentModule(moduleId);
 
     const resources = await getModuleResources(moduleId);
     const assignments = await getAssignmentsByClassIds([moduleRecord.classId]);
@@ -29,6 +29,18 @@ export const GET = createLearningRoute({
       status: progressMap.get(assignment.id)?.status ?? "pending"
     }));
 
-    return { data: { module: moduleRecord, resources, assignments: assignmentData } };
+    return {
+      data: {
+        module: moduleRecord,
+        classroom: {
+          id: klass.id,
+          name: klass.name,
+          subject: klass.subject,
+          grade: klass.grade
+        },
+        resources,
+        assignments: assignmentData
+      }
+    };
   }
 });

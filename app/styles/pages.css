@@ -2481,6 +2481,114 @@ html[data-density="compact"] .main {
   }
 }
 
+.student-module-stage-banner,
+.portrait-stage-banner {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(100, 149, 237, 0.2);
+  background: linear-gradient(160deg, rgba(246, 251, 255, 0.98), rgba(228, 239, 252, 0.92));
+  box-shadow: var(--shadow-soft);
+}
+
+.student-module-stage-kicker,
+.portrait-stage-kicker {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand-0);
+}
+
+.student-module-stage-title,
+.portrait-stage-title {
+  font-size: clamp(20px, 2vw, 26px);
+  line-height: 1.3;
+  font-weight: 800;
+  color: var(--ink-0);
+  font-family: var(--font-display);
+}
+
+.student-module-stage-description,
+.portrait-stage-description,
+.student-module-resource-meta,
+.portrait-radar-legend {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ink-1);
+}
+
+.student-module-resource-card,
+.student-module-assignment-card,
+.portrait-ability-card {
+  display: grid;
+  gap: 10px;
+}
+
+.student-module-next-actions,
+.portrait-next-actions {
+  align-items: center;
+}
+
+#student-module-overview,
+#student-module-resources,
+#student-module-assignments {
+  scroll-margin-top: 96px;
+}
+
+.portrait-radar-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) 1fr;
+  gap: 24px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.portrait-radar-visual {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+}
+
+.portrait-ability-grid,
+.portrait-subject-grid,
+.portrait-weak-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.portrait-subject-grid,
+.portrait-weak-grid {
+  margin-top: 12px;
+}
+
+@media (max-width: 840px) {
+  .portrait-radar-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .student-module-stage-banner,
+  .portrait-stage-banner {
+    padding: 12px;
+  }
+
+  .student-module-stage-title,
+  .portrait-stage-title {
+    font-size: 18px;
+  }
+
+  .student-module-next-actions .button,
+  .student-module-next-actions a.button,
+  .portrait-next-actions .button,
+  .portrait-next-actions a.button {
+    flex: 1 1 100%;
+  }
+}
+
 .favorites-stage-banner {
   display: grid;
   gap: 8px;

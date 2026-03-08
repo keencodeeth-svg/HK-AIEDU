@@ -8,6 +8,13 @@ export type StudentModuleDetailRecord = {
   createdAt: string;
 };
 
+export type StudentModuleClassSummary = {
+  id: string;
+  name: string;
+  subject: string;
+  grade: string;
+};
+
 export type StudentModuleResource = {
   id: string;
   moduleId: string;
@@ -37,6 +44,7 @@ export type StudentModuleAssignment = {
 
 export type StudentModuleDetailData = {
   module: StudentModuleDetailRecord;
+  classroom: StudentModuleClassSummary;
   resources: StudentModuleResource[];
   assignments: StudentModuleAssignment[];
 };
