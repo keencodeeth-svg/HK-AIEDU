@@ -108,7 +108,7 @@ export const GET = createLearningRoute({
       nextAssignmentId?: string;
       moduleCount: number;
     }) {
-      if (role === "student" || role === "parent") {
+      if (role === "student") {
         if (base.nextAssignmentId) {
           return { actionHref: `/student/assignments/${base.nextAssignmentId}`, actionLabel: "去准备作业" };
         }
@@ -118,8 +118,18 @@ export const GET = createLearningRoute({
         return { actionHref: "/course", actionLabel: "查看课程主页" };
       }
 
+      if (role === "parent") {
+        if (base.nextAssignmentId) {
+          return { actionHref: "/parent", actionLabel: "查看孩子任务" };
+        }
+        if (base.moduleCount > 0) {
+          return { actionHref: "/course", actionLabel: "查看课程主页" };
+        }
+        return { actionHref: "/calendar", actionLabel: "查看课程安排" };
+      }
+
       if (base.nextAssignmentId) {
-        return { actionHref: "/teacher", actionLabel: "查看教学执行" };
+        return { actionHref: "/teacher/submissions", actionLabel: "查看提交箱" };
       }
       if (base.moduleCount > 0) {
         return { actionHref: "/teacher/modules", actionLabel: "查看课程模块" };

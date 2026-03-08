@@ -198,6 +198,9 @@ export async function runLearningSuite(context) {
   assert.equal(studentDashboardOverview.body?.data?.role, "student", "Student dashboard overview should detect student role");
   assert.ok(Array.isArray(studentDashboardOverview.body?.data?.metrics), "Student dashboard overview should include metrics");
   assert.ok(Array.isArray(studentDashboardOverview.body?.data?.quickActions), "Student dashboard overview should include quick actions");
+  const studentCalendarQuickAction = (studentDashboardOverview.body?.data?.quickActions ?? []).find((item) => item.id === "student-calendar");
+  assert.ok(studentCalendarQuickAction, "Student dashboard overview should include calendar quick action");
+  assert.equal(studentCalendarQuickAction?.href, "/calendar");
   const tutorQuickAction = (studentDashboardOverview.body?.data?.quickActions ?? []).find((item) => item.id === "student-tutor");
   assert.ok(tutorQuickAction, "Student dashboard overview should include tutor quick action");
   assert.equal(tutorQuickAction?.label, "拍题即问", "Tutor quick action should expose upgraded label");
@@ -598,6 +601,14 @@ export async function runLearningSuite(context) {
   assert.equal(parentDashboardOverview.status, 200, `Parent GET /api/dashboard/overview failed: ${parentDashboardOverview.raw}`);
   assert.equal(parentDashboardOverview.body?.data?.role, "parent", "Parent dashboard overview should detect parent role");
   assert.ok(Array.isArray(parentDashboardOverview.body?.data?.timeline), "Parent dashboard overview should include timeline");
+  const parentCalendarQuickAction = (parentDashboardOverview.body?.data?.quickActions ?? []).find((item) => item.id === "parent-calendar");
+  assert.ok(parentCalendarQuickAction, "Parent dashboard overview should include calendar quick action");
+  assert.equal(parentCalendarQuickAction?.href, "/calendar");
+
+  const parentSchedule = await apiFetch("/api/schedule");
+  assert.equal(parentSchedule.status, 200, `Parent GET /api/schedule failed: ${parentSchedule.raw}`);
+  assert.equal(parentSchedule.body?.data?.role, "parent", "Schedule API should detect parent role");
+  assert.ok(Array.isArray(parentSchedule.body?.data?.weekly), "Parent schedule should include weekly lessons");
 
   const parentAssignments = await apiFetch("/api/parent/assignments");
   assert.equal(parentAssignments.status, 200, `GET /api/parent/assignments failed: ${parentAssignments.raw}`);

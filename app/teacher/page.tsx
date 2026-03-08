@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { CourseModule } from "@/lib/modules";
 import Card from "@/components/Card";
+import RoleScheduleFocusCard from "@/components/RoleScheduleFocusCard";
 import { TeacherAssignmentsCard, TeacherClassListCard, TeacherJoinRequestsCard } from "./_components/TeacherCollectionPanels";
 import { TeacherAddStudentCard, TeacherAssignmentComposerCard, TeacherCreateClassCard } from "./_components/TeacherFormPanels";
 import { TeacherExamModuleCard, TeacherInsightsCard, TeacherOverviewCard, TeacherQuickAccessCards } from "./_components/TeacherSummaryPanels";
@@ -262,6 +263,8 @@ export default function TeacherPage() {
         </div>
         <span className="chip">教学进度跟踪</span>
       </div>
+
+      <RoleScheduleFocusCard variant="teacher" />
 
       <TeacherOverviewCard classes={classes} assignments={assignments} message={message} error={error} />
 

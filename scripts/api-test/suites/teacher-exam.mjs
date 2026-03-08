@@ -32,6 +32,14 @@ export async function runTeacherExamSuite(context) {
   assert.equal(teacherDashboardOverview.status, 200, `Teacher GET /api/dashboard/overview failed: ${teacherDashboardOverview.raw}`);
   assert.equal(teacherDashboardOverview.body?.data?.role, "teacher", "Teacher dashboard overview should detect teacher role");
   assert.ok(Array.isArray(teacherDashboardOverview.body?.data?.alerts), "Teacher dashboard overview should include alerts");
+  const teacherCalendarQuickAction = (teacherDashboardOverview.body?.data?.quickActions ?? []).find((item) => item.id === "teacher-calendar");
+  assert.ok(teacherCalendarQuickAction, "Teacher dashboard overview should include calendar quick action");
+  assert.equal(teacherCalendarQuickAction?.href, "/calendar");
+
+  const teacherSchedule = await apiFetch("/api/schedule");
+  assert.equal(teacherSchedule.status, 200, `Teacher GET /api/schedule failed: ${teacherSchedule.raw}`);
+  assert.equal(teacherSchedule.body?.data?.role, "teacher", "Schedule API should detect teacher role");
+  assert.ok(Array.isArray(teacherSchedule.body?.data?.weekly), "Teacher schedule should include weekly lessons");
 
   const teacherInsights = await apiFetch("/api/teacher/insights");
   assert.equal(teacherInsights.status, 200, `GET /api/teacher/insights failed: ${teacherInsights.raw}`);

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import RoleScheduleFocusCard from "@/components/RoleScheduleFocusCard";
 import StatePanel from "@/components/StatePanel";
 import { formatLoadedTime, requestJson, type RequestError } from "@/lib/client-request";
 import ParentAssignmentsCard from "./_components/ParentAssignmentsCard";
@@ -266,6 +267,8 @@ export default function ParentPage() {
           }
         />
       ) : null}
+
+      <RoleScheduleFocusCard variant="parent" />
 
       <div className="workflow-card-meta">
         <span className="chip">近 7 天正确率 {report.stats.accuracy}%</span>

@@ -386,6 +386,13 @@ async function buildStudentOverview(user: SafeUser, common: CommonOverviewData):
         tone: "primary"
       },
       {
+        id: "student-calendar",
+        label: "课程表",
+        description: "先看下一节课、今日节次和学习日程",
+        href: "/calendar",
+        tone: "secondary"
+      },
+      {
         id: "student-tutor",
         label: "拍题即问",
         description: "拍照识题、分步讲解、编辑重算",
@@ -397,13 +404,6 @@ async function buildStudentOverview(user: SafeUser, common: CommonOverviewData):
         label: "错题复习",
         description: reviewSummary.dueToday ? `今日有 ${reviewSummary.dueToday} 道待复习` : "复盘最近易错题",
         href: "/wrong-book",
-        tone: "secondary"
-      },
-      {
-        id: "student-plan",
-        label: "学习计划",
-        description: "查看今天最值得先做的计划项",
-        href: "/plan",
         tone: "ghost"
       }
     ],
@@ -537,17 +537,17 @@ async function buildParentOverview(user: SafeUser, common: CommonOverviewData): 
         tone: "primary"
       },
       {
+        id: "parent-calendar",
+        label: "孩子课程表",
+        description: "先确认下一节课、今日课程和放学后衔接安排",
+        href: "/calendar",
+        tone: "secondary"
+      },
+      {
         id: "parent-report",
         label: "学习周报",
         description: "掌握本周进步、薄弱点和建议动作",
         href: "/report",
-        tone: "secondary"
-      },
-      {
-        id: "parent-calendar",
-        label: "查看日程",
-        description: "确认考试、作业和家校活动安排",
-        href: "/calendar",
         tone: "secondary"
       },
       {
@@ -685,10 +685,10 @@ async function buildTeacherOverview(user: SafeUser, common: CommonOverviewData):
         tone: "primary"
       },
       {
-        id: "teacher-assignments",
-        label: "作业管理",
-        description: "继续发布、调整或查看班级作业",
-        href: "/teacher",
+        id: "teacher-calendar",
+        label: "教学课表",
+        description: "先看今天节次、下一节课与课堂安排",
+        href: "/calendar",
         tone: "secondary"
       },
       {
@@ -720,8 +720,8 @@ function buildAdminOverview(user: SafeUser, common: CommonOverviewData): Dashboa
       ]
     : [
         { id: "school-home", label: "学校管理", description: "查看学校维度的运营入口", href: "/school", tone: "primary" },
+        { id: "school-schedules", label: "课程表管理", description: "优先补齐排课覆盖、节次和班级课表", href: "/school/schedules", tone: "secondary" },
         { id: "school-classes", label: "班级管理", description: "查看班级、学生与教师状态", href: "/school/classes", tone: "secondary" },
-        { id: "school-students", label: "学生管理", description: "检查学生账户与班级绑定", href: "/school/students", tone: "secondary" },
         { id: "school-teachers", label: "教师管理", description: "查看教师名单与权限配置", href: "/school/teachers", tone: "ghost" }
       ];
 
@@ -768,21 +768,21 @@ function buildFallbackOverview(user: SafeUser, common: CommonOverviewData): Dash
   const quickActionsByRole: Record<UserRole, DashboardQuickAction[]> = {
     student: [
       { id: "student-home", label: "学生端", description: "返回学生主页继续学习", href: "/student", tone: "primary" },
+      { id: "student-calendar", label: "课程表", description: "先看下一节课和今天安排", href: "/calendar", tone: "secondary" },
       { id: "student-assignments", label: "作业中心", description: "继续查看待完成作业", href: "/student/assignments", tone: "secondary" },
-      { id: "student-tutor", label: "拍题即问", description: "直接进入图片识题模式", href: buildTutorLaunchHref({ intent: "image", source: "dashboard-fallback" }), tone: "secondary" },
-      { id: "student-inbox", label: "收件箱", description: "先处理老师或同学的新消息", href: "/inbox", tone: "ghost" }
+      { id: "student-tutor", label: "拍题即问", description: "直接进入图片识题模式", href: buildTutorLaunchHref({ intent: "image", source: "dashboard-fallback" }), tone: "ghost" }
     ],
     parent: [
       { id: "parent-home", label: "家长端", description: "查看家校协同与提醒", href: "/parent", tone: "primary" },
+      { id: "parent-calendar", label: "孩子课程表", description: "先确认孩子下一节课和今日课程", href: "/calendar", tone: "secondary" },
       { id: "parent-report", label: "学习周报", description: "继续查看孩子本周学习变化", href: "/report", tone: "secondary" },
-      { id: "parent-notifications", label: "通知中心", description: "确认学校和班级通知", href: "/notifications", tone: "ghost" },
-      { id: "parent-inbox", label: "收件箱", description: "继续处理家校沟通消息", href: "/inbox", tone: "secondary" }
+      { id: "parent-inbox", label: "收件箱", description: "继续处理家校沟通消息", href: "/inbox", tone: "ghost" }
     ],
     teacher: [
       { id: "teacher-home", label: "教师端", description: "返回教学主控台", href: "/teacher", tone: "primary" },
+      { id: "teacher-calendar", label: "教学课表", description: "先确认今天节次与下一节课安排", href: "/calendar", tone: "secondary" },
       { id: "teacher-submissions", label: "提交箱", description: "继续查看待跟进提交", href: "/teacher/submissions", tone: "secondary" },
-      { id: "teacher-analysis", label: "学情分析", description: "查看班级薄弱点与风险学生", href: "/teacher/analysis", tone: "secondary" },
-      { id: "teacher-notifications", label: "通知规则", description: "继续发送或管理提醒", href: "/teacher/notifications", tone: "ghost" }
+      { id: "teacher-analysis", label: "学情分析", description: "查看班级薄弱点与风险学生", href: "/teacher/analysis", tone: "ghost" }
     ],
     admin: [
       { id: "admin-home", label: "管理端", description: "返回平台管理首页", href: "/admin", tone: "primary" },
@@ -792,8 +792,8 @@ function buildFallbackOverview(user: SafeUser, common: CommonOverviewData): Dash
     ],
     school_admin: [
       { id: "school-home", label: "学校管理", description: "返回学校管理首页", href: "/school", tone: "primary" },
+      { id: "school-schedules", label: "课程表管理", description: "优先检查排课覆盖和节次完整度", href: "/school/schedules", tone: "secondary" },
       { id: "school-classes", label: "班级管理", description: "查看班级与教师状态", href: "/school/classes", tone: "secondary" },
-      { id: "school-students", label: "学生管理", description: "查看学生账户与班级绑定", href: "/school/students", tone: "secondary" },
       { id: "school-notifications", label: "通知中心", description: "处理学校侧通知提醒", href: "/notifications", tone: "ghost" }
     ]
   };
