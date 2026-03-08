@@ -69,11 +69,20 @@ function mapReply(row: DbReply): DiscussionReply {
   };
 }
 
+function sortTopics(list: DiscussionTopic[]) {
+  return [...list].sort((left, right) => {
+    if (left.pinned !== right.pinned) {
+      return left.pinned ? -1 : 1;
+    }
+    return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+  });
+}
+
 export async function getDiscussionTopics(): Promise<DiscussionTopic[]> {
   if (!isDbEnabled()) {
-    return readJson<DiscussionTopic[]>(TOPIC_FILE, []);
+    return sortTopics(readJson<DiscussionTopic[]>(TOPIC_FILE, []));
   }
-  const rows = await query<DbTopic>("SELECT * FROM discussions");
+  const rows = await query<DbTopic>("SELECT * FROM discussions ORDER BY pinned DESC, updated_at DESC, created_at DESC");
   return rows.map(mapTopic);
 }
 
@@ -81,10 +90,10 @@ export async function getDiscussionTopicsByClassIds(classIds: string[]): Promise
   if (!classIds.length) return [];
   if (!isDbEnabled()) {
     const list = await getDiscussionTopics();
-    return list.filter((item) => classIds.includes(item.classId));
+    return sortTopics(list.filter((item) => classIds.includes(item.classId)));
   }
   const rows = await query<DbTopic>(
-    "SELECT * FROM discussions WHERE class_id = ANY($1) ORDER BY pinned DESC, created_at DESC",
+    "SELECT * FROM discussions WHERE class_id = ANY($1) ORDER BY pinned DESC, updated_at DESC, created_at DESC",
     [classIds]
   );
   return rows.map(mapTopic);
@@ -163,9 +172,13 @@ export async function addDiscussionReply(input: {
   };
 
   if (!isDbEnabled()) {
-    const list = readJson<DiscussionReply[]>(REPLY_FILE, []);
-    list.push(next);
-    writeJson(REPLY_FILE, list);
+    const replyList = readJson<DiscussionReply[]>(REPLY_FILE, []);
+    replyList.push(next);
+    writeJson(REPLY_FILE, replyList);
+
+    const topicList = readJson<DiscussionTopic[]>(TOPIC_FILE, []);
+    const nextTopics = topicList.map((topic) => (topic.id === input.discussionId ? { ...topic, updatedAt: createdAt } : topic));
+    writeJson(TOPIC_FILE, nextTopics);
     return next;
   }
 
@@ -175,5 +188,6 @@ export async function addDiscussionReply(input: {
      RETURNING *`,
     [next.id, next.discussionId, next.authorId ?? null, next.parentId ?? null, next.content, createdAt]
   );
+  await query("UPDATE discussions SET updated_at = $2 WHERE id = $1", [next.discussionId, createdAt]);
   return row ? mapReply(row) : next;
 }
