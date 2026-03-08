@@ -20,6 +20,7 @@ export function isDatabaseRequired() {
   if (process.env.REQUIRE_DATABASE === "true") return true;
   if (process.env.REQUIRE_DATABASE === "false") return false;
   if (isProductionBuildPhase()) return false;
+  if (!process.env.DATABASE_URL) return false;
   return process.env.NODE_ENV === "production" && process.env.ALLOW_JSON_FALLBACK !== "true";
 }
 
