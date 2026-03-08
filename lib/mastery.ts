@@ -426,6 +426,12 @@ export async function syncMasteryForKnowledgePoint(userId: string, knowledgePoin
   return next;
 }
 
+export function isIncrementalMasteryEnabled() {
+  if (process.env.MASTERY_INCREMENTAL_ENABLED === "false") return false;
+  if (process.env.MASTERY_INCREMENTAL_ENABLED === "true") return true;
+  return true;
+}
+
 export async function syncMasteryForKnowledgePoints(userId: string, knowledgePointIds: string[], subject?: string) {
   const ids = Array.from(new Set(knowledgePointIds.filter(Boolean)));
   if (!ids.length) {
@@ -437,6 +443,26 @@ export async function syncMasteryForKnowledgePoints(userId: string, knowledgePoi
   }
 
   return readMasteryRecords(userId, subject);
+}
+
+export async function refreshMasteryAfterAttempts(userId: string, knowledgePointIds: string[], subject?: string) {
+  if (!isIncrementalMasteryEnabled()) {
+    return syncMasteryFromAttempts(userId, subject);
+  }
+  return syncMasteryForKnowledgePoints(userId, knowledgePointIds, subject);
+}
+
+export async function updateMasteryByAttempt(input: {
+  userId: string;
+  knowledgePointId: string;
+  subject?: string;
+}) {
+  const records = await refreshMasteryAfterAttempts(input.userId, [input.knowledgePointId], input.subject);
+  return {
+    mode: isIncrementalMasteryEnabled() ? "incremental" : "full_sync",
+    records,
+    record: records.find((item) => item.knowledgePointId === input.knowledgePointId) ?? null
+  };
 }
 
 export async function getMasteryRecordsByUser(userId: string, subject?: string) {

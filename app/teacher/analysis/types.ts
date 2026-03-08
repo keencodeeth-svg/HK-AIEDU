@@ -50,6 +50,7 @@ export type AnalysisAlertItem = {
   status: "active" | "acknowledged";
   lastActionType?: AnalysisActionType | null;
   lastActionAt?: string | null;
+  lastActionDetail?: string | null;
 };
 
 export type AnalysisAlertSummary = {

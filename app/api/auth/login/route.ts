@@ -14,7 +14,8 @@ import {
   buildLoginAttemptIdentity,
   clearLoginAttempt,
   getLoginAttemptStatus,
-  registerFailedLoginAttempt
+  registerFailedLoginAttempt,
+  type LoginAttemptStatus
 } from "@/lib/auth-security";
 import { createAuthRoute } from "@/lib/api/domains";
 
@@ -31,6 +32,16 @@ const loginBodySchema = v.object<{
   { allowUnknown: false }
 );
 
+function toAttemptDetails(status: LoginAttemptStatus) {
+  return {
+    enforced: status.enforced,
+    remainingAttempts: status.remainingAttempts,
+    failedCount: status.failedCount,
+    maxFailedAttempts: status.maxFailedAttempts,
+    lockUntil: status.lockUntil
+  };
+}
+
 export const POST = createAuthRoute({
   cache: "private-realtime",
   handler: async ({ request, meta }) => {
@@ -41,9 +52,7 @@ export const POST = createAuthRoute({
     });
     const attemptStatus = await getLoginAttemptStatus(attemptIdentity);
     if (attemptStatus.locked) {
-      throw new ApiError(429, "登录失败次数过多，请稍后再试", {
-        lockUntil: attemptStatus.lockUntil
-      });
+      throw new ApiError(429, "登录失败次数过多，请稍后再试", toAttemptDetails(attemptStatus));
     }
 
     const user = await getUserByEmail(body.email);
@@ -54,14 +63,12 @@ export const POST = createAuthRoute({
     if (!user || legacyPasswordDisabled || !verifyPassword(body.password, user.password)) {
       const failed = await registerFailedLoginAttempt(attemptIdentity);
       if (failed.locked) {
-        throw new ApiError(429, "登录失败次数过多，请稍后再试", {
-          lockUntil: failed.lockUntil
-        });
+        throw new ApiError(429, "登录失败次数过多，请稍后再试", toAttemptDetails(failed));
       }
       if (legacyPasswordDisabled) {
-        unauthorized("legacy password disabled, run security:migrate-passwords");
+        unauthorized("legacy password disabled, run security:migrate-passwords", toAttemptDetails(failed));
       }
-      unauthorized("invalid credentials");
+      unauthorized("邮箱或密码错误", toAttemptDetails(failed));
     }
 
     if (user.password.startsWith("plain:")) {

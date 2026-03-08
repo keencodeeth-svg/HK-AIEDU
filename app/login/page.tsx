@@ -5,8 +5,53 @@ import Link from "next/link";
 import Card from "@/components/Card";
 import { trackEvent } from "@/lib/analytics-client";
 
+type LoginRole = "student" | "teacher" | "parent" | "admin" | "school_admin";
+
+type LoginErrorPayload = {
+  error?: string;
+  details?: {
+    remainingAttempts?: number;
+    failedCount?: number;
+    maxFailedAttempts?: number;
+    lockUntil?: string | null;
+  };
+  role?: LoginRole;
+};
+
+function formatLockUntil(lockUntil?: string | null) {
+  if (!lockUntil) return "";
+  const value = new Date(lockUntil);
+  if (Number.isNaN(value.getTime())) return lockUntil;
+  return value.toLocaleString("zh-CN", {
+    hour12: false,
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function resolveLoginErrorMessage(payload: LoginErrorPayload, status: number) {
+  const lockUntil = formatLockUntil(payload.details?.lockUntil);
+  if (status === 429) {
+    return lockUntil
+      ? `登录失败次数过多，账号已临时锁定至 ${lockUntil}。`
+      : "登录失败次数过多，账号已临时锁定，请稍后再试。";
+  }
+
+  const remainingAttempts = payload.details?.remainingAttempts;
+  if (typeof remainingAttempts === "number") {
+    if (remainingAttempts <= 1) {
+      return "邮箱或密码错误，再错 1 次账号将被临时锁定。";
+    }
+    return `邮箱或密码错误，还可再尝试 ${remainingAttempts} 次。`;
+  }
+
+  return payload.error ?? "登录失败";
+}
+
 export default function LoginPage() {
-  const [role, setRole] = useState<"student" | "teacher" | "parent" | "admin" | "school_admin">("student");
+  const [role, setRole] = useState<LoginRole>("student");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +65,7 @@ export default function LoginPage() {
     { value: "school_admin" as const, label: "学校管理员", desc: "学校组织/教师/班级" }
   ];
 
-  const placeholderMap: Record<typeof role, string> = {
+  const placeholderMap: Record<LoginRole, string> = {
     student: "student@demo.com",
     teacher: "teacher@demo.com",
     parent: "parent@demo.com",
@@ -46,9 +91,21 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password, role })
       });
-      const data = await res.json();
+      const data = (await res.json()) as LoginErrorPayload;
       if (!res.ok) {
-        throw new Error(data?.error ?? "登录失败");
+        trackEvent({
+          eventName: "login_failed",
+          page: "/login",
+          entityId: role,
+          props: {
+            selectedRole: role,
+            status: res.status,
+            error: data?.error ?? "登录失败",
+            remainingAttempts: data?.details?.remainingAttempts ?? null,
+            lockUntil: data?.details?.lockUntil ?? null
+          }
+        });
+        throw new Error(resolveLoginErrorMessage(data, res.status));
       }
 
       trackEvent({

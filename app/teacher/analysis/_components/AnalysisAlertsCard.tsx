@@ -7,7 +7,7 @@ import type {
   AnalysisParentCollaborationSummary,
   TeacherAlertActionType
 } from "../types";
-import { formatDateTime, getAlertNotificationLabel, getAlertTypeLabel } from "../utils";
+import { ACTION_TYPE_LABEL, formatDateTime, getAlertNotificationLabel, getAlertTypeLabel } from "../utils";
 
 type AnalysisAlertsCardProps = {
   alerts: AnalysisAlertItem[];
@@ -94,8 +94,11 @@ export default function AnalysisAlertsCard({
               <p style={{ color: "var(--ink-1)" }}>建议动作：{item.recommendedAction}</p>
               {item.lastActionType ? (
                 <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
-                  最近动作：{item.lastActionType} · {formatDateTime(item.lastActionAt)}
+                  最近动作：{ACTION_TYPE_LABEL[item.lastActionType]} · {formatDateTime(item.lastActionAt)}
                 </div>
+              ) : null}
+              {item.lastActionDetail ? (
+                <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 4 }}>{item.lastActionDetail}</div>
               ) : null}
               <div className="cta-row">
                 <button

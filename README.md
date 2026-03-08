@@ -384,14 +384,14 @@ CI 工作流：`.github/workflows/ci.yml`
 
 - workflow-lint
 - lint
-- api-tests
 - build
 - verify（强制汇总校验）
+- `npm run test:api` 当前仍作为本地发布前必跑项，暂未接入 GitHub CI 必过校验
 
 ## 13. Render 部署建议
 
 1. 创建 Web Service + PostgreSQL
-2. 配置环境变量：`DATABASE_URL`、`DB_SSL=true`、AI keys、`LLM_PROVIDER_CHAIN`
+2. 配置环境变量：`DATABASE_URL`、`DB_SSL=true`、`REQUIRE_DATABASE=true`、`ALLOW_JSON_FALLBACK=false`、`MASTERY_INCREMENTAL_ENABLED=true`、`UNIFIED_REVIEW_ENGINE=true`、AI keys、`LLM_PROVIDER_CHAIN`、`AI_POLICY_ENFORCE=true`
 3. 首次部署执行：
 
 ```bash
@@ -401,7 +401,15 @@ npm run seed:stage3
 npm run seed:library-db
 ```
 
-4. 登录管理端 `/admin/ai-models` 校验模型链与健康状态
+4. 版本升级执行：
+
+```bash
+npm run db:migrate
+```
+
+5. 开启 `UNIFIED_REVIEW_ENGINE=true` 后，历史 `wrong_review_items` 与 `memory_reviews` 会在用户读取复练数据时懒回填到 `review_tasks`，发布窗口仍建议完整执行 `npm run lint`、`npm run build`、`npm run test:api`。
+
+6. 登录管理端 `/admin/ai-models` 校验模型链与健康状态
 
 ## 14. 目录结构
 

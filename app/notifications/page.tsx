@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import Card from "@/components/Card";
 import StatePanel from "@/components/StatePanel";
+import { formatLoadedTime, requestJson, type RequestError } from "@/lib/client-request";
 
 type Notification = {
   id: string;
@@ -15,7 +16,6 @@ type Notification = {
 };
 
 type ReadFilter = "all" | "unread" | "read";
-type RequestError = Error & { status?: number };
 
 const TYPE_LABELS: Record<string, string> = {
   assignment: "作业",
@@ -30,32 +30,6 @@ const TYPE_LABELS: Record<string, string> = {
 
 function getNotificationTypeLabel(type: string) {
   return TYPE_LABELS[type] ?? type;
-}
-
-function formatLoadedTime(value: string | null) {
-  if (!value) return "";
-  return new Date(value).toLocaleString("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-}
-
-async function requestJson<T>(url: string, init?: RequestInit) {
-  const res = await fetch(url, init);
-  let data: T | Record<string, unknown> | null = null;
-  try {
-    data = await res.json();
-  } catch {
-    data = null;
-  }
-  if (!res.ok) {
-    const error = new Error((data as { error?: string } | null)?.error ?? "加载失败") as RequestError;
-    error.status = res.status;
-    throw error;
-  }
-  return data as T;
 }
 
 export default function NotificationsPage() {

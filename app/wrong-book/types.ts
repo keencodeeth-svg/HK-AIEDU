@@ -54,6 +54,10 @@ export type ReviewQueueItem = {
   lastReviewAt: string | null;
   reviewCount: number;
   status: "active" | "completed";
+  originType: "practice" | "diagnostic" | "assignment" | "exam" | "wrong_book_review" | null;
+  originLabel: string | null;
+  originPaperId: string | null;
+  originSubmittedAt: string | null;
   question: ReviewQueueQuestion;
 };
 

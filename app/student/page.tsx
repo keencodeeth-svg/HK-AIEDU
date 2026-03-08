@@ -1,14 +1,18 @@
 "use client";
 
+import Link from "next/link";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import StatePanel from "@/components/StatePanel";
 import { trackEvent } from "@/lib/analytics-client";
+import { formatLoadedTime, getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
 import StudentDashboardGuideCard from "./_components/StudentDashboardGuideCard";
 import StudentEntryCompactCard from "./_components/StudentEntryCompactCard";
 import StudentEntryDetailCard from "./_components/StudentEntryDetailCard";
-import StudentQuickTutorCard from "./_components/StudentQuickTutorCard";
 import StudentMotivationCard from "./_components/StudentMotivationCard";
 import StudentPriorityTasksCard from "./_components/StudentPriorityTasksCard";
+import StudentQuickTutorCard from "./_components/StudentQuickTutorCard";
 import StudentTaskOverviewCard from "./_components/StudentTaskOverviewCard";
+import StudentUnifiedTaskQueueCard from "./_components/StudentUnifiedTaskQueueCard";
 import type {
   EntryCategory,
   EntryViewMode,
@@ -22,6 +26,39 @@ import type {
 } from "./types";
 import { CATEGORY_META, ENTRY_CATEGORIES, ENTRY_ITEMS, STUDENT_DASHBOARD_GUIDE_KEY } from "./utils";
 
+type PlanResponse = {
+  data?: {
+    items?: PlanItem[];
+    plan?: {
+      items?: PlanItem[];
+    };
+  } | null;
+  items?: PlanItem[];
+};
+
+type MotivationResponse = MotivationPayload | { data?: MotivationPayload | null };
+type JoinRequestsResponse = { data?: JoinRequest[] };
+type TodayTasksResponse = { data?: TodayTaskPayload | null };
+type JoinClassResponse = { message?: string; data?: { message?: string } };
+
+function extractPlanItems(payload: PlanResponse | null | undefined): PlanItem[] {
+  if (Array.isArray(payload?.data?.items)) return payload.data.items;
+  if (Array.isArray(payload?.data?.plan?.items)) return payload.data.plan.items;
+  if (Array.isArray(payload?.items)) return payload.items;
+  return [];
+}
+
+function extractMotivation(payload: MotivationResponse | null | undefined): MotivationPayload | null {
+  if (!payload) return null;
+  if ("data" in payload) {
+    return payload.data ?? null;
+  }
+  if ("streak" in payload && "badges" in payload) {
+    return payload;
+  }
+  return null;
+}
+
 export default function StudentPage() {
   const trackedTaskExposureRef = useRef<string | null>(null);
   const [plan, setPlan] = useState<PlanItem[]>([]);
@@ -31,38 +68,78 @@ export default function StudentPage() {
   const [joinCode, setJoinCode] = useState("");
   const [joinMessage, setJoinMessage] = useState<JoinMessage | null>(null);
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<EntryCategory>("priority");
   const [showAllEntries, setShowAllEntries] = useState(false);
   const [entryViewMode, setEntryViewMode] = useState<EntryViewMode>("compact");
   const [showDashboardGuide, setShowDashboardGuide] = useState(true);
 
-  const loadTodayTasks = useCallback(async () => {
-    setTodayTaskError(null);
-    const res = await fetch("/api/student/today-tasks");
-    const payload = await res.json();
-    if (!res.ok) {
-      setTodayTaskError(payload?.error ?? "加载今日任务失败");
-      return;
-    }
-    setTodayTasks(payload?.data ?? null);
+  const loadJoinRequests = useCallback(async () => {
+    const payload = await requestJson<JoinRequestsResponse>("/api/student/join-requests");
+    setJoinRequests(payload.data ?? []);
   }, []);
 
+  const loadTodayTasks = useCallback(async () => {
+    setTodayTaskError(null);
+    try {
+      const payload = await requestJson<TodayTasksResponse>("/api/student/today-tasks");
+      setTodayTasks(payload.data ?? null);
+      return true;
+    } catch (nextError) {
+      if (isAuthError(nextError)) {
+        throw nextError;
+      }
+      setTodayTaskError(getRequestErrorMessage(nextError, "加载今日任务失败"));
+      return false;
+    }
+  }, []);
+
+  const loadDashboard = useCallback(
+    async (mode: "initial" | "refresh" = "initial") => {
+      if (mode === "refresh") {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+      setPageError(null);
+
+      try {
+        const [planPayload, motivationPayload] = await Promise.all([
+          requestJson<PlanResponse>("/api/plan"),
+          requestJson<MotivationResponse>("/api/student/motivation")
+        ]);
+
+        setPlan(extractPlanItems(planPayload));
+        setMotivation(extractMotivation(motivationPayload));
+        await Promise.all([loadJoinRequests(), loadTodayTasks()]);
+        setAuthRequired(false);
+        setLastLoadedAt(new Date().toISOString());
+      } catch (nextError) {
+        if (isAuthError(nextError)) {
+          setAuthRequired(true);
+          setPlan([]);
+          setMotivation(null);
+          setJoinRequests([]);
+          setTodayTasks(null);
+          setTodayTaskError(null);
+        } else {
+          setPageError(getRequestErrorMessage(nextError, "加载学习控制台失败"));
+        }
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [loadJoinRequests, loadTodayTasks]
+  );
+
   useEffect(() => {
-    fetch("/api/plan")
-      .then((res) => res.json())
-      .then((data) => {
-        const items = data.data?.items ?? [];
-        setPlan(items);
-      });
-    fetch("/api/student/motivation")
-      .then((res) => res.json())
-      .then((data) => setMotivation(data?.data ?? data ?? null));
-    fetch("/api/student/join-requests")
-      .then((res) => res.json())
-      .then((data) => setJoinRequests(data.data ?? []));
-    loadTodayTasks();
-  }, [loadTodayTasks]);
+    void loadDashboard();
+  }, [loadDashboard]);
 
   useEffect(() => {
     try {
@@ -164,6 +241,8 @@ export default function StudentPage() {
     return entriesByCategory.slice(0, CATEGORY_META[activeCategory].defaultCount);
   }, [activeCategory, entriesByCategory, showAllEntries]);
 
+  const hasDashboardData = plan.length > 0 || motivation !== null || todayTasks !== null || joinRequests.length > 0;
+
   async function handleJoinClass(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setJoinMessage(null);
@@ -171,36 +250,53 @@ export default function StudentPage() {
       setJoinMessage({ text: "请输入邀请码后再提交。", tone: "error" });
       return;
     }
-    const res = await fetch("/api/student/join-class", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: joinCode.trim() })
-    });
-    const data = await res.json();
-    setJoinMessage({
-      text: data?.message ?? (res.ok ? "已提交" : "加入失败"),
-      tone: res.ok ? "success" : "error"
-    });
-    setJoinCode("");
-    fetch("/api/student/join-requests")
-      .then((resp) => resp.json())
-      .then((payload) => setJoinRequests(payload.data ?? []));
+
+    try {
+      const payload = await requestJson<JoinClassResponse>("/api/student/join-class", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: joinCode.trim() })
+      });
+      setJoinMessage({
+        text: payload.message ?? payload.data?.message ?? "已提交",
+        tone: "success"
+      });
+      setJoinCode("");
+      await loadJoinRequests();
+      setAuthRequired(false);
+      setPageError(null);
+      setLastLoadedAt(new Date().toISOString());
+    } catch (nextError) {
+      if (isAuthError(nextError)) {
+        setAuthRequired(true);
+        return;
+      }
+      setJoinMessage({ text: getRequestErrorMessage(nextError, "加入失败"), tone: "error" });
+    }
   }
 
   async function refreshPlan() {
     setRefreshing(true);
-    const res = await fetch("/api/plan/refresh", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject: "all" })
-    });
-    const data = await res.json();
-    const items = data?.data?.items ?? data?.data?.plan?.items ?? [];
-    if (Array.isArray(items)) {
-      setPlan(items);
+    setPageError(null);
+    try {
+      const payload = await requestJson<PlanResponse>("/api/plan/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: "all" })
+      });
+      setPlan(extractPlanItems(payload));
+      await loadTodayTasks();
+      setAuthRequired(false);
+      setLastLoadedAt(new Date().toISOString());
+    } catch (nextError) {
+      if (isAuthError(nextError)) {
+        setAuthRequired(true);
+      } else {
+        setPageError(getRequestErrorMessage(nextError, "刷新学习计划失败"));
+      }
+    } finally {
+      setRefreshing(false);
     }
-    await loadTodayTasks();
-    setRefreshing(false);
   }
 
   function hideDashboardGuide() {
@@ -221,6 +317,46 @@ export default function StudentPage() {
     }
   }
 
+  if (loading && !hasDashboardData && !authRequired) {
+    return (
+      <StatePanel
+        title="学习控制台加载中"
+        description="正在汇总学习计划、今日任务和成长激励。"
+        tone="loading"
+      />
+    );
+  }
+
+  if (authRequired) {
+    return (
+      <StatePanel
+        title="需要学生账号登录"
+        description="请先登录学生账号，再查看学习控制台和今日任务。"
+        tone="info"
+        action={
+          <Link className="button secondary" href="/login">
+            前往登录
+          </Link>
+        }
+      />
+    );
+  }
+
+  if (pageError && !hasDashboardData) {
+    return (
+      <StatePanel
+        title="学习控制台加载失败"
+        description={pageError}
+        tone="error"
+        action={
+          <button className="button secondary" type="button" onClick={() => void loadDashboard()}>
+            重试
+          </button>
+        }
+      />
+    );
+  }
+
   return (
     <div className="grid dashboard-stack">
       <div className="section-head">
@@ -228,8 +364,16 @@ export default function StudentPage() {
           <h2>学习控制台</h2>
           <div className="section-sub">今日任务、成长激励与学习入口。</div>
         </div>
-        <span className="chip">学期进行中</span>
+        <div className="cta-row no-margin" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(lastLoadedAt)}</span> : null}
+          <span className="chip">学期进行中</span>
+          <button className="button secondary" type="button" onClick={() => void loadDashboard("refresh")} disabled={loading || refreshing}>
+            {refreshing ? "刷新中..." : "刷新"}
+          </button>
+        </div>
       </div>
+
+      {pageError ? <StatePanel title="本次刷新存在异常" description={pageError} tone="error" compact /> : null}
 
       <StudentDashboardGuideCard
         showDashboardGuide={showDashboardGuide}
@@ -261,6 +405,12 @@ export default function StudentPage() {
           <StudentMotivationCard motivation={motivation} />
         </div>
       </div>
+
+      <StudentUnifiedTaskQueueCard
+        todayTasks={todayTasks}
+        todayTaskError={todayTaskError}
+        onTaskEvent={handleTaskEvent}
+      />
 
       <div className="section-head">
         <div>

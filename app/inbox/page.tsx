@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
 import StatePanel from "@/components/StatePanel";
+import { formatLoadedTime, requestJson, type RequestError } from "@/lib/client-request";
 import { SUBJECT_LABELS } from "@/lib/constants";
 
 type UserSession = {
@@ -35,34 +36,6 @@ type ThreadDetail = {
   participants: Array<{ id: string; name: string; role: string }>;
   messages: Array<{ id: string; senderId?: string; content: string; createdAt: string }>;
 };
-
-type RequestError = Error & { status?: number };
-
-async function requestJson<T>(url: string, init?: RequestInit) {
-  const res = await fetch(url, init);
-  let data: T | Record<string, unknown> | null = null;
-  try {
-    data = await res.json();
-  } catch {
-    data = null;
-  }
-  if (!res.ok) {
-    const error = new Error((data as { error?: string } | null)?.error ?? "加载失败") as RequestError;
-    error.status = res.status;
-    throw error;
-  }
-  return data as T;
-}
-
-function formatLoadedTime(value: string | null) {
-  if (!value) return "";
-  return new Date(value).toLocaleString("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-}
 
 function getComposeHint(role: string | null) {
   if (role === "teacher") {

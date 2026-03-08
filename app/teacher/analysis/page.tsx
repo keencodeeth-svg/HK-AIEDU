@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import StatePanel from "@/components/StatePanel";
+import { formatLoadedTime, getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
 import AnalysisAlertsCard from "./_components/AnalysisAlertsCard";
 import AnalysisCausalityCard from "./_components/AnalysisCausalityCard";
 import AnalysisFavoritesCard from "./_components/AnalysisFavoritesCard";
@@ -22,11 +25,33 @@ import type {
   TeacherAlertActionType
 } from "./types";
 
+type TeacherClassesResponse = { data?: AnalysisClassItem[] };
+type TeacherInsightsResponse = { summary?: { parentCollaboration?: AnalysisParentCollaborationSummary | null } };
+type HeatmapResponse = { data?: { items?: AnalysisHeatItem[] } };
+type AlertsResponse = { data?: { alerts?: AnalysisAlertItem[]; summary?: AnalysisAlertSummary | null } };
+type CausalityResponse = {
+  data?: {
+    summary?: AnalysisInterventionCausalitySummary | null;
+    items?: AnalysisInterventionCausalityItem[];
+  };
+};
+type StudentsResponse = { data?: AnalysisStudentItem[] };
+type FavoritesResponse = { data?: AnalysisFavoriteItem[] };
+type AlertImpactResponse = { data?: AnalysisAlertImpactData };
+type AlertActionResponse = { data?: { result?: { message?: string } } };
+type ReportResponse = { data?: AnalysisReportData | null };
+
 export default function TeacherAnalysisPage() {
+  const didInitRef = useRef(false);
+  const skipNextClassEffectRef = useRef<string | null>(null);
+  const skipNextStudentEffectRef = useRef<string | null>(null);
+  const studentIdRef = useRef("");
   const [classes, setClasses] = useState<AnalysisClassItem[]>([]);
   const [classId, setClassId] = useState("");
   const [heatmap, setHeatmap] = useState<AnalysisHeatItem[]>([]);
   const [report, setReport] = useState<AnalysisReportData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [heatmapLoading, setHeatmapLoading] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -45,162 +70,365 @@ export default function TeacherAnalysisPage() {
   const [causalityItems, setCausalityItems] = useState<AnalysisInterventionCausalityItem[]>([]);
   const [causalityLoading, setCausalityLoading] = useState(false);
   const [causalityDays, setCausalityDays] = useState(14);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/teacher/classes")
-      .then((res) => res.json())
-      .then((data) => setClasses(data.data ?? []));
+    studentIdRef.current = studentId;
+  }, [studentId]);
+
+  const resetScopedData = useCallback(() => {
+    setHeatmap([]);
+    setReport(null);
+    setReportError(null);
+    setStudents([]);
+    setStudentId("");
+    setFavorites([]);
+    setAlerts([]);
+    setAlertSummary(null);
+    setParentCollaboration(null);
+    setAlertActionMessage(null);
+    setImpactByAlertId({});
+    setCausalitySummary(null);
+    setCausalityItems([]);
   }, []);
 
-  useEffect(() => {
-    if (!classId && classes.length) {
-      setClassId(classes[0].id);
-    }
-  }, [classes, classId]);
-
-  async function loadHeatmap(targetId: string) {
-    setHeatmapLoading(true);
-    const res = await fetch(`/api/teacher/insights/heatmap?classId=${targetId}`);
-    const data = await res.json();
-    setHeatmap(data?.data?.items ?? []);
-    setHeatmapLoading(false);
-  }
-
-  async function loadAlerts(targetId: string) {
-    const res = await fetch(`/api/teacher/alerts?classId=${targetId}&includeAcknowledged=true`);
-    const data = await res.json();
-    setAlerts(data?.data?.alerts ?? []);
-    setAlertSummary(data?.data?.summary ?? null);
-  }
-
-  async function loadTeacherSummary() {
-    const res = await fetch("/api/teacher/insights");
-    const data = await res.json();
-    setParentCollaboration(data?.summary?.parentCollaboration ?? null);
-  }
-
-  async function loadInterventionCausality(targetId: string, days: number) {
-    setCausalityLoading(true);
-    const res = await fetch(`/api/teacher/insights/intervention-causality?classId=${targetId}&days=${days}`);
-    const data = await res.json();
-    setCausalitySummary(data?.data?.summary ?? null);
-    setCausalityItems(data?.data?.items ?? []);
-    setCausalityLoading(false);
-  }
-
-  useEffect(() => {
-    if (classId) {
-      loadHeatmap(classId);
-      loadAlerts(classId);
-      loadTeacherSummary();
-      loadInterventionCausality(classId, causalityDays);
-    }
-  }, [classId, causalityDays]);
-
-  async function acknowledgeAlert(alertId: string) {
-    setAcknowledgingAlertId(alertId);
-    const res = await fetch(`/api/teacher/alerts/${alertId}/action`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actionType: "mark_done" })
-    });
-    if (res.ok && classId) {
-      await loadAlerts(classId);
-    }
-    setAcknowledgingAlertId(null);
-  }
-
-  async function runAlertAction(alertId: string, actionType: TeacherAlertActionType) {
-    const actionKey = `${alertId}:${actionType}`;
-    setActingAlertKey(actionKey);
-    setAlertActionMessage(null);
-    const res = await fetch(`/api/teacher/alerts/${alertId}/action`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actionType })
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setAlertActionMessage(data?.error ?? "执行失败");
-      setActingAlertKey(null);
+  const loadFavorites = useCallback(async (targetStudentId: string, silent = false) => {
+    if (!targetStudentId) {
+      setFavorites([]);
       return;
     }
-    setAlertActionMessage(data?.data?.result?.message ?? "动作已执行");
-    if (classId) {
-      await loadAlerts(classId);
-    }
-    await loadAlertImpact(alertId, true);
-    setActingAlertKey(null);
-  }
 
-  async function loadAlertImpact(alertId: string, force = false) {
-    if (!force && impactByAlertId[alertId]) return;
-    setLoadingImpactId(alertId);
-    const res = await fetch(`/api/teacher/alerts/${alertId}/impact`);
-    const data = await res.json();
-    if (res.ok && data?.data) {
-      setImpactByAlertId((prev) => ({ ...prev, [alertId]: data.data }));
+    try {
+      const payload = await requestJson<FavoritesResponse>(
+        `/api/teacher/favorites?studentId=${encodeURIComponent(targetStudentId)}`
+      );
+      setFavorites(payload.data ?? []);
+      setAuthRequired(false);
+    } catch (nextError) {
+      if (isAuthError(nextError)) {
+        setAuthRequired(true);
+        setFavorites([]);
+        return;
+      }
+      if (!silent) {
+        setPageError(getRequestErrorMessage(nextError, "加载学生收藏失败"));
+      }
+      setFavorites([]);
     }
-    setLoadingImpactId(null);
-  }
+  }, []);
 
-  useEffect(() => {
-    if (!classId) return;
-    fetch(`/api/teacher/classes/${classId}/students`)
-      .then((res) => res.json())
-      .then((data) => {
-        const list = data.data ?? [];
-        setStudents(list);
-        if (list.length) {
-          setStudentId(list[0].id);
+  const loadClassScopedData = useCallback(
+    async (targetClassId: string, days: number, preferredStudentId?: string) => {
+      if (!targetClassId) {
+        resetScopedData();
+        return;
+      }
+
+      setHeatmapLoading(true);
+      setCausalityLoading(true);
+      setPageError(null);
+
+      try {
+        const [heatmapPayload, alertsPayload, insightsPayload, causalityPayload, studentsPayload] = await Promise.all([
+          requestJson<HeatmapResponse>(`/api/teacher/insights/heatmap?classId=${encodeURIComponent(targetClassId)}`),
+          requestJson<AlertsResponse>(
+            `/api/teacher/alerts?classId=${encodeURIComponent(targetClassId)}&includeAcknowledged=true`
+          ),
+          requestJson<TeacherInsightsResponse>("/api/teacher/insights"),
+          requestJson<CausalityResponse>(
+            `/api/teacher/insights/intervention-causality?classId=${encodeURIComponent(targetClassId)}&days=${days}`
+          ),
+          requestJson<StudentsResponse>(`/api/teacher/classes/${encodeURIComponent(targetClassId)}/students`)
+        ]);
+
+        const nextStudents = studentsPayload.data ?? [];
+        const nextStudentId =
+          preferredStudentId && nextStudents.some((item) => item.id === preferredStudentId)
+            ? preferredStudentId
+            : nextStudents[0]?.id ?? "";
+
+        setHeatmap(heatmapPayload.data?.items ?? []);
+        setAlerts(alertsPayload.data?.alerts ?? []);
+        setAlertSummary(alertsPayload.data?.summary ?? null);
+        setParentCollaboration(insightsPayload.summary?.parentCollaboration ?? null);
+        setCausalitySummary(causalityPayload.data?.summary ?? null);
+        setCausalityItems(causalityPayload.data?.items ?? []);
+        setStudents(nextStudents);
+        setAuthRequired(false);
+
+        if (nextStudentId) {
+          if (nextStudentId !== studentIdRef.current) {
+            skipNextStudentEffectRef.current = nextStudentId;
+            setStudentId(nextStudentId);
+          }
+          await loadFavorites(nextStudentId, true);
         } else {
           setStudentId("");
+          setFavorites([]);
         }
-      });
-  }, [classId]);
+
+        setLastLoadedAt(new Date().toISOString());
+      } catch (nextError) {
+        if (isAuthError(nextError)) {
+          setAuthRequired(true);
+          resetScopedData();
+        } else {
+          setPageError(getRequestErrorMessage(nextError, "加载班级学情失败"));
+        }
+      } finally {
+        setHeatmapLoading(false);
+        setCausalityLoading(false);
+      }
+    },
+    [loadFavorites, resetScopedData]
+  );
+
+  const loadBootstrap = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+    if (mode === "refresh") {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+    setPageError(null);
+
+    try {
+      const payload = await requestJson<TeacherClassesResponse>("/api/teacher/classes");
+      const nextClasses = payload.data ?? [];
+      setClasses(nextClasses);
+      setAuthRequired(false);
+
+      if (!nextClasses.length) {
+        setClassId("");
+        resetScopedData();
+        setLastLoadedAt(new Date().toISOString());
+        return;
+      }
+
+      const nextClassId = nextClasses.some((item) => item.id === classId) ? classId : nextClasses[0].id;
+      if (nextClassId !== classId) {
+        skipNextClassEffectRef.current = nextClassId;
+        setClassId(nextClassId);
+      }
+      await loadClassScopedData(nextClassId, causalityDays, studentIdRef.current);
+    } catch (nextError) {
+      if (isAuthError(nextError)) {
+        setAuthRequired(true);
+        setClasses([]);
+        setClassId("");
+        resetScopedData();
+      } else {
+        setPageError(getRequestErrorMessage(nextError, "加载教师分析看板失败"));
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [causalityDays, classId, loadClassScopedData, resetScopedData]);
+
+  useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+    void loadBootstrap();
+  }, [loadBootstrap]);
+
+  useEffect(() => {
+    if (!didInitRef.current || !classId) return;
+    if (skipNextClassEffectRef.current === classId) {
+      skipNextClassEffectRef.current = null;
+      return;
+    }
+    void loadClassScopedData(classId, causalityDays, studentIdRef.current);
+  }, [causalityDays, classId, loadClassScopedData]);
 
   useEffect(() => {
     if (!studentId) {
       setFavorites([]);
       return;
     }
-    fetch(`/api/teacher/favorites?studentId=${studentId}`)
-      .then((res) => res.json())
-      .then((data) => setFavorites(data.data ?? []));
-  }, [studentId]);
+    if (skipNextStudentEffectRef.current === studentId) {
+      skipNextStudentEffectRef.current = null;
+      return;
+    }
+    void loadFavorites(studentId);
+  }, [loadFavorites, studentId]);
+
+  useEffect(() => {
+    if (report?.classId && classId && report.classId !== classId) {
+      setReport(null);
+      setReportError(null);
+    }
+  }, [classId, report?.classId]);
+
+  async function acknowledgeAlert(alertId: string) {
+    setAcknowledgingAlertId(alertId);
+    setAlertActionMessage(null);
+    try {
+      const payload = await requestJson<AlertActionResponse>(`/api/teacher/alerts/${alertId}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actionType: "mark_done" })
+      });
+      setAlertActionMessage(payload.data?.result?.message ?? "预警已确认");
+      if (classId) {
+        await loadClassScopedData(classId, causalityDays, studentIdRef.current);
+      }
+    } catch (nextError) {
+      if (isAuthError(nextError)) {
+        setAuthRequired(true);
+      } else {
+        setAlertActionMessage(getRequestErrorMessage(nextError, "确认预警失败"));
+      }
+    } finally {
+      setAcknowledgingAlertId(null);
+    }
+  }
+
+  async function runAlertAction(alertId: string, actionType: TeacherAlertActionType) {
+    const actionKey = `${alertId}:${actionType}`;
+    setActingAlertKey(actionKey);
+    setAlertActionMessage(null);
+    try {
+      const payload = await requestJson<AlertActionResponse>(`/api/teacher/alerts/${alertId}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actionType })
+      });
+      setAlertActionMessage(payload.data?.result?.message ?? "动作已执行");
+      if (classId) {
+        await loadClassScopedData(classId, causalityDays, studentIdRef.current);
+      }
+      await loadAlertImpact(alertId, true);
+    } catch (nextError) {
+      if (isAuthError(nextError)) {
+        setAuthRequired(true);
+      } else {
+        setAlertActionMessage(getRequestErrorMessage(nextError, "执行失败"));
+      }
+    } finally {
+      setActingAlertKey(null);
+    }
+  }
+
+  async function loadAlertImpact(alertId: string, force = false) {
+    if (!force && impactByAlertId[alertId]) return;
+    setLoadingImpactId(alertId);
+    try {
+      const payload = await requestJson<AlertImpactResponse>(`/api/teacher/alerts/${alertId}/impact`);
+      if (payload.data) {
+        setImpactByAlertId((prev) => ({ ...prev, [alertId]: payload.data as AnalysisAlertImpactData }));
+      }
+    } catch (nextError) {
+      if (isAuthError(nextError)) {
+        setAuthRequired(true);
+      } else {
+        setAlertActionMessage(getRequestErrorMessage(nextError, "加载效果追踪失败"));
+      }
+    } finally {
+      setLoadingImpactId(null);
+    }
+  }
 
   async function generateReport() {
     if (!classId) return;
     setReportLoading(true);
     setReportError(null);
-    const res = await fetch("/api/teacher/insights/report", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ classId })
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setReportError(data?.error ?? data?.message ?? "学情报告生成失败");
+    try {
+      const payload = await requestJson<ReportResponse>("/api/teacher/insights/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classId })
+      });
+      setReport(payload.data ?? null);
+      setAuthRequired(false);
+    } catch (nextError) {
+      if (isAuthError(nextError)) {
+        setAuthRequired(true);
+      } else {
+        setReportError(getRequestErrorMessage(nextError, "学情报告生成失败"));
+      }
+    } finally {
       setReportLoading(false);
-      return;
     }
-    setReport(data?.data ?? null);
-    setReportLoading(false);
   }
 
   const sortedHeatmap = useMemo(() => heatmap.slice(0, 40), [heatmap]);
   const showHeatmapSkeleton = heatmapLoading && sortedHeatmap.length === 0;
   const showReportSkeleton = reportLoading && !report;
 
+  if (loading && !classes.length && !authRequired) {
+    return (
+      <StatePanel
+        title="教师分析看板加载中"
+        description="正在汇总班级、预警、热力图和家长协同数据。"
+        tone="loading"
+      />
+    );
+  }
+
+  if (authRequired) {
+    return (
+      <StatePanel
+        title="需要教师账号登录"
+        description="请使用教师账号登录后查看班级学情分析。"
+        tone="info"
+        action={
+          <Link className="button secondary" href="/login">
+            前往登录
+          </Link>
+        }
+      />
+    );
+  }
+
+  if (pageError && !classes.length) {
+    return (
+      <StatePanel
+        title="教师分析看板加载失败"
+        description={pageError}
+        tone="error"
+        action={
+          <button className="button secondary" type="button" onClick={() => void loadBootstrap()}>
+            重试
+          </button>
+        }
+      />
+    );
+  }
+
+  if (!loading && !classes.length) {
+    return (
+      <StatePanel
+        title="暂无班级数据"
+        description="请先在教师端创建或加入班级后，再查看学情分析。"
+        tone="empty"
+        action={
+          <Link className="button secondary" href="/teacher">
+            前往教师工作台
+          </Link>
+        }
+      />
+    );
+  }
+
   return (
     <div className="grid" style={{ gap: 18 }}>
       <div className="section-head">
         <div>
           <h2>班级学情分析</h2>
-          <div className="section-sub">掌握热力图 + 学情报告。</div>
+          <div className="section-sub">掌握热力图、预警闭环、家长协同与学情报告统一收敛。</div>
         </div>
-        <span className="chip">数据面板</span>
+        <div className="cta-row no-margin" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(lastLoadedAt)}</span> : null}
+          <span className="chip">数据面板</span>
+          <button className="button secondary" type="button" onClick={() => void loadBootstrap("refresh")} disabled={loading || refreshing}>
+            {refreshing ? "刷新中..." : "刷新"}
+          </button>
+        </div>
       </div>
+
+      {pageError ? <StatePanel title="本次刷新存在异常" description={pageError} tone="error" compact /> : null}
 
       <AnalysisFiltersCard classes={classes} classId={classId} onClassChange={setClassId} />
       <AnalysisAlertsCard

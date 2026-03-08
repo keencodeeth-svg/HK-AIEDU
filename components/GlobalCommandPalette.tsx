@@ -17,6 +17,10 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+function isSameDestination(pathname: string, href: string) {
+  return pathname === href;
+}
+
 function mergeLinks(primaryLinks: NavLink[], navGroups: NavGroup[]) {
   const merged: SearchItem[] = [];
   const seen = new Set<string>();
@@ -77,6 +81,10 @@ export default function GlobalCommandPalette({
   const [recentHrefs, setRecentHrefs] = useState<string[]>([]);
 
   const mergedLinks = useMemo(() => mergeLinks(primaryLinks, navGroups), [primaryLinks, navGroups]);
+  const currentPageItem = useMemo(
+    () => mergedLinks.find((item) => isSameDestination(pathname, item.href)) ?? null,
+    [mergedLinks, pathname]
+  );
 
   useEffect(() => {
     try {
@@ -144,8 +152,9 @@ export default function GlobalCommandPalette({
       .map((href) => hrefMap.get(href))
       .filter(Boolean)
       .map((item) => ({ ...item!, groupType: "recent" as const, group: "最近访问" }))
+      .filter((item) => !isSameDestination(pathname, item.href))
       .slice(0, 6);
-  }, [mergedLinks, recentHrefs]);
+  }, [mergedLinks, pathname, recentHrefs]);
 
   const featuredLinks = useMemo(() => {
     const deduped = new Set<string>();
@@ -153,11 +162,18 @@ export default function GlobalCommandPalette({
       .filter((item) => {
         if (deduped.has(item.href)) return false;
         deduped.add(item.href);
-        return true;
+        return !isSameDestination(pathname, item.href);
       })
       .slice(0, 8)
-      .map((item) => mergedLinks.find((candidate) => candidate.href === item.href) ?? { ...item, group: "常用入口", groupType: "primary" as const });
-  }, [primaryLinks, navGroups, mergedLinks]);
+      .map(
+        (item) =>
+          mergedLinks.find((candidate) => candidate.href === item.href) ?? {
+            ...item,
+            group: "常用入口",
+            groupType: "primary" as const
+          }
+      );
+  }, [mergedLinks, navGroups, pathname, primaryLinks]);
 
   const visibleResults = useMemo(() => {
     const normalized = keyword.trim().toLowerCase();
@@ -172,11 +188,16 @@ export default function GlobalCommandPalette({
 
     return mergedLinks
       .map((item) => ({ item, score: rankItem(item, normalized, recentHrefs) }))
-      .filter((entry) => entry.score >= 0)
+      .filter((entry) => entry.score >= 0 && !isSameDestination(pathname, entry.item.href))
       .sort((a, b) => b.score - a.score || a.item.label.localeCompare(b.item.label, "zh-CN"))
       .slice(0, 12)
       .map((entry) => entry.item);
-  }, [featuredLinks, keyword, mergedLinks, recentHrefs, recentLinks]);
+  }, [featuredLinks, keyword, mergedLinks, pathname, recentHrefs, recentLinks]);
+
+  const currentPageMatchesKeyword = useMemo(() => {
+    if (!currentPageItem || !keyword.trim()) return false;
+    return rankItem(currentPageItem, keyword.trim().toLowerCase(), recentHrefs) >= 0;
+  }, [currentPageItem, keyword, recentHrefs]);
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -283,8 +304,12 @@ export default function GlobalCommandPalette({
             <StatePanel
               compact
               tone="empty"
-              title="没有找到匹配功能"
-              description="换个关键词试试，或者清空后查看最近访问与常用入口。"
+              title={currentPageMatchesKeyword ? "你已经在这个页面" : "没有找到匹配功能"}
+              description={
+                currentPageMatchesKeyword
+                  ? "当前关键词命中的入口就是你正在访问的页面，试试更具体的关键词继续跳转。"
+                  : "换个关键词试试，或者清空后查看最近访问与常用入口。"
+              }
               action={
                 keyword.trim() ? (
                   <button type="button" className="button secondary" onClick={() => setKeyword("")}>

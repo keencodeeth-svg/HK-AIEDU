@@ -79,6 +79,13 @@ function getAlertNotificationLabel(type: TeacherAlertItem["type"]) {
   return type === "student-risk" ? "提醒学生" : "提醒全班";
 }
 
+function getActionTypeLabel(type: TeacherAlertActionType | "mark_done") {
+  if (type === "assign_review") return "布置修复";
+  if (type === "notify_student") return "提醒学生/班级";
+  if (type === "auto_chain") return "一键闭环";
+  return "确认完成";
+}
+
 function formatDateTime(value?: string | null) {
   return value ? new Date(value).toLocaleString("zh-CN") : "-";
 }
@@ -163,8 +170,11 @@ export function TeacherInsightsCard({
                   <p style={{ color: "var(--ink-1)" }}>建议动作：{item.recommendedAction}</p>
                   {item.lastActionType ? (
                     <p style={{ color: "var(--ink-1)", fontSize: 12 }}>
-                      最近动作：{item.lastActionType} · {formatDateTime(item.lastActionAt)}
+                      最近动作：{getActionTypeLabel(item.lastActionType)} · {formatDateTime(item.lastActionAt)}
                     </p>
+                  ) : null}
+                  {item.lastActionDetail ? (
+                    <p style={{ color: "var(--ink-1)", fontSize: 12 }}>{item.lastActionDetail}</p>
                   ) : null}
                   <div className="cta-row">
                     <button

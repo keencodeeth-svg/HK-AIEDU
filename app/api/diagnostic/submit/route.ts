@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { getCurrentUser } from "@/lib/auth";
 import { getKnowledgePoints, getQuestions } from "@/lib/content";
 import { addAttempt, generateStudyPlan } from "@/lib/progress";
-import { syncMasteryForKnowledgePoints } from "@/lib/mastery";
+import { refreshMasteryAfterAttempts } from "@/lib/mastery";
 import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 import { createLearningRoute } from "@/lib/api/domains";
@@ -66,20 +66,23 @@ export const POST = createLearningRoute({
       if (!correct && item.reason) {
         wrongReasons.set(item.reason, (wrongReasons.get(item.reason) ?? 0) + 1);
       }
-      await addAttempt({
-        id: crypto.randomBytes(10).toString("hex"),
-        userId: user.id,
-        questionId: question.id,
-        subject: question.subject,
-        knowledgePointId: question.knowledgePointId,
-        correct,
-        answer: item.answer,
-        reason: item.reason,
-        createdAt: new Date().toISOString()
-      });
+      await addAttempt(
+        {
+          id: crypto.randomBytes(10).toString("hex"),
+          userId: user.id,
+          questionId: question.id,
+          subject: question.subject,
+          knowledgePointId: question.knowledgePointId,
+          correct,
+          answer: item.answer,
+          reason: item.reason,
+          createdAt: new Date().toISOString()
+        },
+        { reviewOrigin: { sourceType: "diagnostic" } }
+      );
     }
 
-    await syncMasteryForKnowledgePoints(user.id, Array.from(attemptedKnowledgePointIds), body.subject);
+    await refreshMasteryAfterAttempts(user.id, Array.from(attemptedKnowledgePointIds), body.subject);
     const plan = await generateStudyPlan(user.id, body.subject);
 
     return {

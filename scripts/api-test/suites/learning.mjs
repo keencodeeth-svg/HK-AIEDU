@@ -71,6 +71,30 @@ export async function runLearningSuite(context) {
     "Practice submit should return knowledgePointId"
   );
   assert.ok(practiceSubmit.body?.mastery && typeof practiceSubmit.body.mastery === "object");
+  assert.equal(practiceSubmit.body?.mastery?.total, 1, "First practice attempt should set mastery.total=1");
+  assert.equal(practiceSubmit.body?.mastery?.correct, 0, "Wrong first practice attempt should set mastery.correct=0");
+  assert.ok(
+    ["incremental", "full_sync"].includes(String(practiceSubmit.body?.masteryUpdateMode ?? "")),
+    "Practice submit should expose mastery update mode"
+  );
+
+  const practiceReviewNext = await apiFetch("/api/practice/next", {
+    method: "POST",
+    json: {
+      subject: "math",
+      grade: "4",
+      knowledgePointId: practiceNext.body.question.knowledgePointId,
+      mode: "review"
+    }
+  });
+  assert.equal(practiceReviewNext.status, 200, `POST /api/practice/next review failed: ${practiceReviewNext.raw}`);
+  assert.equal(
+    practiceReviewNext.body?.question?.id,
+    practiceNext.body.question.id,
+    "Review mode should prioritize the queued wrong question for the fresh student"
+  );
+  assert.equal(practiceReviewNext.body?.reviewSourceType, "wrong", "Review mode should expose wrong-review source when available");
+  assert.equal(typeof practiceReviewNext.body?.reviewDueAt, "string", "Review mode should expose queued review due time");
 
   const answerOnlyAssist = await apiFetch("/api/ai/assist", {
     method: "POST",
@@ -264,6 +288,7 @@ export async function runLearningSuite(context) {
   const queueItem = queueItems.find((item) => item.questionId === practiceNext.body.question.id);
   assert.ok(queueItem, "Review queue should include newly wrong question");
   assert.equal(queueItem?.intervalLevel, 1, "Review queue item should start at intervalLevel 1");
+  assert.equal(queueItem?.originType, "practice", "Practice wrong question should keep originType=practice");
 
   const todayTasks = await apiFetch("/api/student/today-tasks");
   assert.equal(todayTasks.status, 200, `GET /api/student/today-tasks failed: ${todayTasks.raw}`);
@@ -338,6 +363,22 @@ export async function runLearningSuite(context) {
   assert.equal(reviewResult.body?.correct, true, "Review result should accept correct answer");
   assert.equal(reviewResult.body?.intervalLevel, 2, "After one correct review, interval should move to level 2");
   assert.equal(typeof reviewResult.body?.nextReviewAt, "string", "Review result should include nextReviewAt");
+  assert.ok(reviewResult.body?.mastery && typeof reviewResult.body.mastery === "object");
+  assert.equal(reviewResult.body?.mastery?.total, 2, "Wrong review should advance mastery.total to 2 for the same question");
+  assert.equal(reviewResult.body?.mastery?.correct, 1, "Wrong review correct answer should advance mastery.correct to 1");
+  const reviewQueueAfterCorrect = await apiFetch("/api/wrong-book/review-queue");
+  assert.equal(reviewQueueAfterCorrect.status, 200, `GET /api/wrong-book/review-queue after review submit failed: ${reviewQueueAfterCorrect.raw}`);
+  const reviewQueueItemsAfterCorrect = [
+    ...(reviewQueueAfterCorrect.body?.data?.today ?? []),
+    ...(reviewQueueAfterCorrect.body?.data?.upcoming ?? [])
+  ];
+  const queueItemAfterCorrect = reviewQueueItemsAfterCorrect.find((item) => item.questionId === practiceNext.body.question.id);
+  assert.ok(queueItemAfterCorrect, "Review queue should keep the reviewed question after interval upgrade");
+  assert.equal(queueItemAfterCorrect?.intervalLevel, 2, "Review queue should persist the upgraded intervalLevel after correct review");
+  assert.ok(
+    ["incremental", "full_sync"].includes(String(reviewResult.body?.masteryUpdateMode ?? "")),
+    "Wrong review should expose mastery update mode"
+  );
 
   const weeklyReport = await apiFetch("/api/report/weekly");
   assert.equal(weeklyReport.status, 200, `GET /api/report/weekly failed: ${weeklyReport.raw}`);

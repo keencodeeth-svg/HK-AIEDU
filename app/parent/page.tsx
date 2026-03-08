@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import StatePanel from "@/components/StatePanel";
+import { formatLoadedTime, requestJson, type RequestError } from "@/lib/client-request";
 import ParentAssignmentsCard from "./_components/ParentAssignmentsCard";
 import ParentCorrectionsCard from "./_components/ParentCorrectionsCard";
 import ParentFavoritesCard from "./_components/ParentFavoritesCard";
@@ -21,8 +22,6 @@ import type {
   ReceiptStatus,
   WeeklyReport
 } from "./types";
-
-type RequestError = Error & { status?: number };
 
 type ParentAssignmentsPayload = {
   data?: AssignmentListItem[];
@@ -43,34 +42,6 @@ type ParentCorrectionsPayload = {
 type ParentFavoritesPayload = {
   data?: FavoriteItem[];
 };
-
-async function requestJson<T>(url: string) {
-  const res = await fetch(url);
-  let data: T | Record<string, unknown> | null = null;
-  try {
-    data = await res.json();
-  } catch {
-    data = null;
-  }
-
-  if (!res.ok) {
-    const error = new Error((data as { error?: string } | null)?.error ?? "加载失败") as RequestError;
-    error.status = res.status;
-    throw error;
-  }
-
-  return data as T;
-}
-
-function formatLoadedTime(value: string | null) {
-  if (!value) return "";
-  return new Date(value).toLocaleString("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-}
 
 export default function ParentPage() {
   const [report, setReport] = useState<WeeklyReport | null>(null);

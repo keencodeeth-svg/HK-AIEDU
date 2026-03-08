@@ -1,5 +1,5 @@
 import { getAdaptiveQuestions, getPracticeQuestions, getWrongQuestionIds } from "@/lib/progress";
-import { getDueReviewQuestions } from "@/lib/memory";
+import { getUnifiedReviewQuestionCandidates } from "@/lib/review-scheduler";
 import { getQuestions } from "@/lib/content";
 import { getMasteryRecordsByUser, getWeaknessRankMap } from "@/lib/mastery";
 import { getStudentProfile } from "@/lib/profiles";
@@ -35,6 +35,8 @@ export const POST = createLearningRoute({
     const profile = await getStudentProfile(user.id);
     const grade = body.grade ?? profile?.grade ?? (user.grade ?? "4");
     let questions = await getPracticeQuestions(subject, grade, body.knowledgePointId);
+    let reviewSourceType: "wrong" | "memory" | null = null;
+    let reviewDueAt: string | null = null;
     if (body.mode === "wrong") {
       const wrongIds = await getWrongQuestionIds(user.id);
       const all = await getQuestions();
@@ -55,14 +57,18 @@ export const POST = createLearningRoute({
       });
     }
     if (body.mode === "review") {
-      questions = await getDueReviewQuestions({
+      const reviewCandidates = await getUnifiedReviewQuestionCandidates({
         userId: user.id,
         subject,
         grade,
+        knowledgePointId: body.knowledgePointId,
         limit: 10
       });
+      questions = reviewCandidates.map((item) => item.question);
+      reviewSourceType = reviewCandidates[0]?.task.sourceType ?? null;
+      reviewDueAt = reviewCandidates[0]?.task.nextReviewAt ?? null;
     }
-    let question = questions[Math.floor(Math.random() * questions.length)];
+    let question = body.mode === "review" ? questions[0] : questions[Math.floor(Math.random() * questions.length)];
     let weaknessRank: number | null = null;
     let recommendationReason = "随机练习巩固";
 
@@ -85,7 +91,9 @@ export const POST = createLearningRoute({
       }
 
       weaknessRank = rankMap.get(question.knowledgePointId) ?? null;
-      if (weaknessRank !== null && body.mode !== "adaptive") {
+      if (body.mode === "review") {
+        recommendationReason = reviewSourceType === "wrong" ? "统一复练队列：错题优先" : "统一复练队列：记忆复习";
+      } else if (weaknessRank !== null && body.mode !== "adaptive") {
         recommendationReason = `知识点薄弱度第 ${weaknessRank} 位`;
       }
     }
@@ -104,7 +112,9 @@ export const POST = createLearningRoute({
           reason: recommendationReason,
           weaknessRank
         }
-      }
+      },
+      reviewSourceType,
+      reviewDueAt
     };
   }
 });

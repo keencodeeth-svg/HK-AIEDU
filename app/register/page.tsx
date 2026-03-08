@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import Card from "@/components/Card";
+import PasswordPolicyHint from "@/components/auth/PasswordPolicyHint";
 import { GRADE_OPTIONS } from "@/lib/constants";
 import type { RegisterPayload, RegisterResponse, RegisterRole } from "./types";
 
@@ -93,9 +94,7 @@ export default function RegisterPage() {
           <label className="form-field">
             <div className="section-title">密码</div>
             <input className="form-control" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
-            <div className="form-note">
-              默认建议至少 8 位，包含大写字母、小写字母和数字（以系统配置为准）。
-            </div>
+            <PasswordPolicyHint />
           </label>
           {role === "student" ? (
             <>

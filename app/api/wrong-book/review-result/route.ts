@@ -1,8 +1,9 @@
 import crypto from "crypto";
 import { getQuestions } from "@/lib/content";
 import { addAttempt } from "@/lib/progress";
-import { getMasteryRecord, getWeaknessRankMap, syncMasteryForKnowledgePoints } from "@/lib/mastery";
-import { enqueueWrongReview, getIntervalLabel, submitWrongReviewResult } from "@/lib/wrong-review";
+import { getMasteryRecord, getWeaknessRankMap, updateMasteryByAttempt } from "@/lib/mastery";
+import { getIntervalLabel, submitWrongReviewResult } from "@/lib/wrong-review";
+import { enqueueUnifiedWrongReview } from "@/lib/review-scheduler";
 import { notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 import { createLearningRoute } from "@/lib/api/domains";
@@ -33,17 +34,20 @@ export const POST = createLearningRoute({
     const previousScore = previousMastery?.masteryScore ?? 0;
     const correct = body.answer === question.answer;
 
-    await addAttempt({
-      id: crypto.randomBytes(10).toString("hex"),
-      userId: user.id,
-      questionId: question.id,
-      subject: question.subject,
-      knowledgePointId: question.knowledgePointId,
-      correct,
-      answer: body.answer,
-      reason: "wrong-book-review",
-      createdAt: new Date().toISOString()
-    });
+    await addAttempt(
+      {
+        id: crypto.randomBytes(10).toString("hex"),
+        userId: user.id,
+        questionId: question.id,
+        subject: question.subject,
+        knowledgePointId: question.knowledgePointId,
+        correct,
+        answer: body.answer,
+        reason: "wrong-book-review",
+        createdAt: new Date().toISOString()
+      },
+      { reviewOrigin: { sourceType: "wrong_book_review" } }
+    );
 
     let review = await submitWrongReviewResult({
       userId: user.id,
@@ -51,11 +55,12 @@ export const POST = createLearningRoute({
       correct
     });
     if (!review) {
-      await enqueueWrongReview({
+      await enqueueUnifiedWrongReview({
         userId: user.id,
         questionId: question.id,
         subject: question.subject,
-        knowledgePointId: question.knowledgePointId
+        knowledgePointId: question.knowledgePointId,
+        sourceType: "wrong_book_review"
       });
       review = await submitWrongReviewResult({
         userId: user.id,
@@ -64,8 +69,13 @@ export const POST = createLearningRoute({
       });
     }
 
-    const masteryRecords = await syncMasteryForKnowledgePoints(user.id, [question.knowledgePointId], question.subject);
-    const mastery = masteryRecords.find((item) => item.knowledgePointId === question.knowledgePointId);
+    const masteryUpdate = await updateMasteryByAttempt({
+      userId: user.id,
+      knowledgePointId: question.knowledgePointId,
+      subject: question.subject
+    });
+    const masteryRecords = masteryUpdate.records;
+    const mastery = masteryUpdate.record;
     const weaknessRankMap = getWeaknessRankMap(masteryRecords, question.subject);
     const weaknessRank = weaknessRankMap.get(question.knowledgePointId) ?? null;
     const masteryScore = mastery?.masteryScore ?? previousScore;
@@ -79,6 +89,21 @@ export const POST = createLearningRoute({
       masteryScore,
       masteryDelta,
       weaknessRank,
+      masteryUpdateMode: masteryUpdate.mode,
+      mastery: {
+        knowledgePointId: question.knowledgePointId,
+        subject: question.subject,
+        masteryScore,
+        masteryDelta,
+        weaknessRank,
+        masteryLevel: mastery?.masteryLevel ?? "weak",
+        confidenceScore: mastery?.confidenceScore ?? 0,
+        recencyWeight: mastery?.recencyWeight ?? 0,
+        masteryTrend7d: mastery?.masteryTrend7d ?? 0,
+        correct: mastery?.correct ?? 0,
+        total: mastery?.total ?? 0,
+        lastAttemptAt: mastery?.lastAttemptAt ?? null
+      },
       nextReviewAt: review?.nextReviewAt ?? null,
       intervalLevel: review?.intervalLevel ?? null,
       lastReviewResult: review?.lastReviewResult ?? null,

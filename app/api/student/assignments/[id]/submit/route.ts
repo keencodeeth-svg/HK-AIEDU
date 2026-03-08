@@ -8,7 +8,7 @@ import {
 } from "@/lib/assignments";
 import { getQuestions } from "@/lib/content";
 import { addAttempt } from "@/lib/progress";
-import { syncMasteryForKnowledgePoints } from "@/lib/mastery";
+import { refreshMasteryAfterAttempts } from "@/lib/mastery";
 import { getAssignmentUploads } from "@/lib/assignment-uploads";
 import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
@@ -103,27 +103,32 @@ export const POST = createLearningRoute({
     }
 
     if (!isUpload && !isEssay) {
-      const attemptedKnowledgePointIds = new Set<string>();
+      const attemptedKnowledgePointIdsBySubject = new Map<string, Set<string>>();
       for (const item of items) {
         const question = questionMap.get(item.questionId);
         if (!question) {
           continue;
         }
-        attemptedKnowledgePointIds.add(question.knowledgePointId);
+        const subjectBucket = attemptedKnowledgePointIdsBySubject.get(question.subject) ?? new Set<string>();
+        subjectBucket.add(question.knowledgePointId);
+        attemptedKnowledgePointIdsBySubject.set(question.subject, subjectBucket);
         const answer = answers[question.id] ?? "";
         const correct = answer === question.answer;
         if (correct) score += 1;
 
-        await addAttempt({
-          id: crypto.randomBytes(10).toString("hex"),
-          userId: user.id,
-          questionId: question.id,
-          subject: question.subject,
-          knowledgePointId: question.knowledgePointId,
-          correct,
-          answer,
-          createdAt: new Date().toISOString()
-        });
+        await addAttempt(
+          {
+            id: crypto.randomBytes(10).toString("hex"),
+            userId: user.id,
+            questionId: question.id,
+            subject: question.subject,
+            knowledgePointId: question.knowledgePointId,
+            correct,
+            answer,
+            createdAt: new Date().toISOString()
+          },
+          { reviewOrigin: { sourceType: "assignment" } }
+        );
 
         details.push({
           questionId: question.id,
@@ -134,7 +139,9 @@ export const POST = createLearningRoute({
         });
       }
 
-      await syncMasteryForKnowledgePoints(user.id, Array.from(attemptedKnowledgePointIds));
+      for (const [subject, knowledgePointIds] of attemptedKnowledgePointIdsBySubject.entries()) {
+        await refreshMasteryAfterAttempts(user.id, Array.from(knowledgePointIds), subject);
+      }
     }
 
     const total = isUpload || isEssay ? null : items.length;

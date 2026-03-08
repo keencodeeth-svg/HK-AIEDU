@@ -1,5 +1,5 @@
 import { getQuestions } from "@/lib/content";
-import { getIntervalLabel, getWrongReviewQueue } from "@/lib/wrong-review";
+import { getUnifiedReviewQueue } from "@/lib/review-scheduler";
 import { unauthorized } from "@/lib/api/http";
 import { createLearningRoute } from "@/lib/api/domains";
 
@@ -11,13 +11,15 @@ export const GET = createLearningRoute({
       unauthorized();
     }
 
-    const queue = await getWrongReviewQueue(user.id);
+    const queue = await getUnifiedReviewQueue({
+      userId: user.id,
+      sources: ["wrong"]
+    });
     const questions = await getQuestions();
     const questionMap = new Map(questions.map((item) => [item.id, item]));
 
     const mapItem = (item: (typeof queue.dueToday)[number]) => ({
       ...item,
-      intervalLabel: getIntervalLabel(item.intervalLevel),
       question: (() => {
         const question = questionMap.get(item.questionId);
         if (!question) return null;

@@ -15,7 +15,7 @@ import {
   upsertExamSubmission
 } from "@/lib/exams";
 import { buildExamReviewPack, getExamReviewPack, upsertExamReviewPack } from "@/lib/exam-review-pack";
-import { enqueueWrongReview } from "@/lib/wrong-review";
+import { enqueueUnifiedWrongReview } from "@/lib/review-scheduler";
 import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 import { createExamRoute } from "@/lib/api/domains";
@@ -244,11 +244,14 @@ export const POST = createExamRoute({
 
     const queued = await Promise.all(
       wrongQuestions.map((question) =>
-        enqueueWrongReview({
+        enqueueUnifiedWrongReview({
           userId: user.id,
           questionId: question.id,
           subject: question.subject,
-          knowledgePointId: question.knowledgePointId
+          knowledgePointId: question.knowledgePointId,
+          sourceType: "exam",
+          sourcePaperId: paper.id,
+          sourceSubmittedAt: submission.submittedAt
         })
       )
     );

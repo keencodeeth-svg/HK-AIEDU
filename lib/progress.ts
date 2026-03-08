@@ -3,11 +3,11 @@ import { readJson, writeJson } from "./storage";
 import { getKnowledgePoints, getQuestions } from "./content";
 import type { Question } from "./types";
 import { assertDatabaseEnabled, isDbEnabled, query, queryOne } from "./db";
-import { updateMemorySchedule } from "./memory";
 import { getReviewItemsByStudent } from "./reviews";
 import { getFocusSessionsByUser } from "./focus";
 import { getFavoritesByUser } from "./favorites";
-import { enqueueWrongReview } from "./wrong-review";
+import { scheduleReviewTasksAfterAttempt } from "./review-scheduler";
+import type { WrongReviewOriginMeta } from "./wrong-review";
 
 export type QuestionAttempt = {
   id: string;
@@ -165,25 +165,20 @@ export async function saveAttempts(list: QuestionAttempt[]) {
   }
 }
 
-export async function addAttempt(attempt: QuestionAttempt) {
+export async function addAttempt(attempt: QuestionAttempt, options?: { reviewOrigin?: WrongReviewOriginMeta }) {
   if (!isDbEnabled()) {
     assertDatabaseEnabled("question_attempts");
     const list = await getAttempts();
     list.push(attempt);
     await saveAttempts(list);
-    await updateMemorySchedule({
+    await scheduleReviewTasksAfterAttempt({
       userId: attempt.userId,
       questionId: attempt.questionId,
-      correct: attempt.correct
+      subject: attempt.subject,
+      knowledgePointId: attempt.knowledgePointId,
+      correct: attempt.correct,
+      reviewOrigin: options?.reviewOrigin
     });
-    if (!attempt.correct) {
-      await enqueueWrongReview({
-        userId: attempt.userId,
-        questionId: attempt.questionId,
-        subject: attempt.subject,
-        knowledgePointId: attempt.knowledgePointId
-      });
-    }
     return;
   }
   await query(
@@ -202,19 +197,14 @@ export async function addAttempt(attempt: QuestionAttempt) {
       attempt.createdAt
     ]
   );
-  await updateMemorySchedule({
+  await scheduleReviewTasksAfterAttempt({
     userId: attempt.userId,
     questionId: attempt.questionId,
-    correct: attempt.correct
+    subject: attempt.subject,
+    knowledgePointId: attempt.knowledgePointId,
+    correct: attempt.correct,
+    reviewOrigin: options?.reviewOrigin
   });
-  if (!attempt.correct) {
-    await enqueueWrongReview({
-      userId: attempt.userId,
-      questionId: attempt.questionId,
-      subject: attempt.subject,
-      knowledgePointId: attempt.knowledgePointId
-    });
-  }
 }
 
 export async function getAttemptsByUser(userId: string) {

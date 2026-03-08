@@ -4,7 +4,7 @@ import { getAssignmentProgress, getAssignmentProgressByStudent, getAssignmentsBy
 import { getNotificationsByUser } from "./notifications";
 import { getThreadsForUser } from "./inbox";
 import { getStudentContext } from "./user-context";
-import { getWrongReviewQueue } from "./wrong-review";
+import { getUnifiedReviewQueue } from "./review-scheduler";
 import { buildTutorLaunchHref } from "./tutor-launch";
 
 export type DashboardMetric = {
@@ -170,7 +170,7 @@ async function getStudentTaskRows(studentId: string) {
 }
 
 async function buildStudentOverview(user: SafeUser, common: CommonOverviewData): Promise<DashboardOverview> {
-  const [tasks, reviewQueue] = await Promise.all([getStudentTaskRows(user.id), getWrongReviewQueue(user.id)]);
+  const [tasks, reviewQueue] = await Promise.all([getStudentTaskRows(user.id), getUnifiedReviewQueue({ userId: user.id })]);
   const pendingTasks = tasks.filter((item) => item.pending);
   const overdueTasks = pendingTasks.filter((item) => item.overdue);
   const dueSoonTasks = pendingTasks.filter((item) => item.dueSoon);
@@ -190,8 +190,8 @@ async function buildStudentOverview(user: SafeUser, common: CommonOverviewData):
     alerts.push({
       id: "student-review",
       level: overdueTasks.length ? "medium" : "high",
-      title: `今日有 ${reviewQueue.summary.dueToday} 道错题待复习`,
-      detail: "先做错题复习，通常是提升掌握度最快的动作。",
+      title: `今日有 ${reviewQueue.summary.dueToday} 项复练待完成`,
+      detail: "先做今日复练，通常是提升掌握度与记忆保持最快的动作。",
       href: "/wrong-book",
       actionLabel: "去复习"
     });
@@ -340,7 +340,7 @@ async function buildParentOverview(user: SafeUser, common: CommonOverviewData): 
     };
   }
 
-  const [tasks, reviewQueue] = await Promise.all([getStudentTaskRows(student.id), getWrongReviewQueue(student.id)]);
+  const [tasks, reviewQueue] = await Promise.all([getStudentTaskRows(student.id), getUnifiedReviewQueue({ userId: student.id })]);
   const pendingTasks = tasks.filter((item) => item.pending);
   const overdueTasks = pendingTasks.filter((item) => item.overdue);
   const dueSoonTasks = pendingTasks.filter((item) => item.dueSoon);

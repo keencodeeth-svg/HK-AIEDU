@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Card from "@/components/Card";
+import PasswordPolicyHint from "@/components/auth/PasswordPolicyHint";
 
 export default function AdminRegisterPage() {
   const [email, setEmail] = useState("");
@@ -71,9 +72,7 @@ export default function AdminRegisterPage() {
               onChange={(event) => setPassword(event.target.value)}
               placeholder="默认建议至少 8 位，含大小写和数字"
             />
-            <div className="form-note">
-              实际规则由后端密码策略配置控制。
-            </div>
+            <PasswordPolicyHint />
           </label>
           <label className="form-field">
             <div className="section-title">邀请码（可选）</div>

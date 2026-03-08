@@ -64,6 +64,7 @@ export type TeacherAlertItem = {
   status: "active" | "acknowledged";
   lastActionType?: TeacherAlertActionType | "mark_done" | null;
   lastActionAt?: string | null;
+  lastActionDetail?: string | null;
 };
 
 export type TeacherWeakPoint = {

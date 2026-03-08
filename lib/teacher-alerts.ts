@@ -28,6 +28,7 @@ export type TeacherAlert = {
   lastActionType?: "assign_review" | "notify_student" | "auto_chain" | "mark_done" | null;
   lastActionAt?: string | null;
   lastActionBy?: string | null;
+  lastActionDetail?: string | null;
   student?: {
     id: string;
     name: string;

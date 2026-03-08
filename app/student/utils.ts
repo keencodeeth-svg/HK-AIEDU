@@ -220,3 +220,11 @@ export function getTodayTaskStatusLabel(status: TodayTaskStatus) {
   if (status === "optional") return "可选";
   return "待完成";
 }
+
+export function getTodayTaskSourceLabel(source: "assignment" | "exam" | "wrong_review" | "plan" | "challenge") {
+  if (source === "assignment") return "作业";
+  if (source === "exam") return "考试";
+  if (source === "wrong_review") return "复练";
+  if (source === "plan") return "计划";
+  return "挑战";
+}

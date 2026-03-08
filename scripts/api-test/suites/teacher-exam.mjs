@@ -625,6 +625,9 @@ export async function runTeacherExamSuite(context) {
   assert.ok(reviewFromExam, "Exam wrong question should appear in review queue");
   assert.equal(reviewFromExam?.intervalLevel, 1, "Exam wrong question should reset to intervalLevel 1");
   assert.equal(reviewFromExam?.lastReviewResult, "wrong", "Exam wrong question should mark lastReviewResult=wrong");
+  assert.equal(reviewFromExam?.originType, "exam", "Exam wrong question should keep originType=exam");
+  assert.equal(reviewFromExam?.originPaperId, createdExamId, "Exam wrong question should keep originPaperId");
+  assert.equal(typeof reviewFromExam?.originSubmittedAt, "string", "Exam wrong question should expose originSubmittedAt");
 
   const examSubmitAgain = await apiFetch(`/api/student/exams/${createdExamId}/submit`, {
     method: "POST",

@@ -7,7 +7,7 @@ import { getKnowledgePoints } from "@/lib/content";
 import { ensureExamAssignment, getExamAssignment, getExamPapersByClassIds } from "@/lib/exams";
 import { generateStudyPlans, getStudyPlans } from "@/lib/progress";
 import { getStudentProfile } from "@/lib/profiles";
-import { getIntervalLabel, getWrongReviewQueue } from "@/lib/wrong-review";
+import { getUnifiedReviewQueue } from "@/lib/review-scheduler";
 import { unauthorized } from "@/lib/api/http";
 import { createLearningRoute } from "@/lib/api/domains";
 
@@ -209,11 +209,11 @@ export const GET = createLearningRoute({
   const knowledgePoints = await getKnowledgePoints();
   const kpMap = new Map(knowledgePoints.map((item) => [item.id, item]));
 
-  const [assignments, assignmentProgress, papers, wrongQueue, challengeState, profile] = await Promise.all([
+  const [assignments, assignmentProgress, papers, reviewQueue, challengeState, profile] = await Promise.all([
     getAssignmentsByClassIds(classIds),
     getAssignmentProgressByStudent(user.id),
     getExamPapersByClassIds(classIds),
-    getWrongReviewQueue(user.id),
+    getUnifiedReviewQueue({ userId: user.id }),
     getChallengeState(user.id),
     getStudentProfile(user.id)
   ]);
@@ -296,42 +296,44 @@ export const GET = createLearningRoute({
       );
     });
 
-  wrongQueue.dueToday.forEach((item) => {
+  reviewQueue.dueToday.forEach((item) => {
     const dueTs = toTimestamp(item.nextReviewAt);
     const status: TodayTaskStatus = dueTs !== null && dueTs < nowTs ? "overdue" : "due_today";
     const kpTitle = kpMap.get(item.knowledgePointId)?.title ?? item.knowledgePointId;
+    const isMemoryReview = item.sourceType === "memory";
     tasks.push(
       buildTask({
-        id: `wrong-review-${item.id}`,
+        id: `${item.sourceType}-review-${item.id}`,
         source: "wrong_review",
         sourceId: item.id,
-        title: `错题复练：${kpTitle}`,
-        description: `复练节奏 ${getIntervalLabel(item.intervalLevel)} · 应复练 ${formatDateTime(item.nextReviewAt)}`,
-        href: "/wrong-book",
+        title: `${isMemoryReview ? "记忆复习" : "错题复练"}：${kpTitle}`,
+        description: `${isMemoryReview ? "记忆节奏" : "复练节奏"} ${item.intervalLabel} · 应复练 ${formatDateTime(item.nextReviewAt)}`,
+        href: isMemoryReview ? "/practice?mode=review" : "/wrong-book",
         status,
         dueAt: item.nextReviewAt,
-        tags: ["错题复练", SUBJECT_LABELS[item.subject] ?? item.subject],
-        recommendedReason: "错题 24 小时内复练收益最高，优先提分",
+        tags: [isMemoryReview ? "记忆复习" : "错题复练", SUBJECT_LABELS[item.subject] ?? item.subject],
+        recommendedReason: isMemoryReview ? "按记忆曲线回顾，避免已学内容快速遗忘" : "错题 24 小时内复练收益最高，优先提分",
         nowTs,
         targetCountHint: 1
       })
     );
   });
 
-  wrongQueue.upcoming.slice(0, 3).forEach((item) => {
+  reviewQueue.upcoming.slice(0, 3).forEach((item) => {
     const kpTitle = kpMap.get(item.knowledgePointId)?.title ?? item.knowledgePointId;
+    const isMemoryReview = item.sourceType === "memory";
     tasks.push(
       buildTask({
-        id: `wrong-review-upcoming-${item.id}`,
+        id: `${item.sourceType}-review-upcoming-${item.id}`,
         source: "wrong_review",
         sourceId: item.id,
-        title: `预备复练：${kpTitle}`,
-        description: `下轮节奏 ${getIntervalLabel(item.intervalLevel)} · 预计 ${formatDateTime(item.nextReviewAt)}`,
-        href: "/wrong-book",
+        title: `${isMemoryReview ? "预备记忆复习" : "预备复练"}：${kpTitle}`,
+        description: `${isMemoryReview ? "记忆节奏" : "下轮节奏"} ${item.intervalLabel} · 预计 ${formatDateTime(item.nextReviewAt)}`,
+        href: isMemoryReview ? "/practice?mode=review" : "/wrong-book",
         status: "upcoming",
         dueAt: item.nextReviewAt,
-        tags: ["错题复练", "排队中"],
-        recommendedReason: "提前排队，避免后续集中积压",
+        tags: [isMemoryReview ? "记忆复习" : "错题复练", "排队中"],
+        recommendedReason: isMemoryReview ? "提前安排记忆复习，减少遗忘回撤" : "提前排队，避免后续集中积压",
         nowTs,
         targetCountHint: 1
       })

@@ -170,6 +170,12 @@ type ProviderAttemptResult = {
   stopProvider: boolean;
 };
 
+function isAiPolicyEnforced() {
+  if (process.env.AI_POLICY_ENFORCE === "false") return false;
+  if (process.env.AI_POLICY_ENFORCE === "true") return true;
+  return true;
+}
+
 async function runCustomProviderAttempt(params: {
   provider: "custom";
   taskType: AiTaskType;
@@ -186,7 +192,7 @@ async function runCustomProviderAttempt(params: {
   const timed = await runWithTimeout(() => callCustomLLM(prompt), params.timeoutMs);
   const text = typeof timed.value === "string" ? timed.value : null;
   const quality = text ? evaluateTaskOutputQuality({ taskType: params.taskType, provider: params.provider, text }) : null;
-  const qualityRejected = Boolean(quality?.policyViolated);
+  const qualityRejected = isAiPolicyEnforced() && Boolean(quality?.policyViolated);
 
   recordAiCallLogSafe({
     taskType: params.taskType,
@@ -271,7 +277,7 @@ async function runConfiguredProviderAttempt(params: {
   );
   const text = typeof timed.value === "string" ? timed.value : null;
   const quality = text ? evaluateTaskOutputQuality({ taskType: params.taskType, provider: config.provider, text }) : null;
-  const qualityRejected = Boolean(quality?.policyViolated);
+  const qualityRejected = isAiPolicyEnforced() && Boolean(quality?.policyViolated);
 
   recordAiCallLogSafe({
     taskType: params.taskType,
@@ -326,7 +332,7 @@ export async function callRoutedLLM(params: {
   const retries = Math.max(0, policy.maxRetries);
   const timeoutMs = policy.timeoutMs;
 
-  if (requestChars > policy.budgetLimit) {
+  if (isAiPolicyEnforced() && requestChars > policy.budgetLimit) {
     // Reject over-budget requests early so we do not burn provider quota on huge prompts.
     recordAiCallLogSafe({
       taskType,

@@ -6,7 +6,7 @@ import {
   listParentActionReceipts,
   summarizeParentActionReceipts
 } from "@/lib/parent-action-receipts";
-import { getWrongReviewQueue } from "@/lib/wrong-review";
+import { getUnifiedReviewQueue } from "@/lib/review-scheduler";
 import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { createLearningRoute } from "@/lib/api/domains";
 
@@ -127,7 +127,7 @@ export const GET = createLearningRoute({
     });
     const overdue = pending.filter((item) => new Date(item.dueDate).getTime() < Date.now());
     const completed = data.filter((item) => item.status === "completed");
-    const reviewQueue = await getWrongReviewQueue(user.studentId);
+    const reviewQueue = await getUnifiedReviewQueue({ userId: user.studentId });
     const reviewDueToday = reviewQueue.summary.dueToday;
 
     const actionItems = buildAssignmentActionItems({

@@ -12,9 +12,14 @@ export function isDbEnabled() {
   return Boolean(process.env.DATABASE_URL);
 }
 
+function isProductionBuildPhase() {
+  return process.env.NEXT_PHASE === "phase-production-build" || process.env.npm_lifecycle_event === "build";
+}
+
 export function isDatabaseRequired() {
   if (process.env.REQUIRE_DATABASE === "true") return true;
   if (process.env.REQUIRE_DATABASE === "false") return false;
+  if (isProductionBuildPhase()) return false;
   return process.env.NODE_ENV === "production" && process.env.ALLOW_JSON_FALLBACK !== "true";
 }
 

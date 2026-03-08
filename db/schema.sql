@@ -246,29 +246,55 @@ CREATE TABLE IF NOT EXISTS wrong_review_items (
   first_wrong_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL,
+  source_type TEXT NOT NULL DEFAULT 'practice',
+  source_paper_id TEXT,
+  source_submitted_at TIMESTAMPTZ,
   UNIQUE (user_id, question_id)
 );
 
+ALTER TABLE wrong_review_items ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'practice';
+ALTER TABLE wrong_review_items ADD COLUMN IF NOT EXISTS source_paper_id TEXT;
+ALTER TABLE wrong_review_items ADD COLUMN IF NOT EXISTS source_submitted_at TIMESTAMPTZ;
+UPDATE wrong_review_items SET source_type = 'practice' WHERE source_type IS NULL;
 CREATE INDEX IF NOT EXISTS wrong_review_items_user_idx ON wrong_review_items (user_id);
 CREATE INDEX IF NOT EXISTS wrong_review_items_next_idx ON wrong_review_items (next_review_at);
+CREATE INDEX IF NOT EXISTS wrong_review_items_source_idx ON wrong_review_items (user_id, source_type, status);
 
 CREATE TABLE IF NOT EXISTS review_tasks (
   id TEXT PRIMARY KEY,
   user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
   question_id TEXT REFERENCES questions(id) ON DELETE CASCADE,
+  source_type TEXT NOT NULL DEFAULT 'wrong',
   subject TEXT,
   knowledge_point_id TEXT,
-  status TEXT NOT NULL DEFAULT 'pending',
+  status TEXT NOT NULL DEFAULT 'active',
   interval_level INT NOT NULL DEFAULT 1,
   due_at TIMESTAMPTZ NOT NULL,
   completed_at TIMESTAMPTZ,
+  last_review_result TEXT,
+  last_review_at TIMESTAMPTZ,
+  review_count INT NOT NULL DEFAULT 0,
+  origin_type TEXT,
+  origin_paper_id TEXT,
+  origin_submitted_at TIMESTAMPTZ,
   payload JSONB,
   created_at TIMESTAMPTZ NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL
+  updated_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (user_id, question_id, source_type)
 );
 
+ALTER TABLE review_tasks ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'wrong';
+ALTER TABLE review_tasks ADD COLUMN IF NOT EXISTS last_review_result TEXT;
+ALTER TABLE review_tasks ADD COLUMN IF NOT EXISTS last_review_at TIMESTAMPTZ;
+ALTER TABLE review_tasks ADD COLUMN IF NOT EXISTS review_count INT NOT NULL DEFAULT 0;
+ALTER TABLE review_tasks ADD COLUMN IF NOT EXISTS origin_type TEXT;
+ALTER TABLE review_tasks ADD COLUMN IF NOT EXISTS origin_paper_id TEXT;
+ALTER TABLE review_tasks ADD COLUMN IF NOT EXISTS origin_submitted_at TIMESTAMPTZ;
+UPDATE review_tasks SET source_type = 'wrong' WHERE source_type IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS review_tasks_user_question_source_idx ON review_tasks (user_id, question_id, source_type);
 CREATE INDEX IF NOT EXISTS review_tasks_user_idx ON review_tasks (user_id, status);
 CREATE INDEX IF NOT EXISTS review_tasks_due_idx ON review_tasks (due_at);
+CREATE INDEX IF NOT EXISTS review_tasks_source_due_idx ON review_tasks (user_id, source_type, status, due_at);
 
 CREATE TABLE IF NOT EXISTS teacher_alert_acks (
   id TEXT PRIMARY KEY,

@@ -3,6 +3,12 @@ import { readJson, writeJson } from "./storage";
 import { isDbEnabled, query, queryOne } from "./db";
 import { getQuestions } from "./content";
 import type { Question } from "./types";
+import {
+  getReviewTasksByUser,
+  isUnifiedReviewTaskStoreEnabled,
+  type ReviewTask,
+  upsertReviewTask
+} from "./review-tasks";
 
 export type MemoryReview = {
   id: string;
@@ -13,6 +19,10 @@ export type MemoryReview = {
   lastReviewedAt?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+type MemoryReviewReadOptions = {
+  preferUnifiedStore?: boolean;
 };
 
 const REVIEW_FILE = "memory-reviews.json";
@@ -42,6 +52,23 @@ function mapReview(row: DbMemoryReview): MemoryReview {
   };
 }
 
+function mapPersistedReviewTask(task: ReviewTask): MemoryReview {
+  return {
+    id: task.id,
+    userId: task.userId,
+    questionId: task.questionId,
+    stage: Math.max(0, Number(task.intervalLevel) || 0),
+    nextReviewAt: task.nextReviewAt,
+    lastReviewedAt: task.lastReviewAt ?? undefined,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt
+  };
+}
+
+function compareMemoryReviews(a: MemoryReview, b: MemoryReview) {
+  return new Date(a.nextReviewAt).getTime() - new Date(b.nextReviewAt).getTime();
+}
+
 function nextStage(current: number, correct: boolean) {
   if (!correct) return 0;
   return Math.min(current + 1, STAGES.length - 1);
@@ -50,6 +77,79 @@ function nextStage(current: number, correct: boolean) {
 function calcNextReviewAt(stage: number) {
   const days = STAGES[Math.max(0, Math.min(stage, STAGES.length - 1))];
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function isPersistedMemoryReviewOutdated(task: MemoryReview | null | undefined, legacy: MemoryReview) {
+  if (!task) return true;
+  return (
+    task.stage !== legacy.stage ||
+    task.nextReviewAt !== legacy.nextReviewAt ||
+    (task.lastReviewedAt ?? null) !== (legacy.lastReviewedAt ?? null) ||
+    task.updatedAt < legacy.updatedAt
+  );
+}
+
+async function syncMemoryReviewTask(review: MemoryReview | null) {
+  if (!review) return null;
+  const question = (await getQuestions()).find((item) => item.id === review.questionId);
+  return upsertReviewTask({
+    userId: review.userId,
+    questionId: review.questionId,
+    sourceType: "memory",
+    subject: question?.subject ?? null,
+    knowledgePointId: question?.knowledgePointId ?? null,
+    status: "active",
+    intervalLevel: review.stage,
+    nextReviewAt: review.nextReviewAt,
+    completedAt: null,
+    lastReviewResult: null,
+    lastReviewAt: review.lastReviewedAt ?? null,
+    reviewCount: review.stage,
+    originType: null,
+    originPaperId: null,
+    originSubmittedAt: null,
+    payload: {
+      grade: question?.grade ?? null
+    }
+  });
+}
+
+async function getPersistedMemoryReviewsByUser(userId: string) {
+  const tasks = await getReviewTasksByUser(userId, {
+    includeCompleted: true,
+    sourceTypes: ["memory"]
+  });
+  return tasks.map(mapPersistedReviewTask).sort(compareMemoryReviews);
+}
+
+async function getLegacyMemoryReviewsByUser(userId: string) {
+  if (!isDbEnabled()) {
+    const list = readJson<MemoryReview[]>(REVIEW_FILE, []);
+    return list.filter((item) => item.userId === userId).sort(compareMemoryReviews);
+  }
+
+  const rows = await query<DbMemoryReview>(
+    "SELECT * FROM memory_reviews WHERE user_id = $1 ORDER BY next_review_at ASC",
+    [userId]
+  );
+  return rows.map(mapReview);
+}
+
+export async function ensureMemoryReviewTasksBackfilled(userId: string) {
+  if (!isUnifiedReviewTaskStoreEnabled()) return;
+  const [legacyReviews, persistedReviews] = await Promise.all([
+    getLegacyMemoryReviewsByUser(userId),
+    getPersistedMemoryReviewsByUser(userId)
+  ]);
+  if (!legacyReviews.length) return;
+
+  const persistedByQuestionId = new Map(persistedReviews.map((item) => [item.questionId, item]));
+  const reviewsToSync = legacyReviews.filter((item) =>
+    isPersistedMemoryReviewOutdated(persistedByQuestionId.get(item.questionId), item)
+  );
+  if (!reviewsToSync.length) return;
+
+  await Promise.all(reviewsToSync.map((item) => syncMemoryReviewTask(item)));
 }
 
 export async function updateMemorySchedule(params: {
@@ -82,6 +182,7 @@ export async function updateMemorySchedule(params: {
       list.push(record);
     }
     writeJson(REVIEW_FILE, list);
+    await syncMemoryReviewTask(record);
     return record;
   }
 
@@ -112,24 +213,35 @@ export async function updateMemorySchedule(params: {
       now
     ]
   );
-  return record ? mapReview(record) : null;
+  const mapped = record ? mapReview(record) : null;
+  await syncMemoryReviewTask(mapped);
+  return mapped;
+}
+
+export function getMemoryStageLabel(stage: number) {
+  const days = STAGES[Math.max(0, Math.min(stage, STAGES.length - 1))];
+  return `${days}d`;
+}
+
+export async function getMemoryReviewsByUser(userId: string, options?: MemoryReviewReadOptions) {
+  const preferUnifiedStore = options?.preferUnifiedStore ?? true;
+  if (preferUnifiedStore && isUnifiedReviewTaskStoreEnabled()) {
+    await ensureMemoryReviewTasksBackfilled(userId);
+    const persistedReviews = await getPersistedMemoryReviewsByUser(userId);
+    if (persistedReviews.length) {
+      return persistedReviews;
+    }
+  }
+
+  return getLegacyMemoryReviewsByUser(userId);
 }
 
 export async function getDueReviewQuestionIds(userId: string) {
-  if (!isDbEnabled()) {
-    const list = readJson<MemoryReview[]>(REVIEW_FILE, []);
-    const now = Date.now();
-    return list
-      .filter((item) => item.userId === userId && new Date(item.nextReviewAt).getTime() <= now)
-      .sort((a, b) => new Date(a.nextReviewAt).getTime() - new Date(b.nextReviewAt).getTime())
-      .map((item) => item.questionId);
-  }
-
-  const rows = await query<DbMemoryReview>(
-    "SELECT * FROM memory_reviews WHERE user_id = $1 AND next_review_at <= now() ORDER BY next_review_at ASC",
-    [userId]
-  );
-  return rows.map((row) => row.question_id);
+  const reviews = await getMemoryReviewsByUser(userId);
+  const now = Date.now();
+  return reviews
+    .filter((item) => new Date(item.nextReviewAt).getTime() <= now)
+    .map((item) => item.questionId);
 }
 
 export async function getDueReviewQuestions(params: {
