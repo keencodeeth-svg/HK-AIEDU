@@ -134,6 +134,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         { href: "/admin/knowledge-tree", label: "知识点树" },
         { href: "/admin/experiments", label: "实验中心" },
         { href: "/admin/ai-models", label: "AI模型中心" },
+        { href: "/admin/recovery-requests", label: "账号恢复工单" },
         { href: "/admin/logs", label: "操作日志" }
       ],
       groups: [
@@ -156,6 +157,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {
           title: "审计运维",
           links: [
+            { href: "/admin/recovery-requests", label: "账号恢复工单" },
             { href: "/admin/logs", label: "操作日志" },
             { href: "/admin", label: "控制台总览" }
           ]

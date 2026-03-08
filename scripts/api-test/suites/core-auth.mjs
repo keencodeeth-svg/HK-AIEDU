@@ -51,6 +51,10 @@ export async function runCoreAuthSuite(context) {
   assert.equal(unauthAdminLogs.status, 401, "GET /api/admin/logs should require admin auth");
   assert.equal(unauthAdminLogs.body?.error, "unauthorized");
 
+  const unauthRecoveryWorkbench = await apiFetch("/api/admin/recovery-requests", { useCookies: false });
+  assert.equal(unauthRecoveryWorkbench.status, 401, "GET /api/admin/recovery-requests should require admin auth");
+  assert.equal(unauthRecoveryWorkbench.body?.error, "unauthorized");
+
   const unauthFunnel = await apiFetch("/api/analytics/funnel", { useCookies: false });
   assert.equal(unauthFunnel.status, 401, "GET /api/analytics/funnel should require admin auth");
   assert.equal(unauthFunnel.body?.error, "unauthorized");

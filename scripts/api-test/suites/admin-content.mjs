@@ -18,6 +18,65 @@ export async function runAdminContentSuite(context) {
   assert.equal(adminLogs.body?.code, 0, "Admin logs should use standard envelope");
   assert.ok(Array.isArray(adminLogs.body?.data), "Admin logs response should include data array");
 
+  const recoverySeedEmail = `api-test-admin-recovery-${Date.now().toString(36)}@local.test`;
+  const recoverySeed = await apiFetch("/api/auth/recovery-request", {
+    method: "POST",
+    useCookies: false,
+    json: {
+      role: "parent",
+      email: recoverySeedEmail,
+      issueType: "forgot_account",
+      name: "Recovery Parent",
+      studentEmail: "student-binding@local.test",
+      note: "不记得注册时使用的账号"
+    }
+  });
+  assert.equal(recoverySeed.status, 200, `POST /api/auth/recovery-request failed: ${recoverySeed.raw}`);
+  const recoveryTicketId = recoverySeed.body?.data?.ticketId;
+  assert.ok(recoveryTicketId, "Recovery seed should return a ticketId");
+
+  const recoveryWorkbench = await apiFetch(`/api/admin/recovery-requests?status=pending&query=${encodeURIComponent(recoverySeedEmail)}`);
+  assert.equal(recoveryWorkbench.status, 200, `GET /api/admin/recovery-requests failed: ${recoveryWorkbench.raw}`);
+  assert.equal(recoveryWorkbench.body?.code, 0, "Recovery workbench should use standard envelope");
+  const seededRecoveryItem = (recoveryWorkbench.body?.data?.items ?? []).find((item) => item.id === recoveryTicketId);
+  assert.ok(seededRecoveryItem, "Recovery workbench should include the seeded ticket");
+  assert.equal(seededRecoveryItem.status, "pending", "New recovery ticket should start as pending");
+
+  const startRecovery = await apiFetch(`/api/admin/recovery-requests/${recoveryTicketId}`, {
+    method: "POST",
+    json: {
+      status: "in_progress",
+      adminNote: "已开始人工核验注册信息"
+    }
+  });
+  assert.equal(startRecovery.status, 200, `POST /api/admin/recovery-requests/:id failed: ${startRecovery.raw}`);
+  assert.equal(startRecovery.body?.data?.status, "in_progress", "Recovery ticket should move into in_progress");
+  assert.equal(startRecovery.body?.data?.adminNote, "已开始人工核验注册信息");
+
+  const rejectWithoutNote = await apiFetch(`/api/admin/recovery-requests/${recoveryTicketId}`, {
+    method: "POST",
+    json: { status: "rejected" }
+  });
+  assert.equal(rejectWithoutNote.status, 400, "Rejecting a recovery ticket should require adminNote");
+  assert.equal(rejectWithoutNote.body?.error, "adminNote required");
+
+  const resolveRecovery = await apiFetch(`/api/admin/recovery-requests/${recoveryTicketId}`, {
+    method: "POST",
+    json: {
+      status: "resolved",
+      adminNote: "已完成账号核验并通知用户重置密码"
+    }
+  });
+  assert.equal(resolveRecovery.status, 200, `Resolving recovery ticket failed: ${resolveRecovery.raw}`);
+  assert.equal(resolveRecovery.body?.data?.status, "resolved", "Recovery ticket should be resolved");
+  assert.ok(resolveRecovery.body?.data?.handledByAdminId, "Resolved recovery ticket should record handledByAdminId");
+
+  const resolvedRecoveryList = await apiFetch(`/api/admin/recovery-requests?status=resolved&query=${encodeURIComponent(recoverySeedEmail)}`);
+  assert.equal(resolvedRecoveryList.status, 200, `Resolved recovery list failed: ${resolvedRecoveryList.raw}`);
+  const resolvedRecoveryItem = (resolvedRecoveryList.body?.data?.items ?? []).find((item) => item.id === recoveryTicketId);
+  assert.ok(resolvedRecoveryItem, "Resolved recovery list should include the updated ticket");
+  assert.equal(resolvedRecoveryItem.status, "resolved");
+
   const observabilityMetrics = await apiFetch("/api/admin/observability/metrics?limit=5");
   assert.equal(
     observabilityMetrics.status,

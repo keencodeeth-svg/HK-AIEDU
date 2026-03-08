@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { readJson, writeJson } from "./storage";
-import { isDbEnabled, query } from "./db";
+import { isDbEnabled, query, queryOne } from "./db";
 
 export type AdminLog = {
   id: string;
@@ -11,6 +11,8 @@ export type AdminLog = {
   detail?: string | null;
   createdAt: string;
 };
+
+type AdminLogMutation = Partial<Pick<AdminLog, "adminId" | "action" | "entityType" | "entityId" | "detail">>;
 
 const LOG_FILE = "admin-logs.json";
 
@@ -76,4 +78,44 @@ export async function getAdminLogs(limit = 100) {
     [limit]
   );
   return rows.map(mapLog);
+}
+
+export async function getAdminLogById(id: string) {
+  if (!isDbEnabled()) {
+    const list = readJson<AdminLog[]>(LOG_FILE, []);
+    return list.find((item) => item.id === id) ?? null;
+  }
+  const row = await queryOne<DbLog>("SELECT * FROM admin_logs WHERE id = $1", [id]);
+  return row ? mapLog(row) : null;
+}
+
+export async function updateAdminLog(id: string, updates: AdminLogMutation) {
+  const current = await getAdminLogById(id);
+  if (!current) return null;
+
+  const next: AdminLog = {
+    ...current,
+    adminId: updates.adminId !== undefined ? updates.adminId : current.adminId,
+    action: updates.action ?? current.action,
+    entityType: updates.entityType ?? current.entityType,
+    entityId: updates.entityId !== undefined ? updates.entityId : current.entityId,
+    detail: updates.detail !== undefined ? updates.detail : current.detail
+  };
+
+  if (!isDbEnabled()) {
+    const list = readJson<AdminLog[]>(LOG_FILE, []);
+    const nextList = list.map((item) => (item.id === id ? next : item));
+    writeJson(LOG_FILE, nextList.slice(0, 200));
+    return next;
+  }
+
+  const row = await queryOne<DbLog>(
+    `UPDATE admin_logs
+     SET admin_id = $2, action = $3, entity_type = $4, entity_id = $5, detail = $6
+     WHERE id = $1
+     RETURNING *`,
+    [next.id, next.adminId, next.action, next.entityType, next.entityId ?? null, next.detail ?? null]
+  );
+
+  return row ? mapLog(row) : next;
 }

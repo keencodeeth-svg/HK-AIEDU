@@ -57,6 +57,15 @@ export default function AdminPage() {
             <AnalyticsFunnelCard />
           </div>
         </Card>
+        <Card title="账号恢复工单" tag="P0">
+          <div className="feature-card">
+            <EduIcon name="board" />
+            <p>统一处理忘记密码、找回账号与锁定恢复请求，形成可追踪闭环。</p>
+          </div>
+          <Link className="button secondary" href="/admin/recovery-requests" style={{ marginTop: 12 }}>
+            进入工单台
+          </Link>
+        </Card>
         <Card title="操作日志" tag="安全">
           <div className="feature-card">
             <EduIcon name="board" />
