@@ -2,7 +2,9 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { getClassById } from "./classes";
+import { badRequest, conflict, notFound } from "./api/http";
 import { DEFAULT_SCHOOL_ID } from "./schools";
+import { listTeacherUnavailableSlots } from "./teacher-unavailability";
 
 export type Weekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 export type LessonStatus = "finished" | "upcoming" | "in_progress";
@@ -21,6 +23,18 @@ export type ClassScheduleSession = {
   focusSummary?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ClassScheduleSessionInput = {
+  classId: string;
+  weekday: number;
+  startTime: string;
+  endTime: string;
+  slotLabel?: string;
+  room?: string;
+  campus?: string;
+  note?: string;
+  focusSummary?: string;
 };
 
 export type ScheduleLessonBase = ClassScheduleSession & {
@@ -143,13 +157,13 @@ function writeStore(items: ClassScheduleSession[]) {
 
 function assertTimeValue(value: string, pathLabel: string) {
   if (!TIME_PATTERN.test(value)) {
-    throw new Error(`${pathLabel} must be HH:mm`);
+    badRequest(`${pathLabel} must be HH:mm`);
   }
 }
 
 function assertWeekdayValue(value: number) {
   if (!WEEKDAY_OPTIONS.some((item) => item.value === value)) {
-    throw new Error("weekday must be between 1 and 7");
+    badRequest("weekday must be between 1 and 7");
   }
 }
 
@@ -157,7 +171,7 @@ function assertTimeRange(startTime: string, endTime: string) {
   assertTimeValue(startTime, "startTime");
   assertTimeValue(endTime, "endTime");
   if (startTime >= endTime) {
-    throw new Error("endTime must be later than startTime");
+    badRequest("endTime must be later than startTime");
   }
 }
 
@@ -165,8 +179,12 @@ function overlapsTimeRange(left: Pick<ClassScheduleSession, "startTime" | "endTi
   return left.startTime < right.endTime && right.startTime < left.endTime;
 }
 
-function assertNoScheduleOverlap(items: ClassScheduleSession[], candidate: ClassScheduleSession, ignoreId?: string) {
-  const conflict = items.find(
+function normalizeLocationKey(value?: string | null) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function assertClassScheduleOverlap(items: ClassScheduleSession[], candidate: ClassScheduleSession, ignoreId?: string) {
+  const classConflict = items.find(
     (item) =>
       item.id !== ignoreId &&
       item.classId === candidate.classId &&
@@ -174,8 +192,69 @@ function assertNoScheduleOverlap(items: ClassScheduleSession[], candidate: Class
       overlapsTimeRange(item, candidate)
   );
 
-  if (conflict) {
-    throw new Error("schedule overlaps with existing session");
+  if (classConflict) {
+    conflict("班级节次时间冲突");
+  }
+}
+
+function createTeacherResolver() {
+  const cache = new Map<string, Promise<string | null>>();
+  return async (classId: string) => {
+    if (!cache.has(classId)) {
+      cache.set(
+        classId,
+        getClassById(classId).then((klass) => klass?.teacherId ?? null)
+      );
+    }
+    return cache.get(classId)!;
+  };
+}
+
+async function assertScheduleConstraints(
+  items: ClassScheduleSession[],
+  candidate: ClassScheduleSession,
+  options?: { ignoreId?: string; teacherId?: string | null }
+) {
+  assertClassScheduleOverlap(items, candidate, options?.ignoreId);
+
+  const roomKey = normalizeLocationKey(candidate.room);
+  const campusKey = normalizeLocationKey(candidate.campus);
+  if (roomKey) {
+    const roomConflict = items.find(
+      (item) =>
+        item.id !== options?.ignoreId &&
+        item.schoolId === candidate.schoolId &&
+        item.weekday === candidate.weekday &&
+        overlapsTimeRange(item, candidate) &&
+        normalizeLocationKey(item.room) === roomKey &&
+        normalizeLocationKey(item.campus) === campusKey
+    );
+    if (roomConflict) {
+      conflict("教室时间冲突");
+    }
+  }
+
+  if (!options?.teacherId) {
+    return;
+  }
+
+  const resolveTeacherId = createTeacherResolver();
+  for (const item of items) {
+    if (item.id === options.ignoreId) continue;
+    if (item.weekday !== candidate.weekday) continue;
+    if (!overlapsTimeRange(item, candidate)) continue;
+    const itemTeacherId = await resolveTeacherId(item.classId);
+    if (itemTeacherId && itemTeacherId === options.teacherId) {
+      conflict("教师时间冲突");
+    }
+  }
+
+  const blockedSlots = await listTeacherUnavailableSlots({ schoolId: candidate.schoolId, teacherId: options.teacherId });
+  const blocked = blockedSlots.find(
+    (item) => item.weekday === candidate.weekday && overlapsTimeRange(item, candidate)
+  );
+  if (blocked) {
+    conflict(`教师禁排时段冲突：${blocked.startTime}-${blocked.endTime}`);
   }
 }
 
@@ -247,20 +326,10 @@ export async function getClassScheduleSessionById(id: string) {
   return readStore().find((item) => item.id === id) ?? null;
 }
 
-export async function createClassScheduleSession(input: {
-  classId: string;
-  weekday: number;
-  startTime: string;
-  endTime: string;
-  slotLabel?: string;
-  room?: string;
-  campus?: string;
-  note?: string;
-  focusSummary?: string;
-}) {
+export async function createClassScheduleSession(input: ClassScheduleSessionInput) {
   const klass = await getClassById(input.classId);
   if (!klass) {
-    throw new Error("class not found");
+    notFound("class not found");
   }
 
   assertWeekdayValue(input.weekday);
@@ -284,7 +353,7 @@ export async function createClassScheduleSession(input: {
   };
 
   const list = readStore();
-  assertNoScheduleOverlap(list, next);
+  await assertScheduleConstraints(list, next, { teacherId: klass.teacherId ?? null });
   list.push(next);
   writeStore(list);
   return next;
@@ -330,10 +399,62 @@ export async function updateClassScheduleSession(
     updatedAt: new Date().toISOString()
   };
 
-  assertNoScheduleOverlap(list, next, id);
+  const klass = await getClassById(current.classId);
+  if (!klass) {
+    notFound("class not found");
+  }
+  await assertScheduleConstraints(list, next, { ignoreId: id, teacherId: klass.teacherId ?? null });
   list[index] = next;
   writeStore(list);
   return next;
+}
+
+export async function applyClassSchedulePlan(input: {
+  items: ClassScheduleSessionInput[];
+  replaceClassIds?: string[];
+  schoolId?: string | null;
+}) {
+  const replaceSet = new Set((input.replaceClassIds ?? []).filter(Boolean));
+  const nextList = readStore().filter((item) => {
+    if (input.schoolId && normalizeSchoolId(item.schoolId) !== normalizeSchoolId(input.schoolId)) {
+      return true;
+    }
+    return !replaceSet.has(item.classId);
+  });
+
+  const created: ClassScheduleSession[] = [];
+  for (const draft of input.items) {
+    const klass = await getClassById(draft.classId);
+    if (!klass) {
+      notFound(`class not found: ${draft.classId}`);
+    }
+
+    assertWeekdayValue(draft.weekday);
+    assertTimeRange(draft.startTime, draft.endTime);
+
+    const now = new Date().toISOString();
+    const next: ClassScheduleSession = {
+      id: `sched-${crypto.randomBytes(6).toString("hex")}`,
+      schoolId: normalizeSchoolId(klass.schoolId),
+      classId: draft.classId,
+      weekday: draft.weekday as Weekday,
+      startTime: draft.startTime,
+      endTime: draft.endTime,
+      slotLabel: normalizeText(draft.slotLabel),
+      room: normalizeText(draft.room),
+      campus: normalizeText(draft.campus),
+      note: normalizeText(draft.note),
+      focusSummary: normalizeText(draft.focusSummary),
+      createdAt: now,
+      updatedAt: now
+    };
+
+    await assertScheduleConstraints([...nextList, ...created], next, { teacherId: klass.teacherId ?? null });
+    created.push(next);
+  }
+
+  writeStore([...nextList, ...created]);
+  return created.sort(compareSessions);
 }
 
 export async function deleteClassScheduleSession(id: string, scope?: { schoolId?: string | null }) {

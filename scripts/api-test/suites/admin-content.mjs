@@ -13,6 +13,119 @@ export async function runAdminContentSuite(context) {
   assert.equal(adminLogin.status, 200, `Admin login failed: ${adminLogin.raw}`);
   assert.ok(context.cookieJar.has("mvp_session"), "Admin login should set mvp_session cookie");
 
+
+  const schoolSchedulesBefore = await apiFetch("/api/school/schedules?schoolId=school-default");
+  assert.equal(schoolSchedulesBefore.status, 200, `GET /api/school/schedules failed: ${schoolSchedulesBefore.raw}`);
+  assert.ok(Array.isArray(schoolSchedulesBefore.body?.data?.classes), "School schedules should include classes array");
+  const scheduleClasses = (schoolSchedulesBefore.body?.data?.classes ?? []).slice(0, 3);
+  assert.ok(scheduleClasses.length >= 3, "School schedules should expose at least 3 classes for scheduling regression");
+
+  const templateSave = await apiFetch("/api/school/schedules/templates", {
+    method: "POST",
+    json: {
+      schoolId: "school-default",
+      grade: scheduleClasses[0].grade,
+      subject: scheduleClasses[0].subject,
+      weeklyLessonsPerClass: 3,
+      lessonDurationMinutes: 40,
+      periodsPerDay: 2,
+      weekdays: [1, 2],
+      dayStartTime: "08:00",
+      shortBreakMinutes: 10,
+      lunchBreakAfterPeriod: 1,
+      lunchBreakMinutes: 0,
+      campus: "模板校区"
+    }
+  });
+  assert.equal(templateSave.status, 200, `POST /api/school/schedules/templates failed: ${templateSave.raw}`);
+  assert.equal(templateSave.body?.data?.weeklyLessonsPerClass, 3, "Template save should persist weeklyLessonsPerClass");
+
+  const templatesList = await apiFetch("/api/school/schedules/templates?schoolId=school-default");
+  assert.equal(templatesList.status, 200, `GET /api/school/schedules/templates failed: ${templatesList.raw}`);
+  const savedTemplate = (templatesList.body?.data ?? []).find(
+    (item) => item.grade === scheduleClasses[0].grade && item.subject === scheduleClasses[0].subject
+  );
+  assert.ok(savedTemplate, "Saved schedule template should be listed");
+
+  const teacherUnavailableCreate = await apiFetch("/api/school/schedules/teacher-unavailability", {
+    method: "POST",
+    json: {
+      schoolId: "school-default",
+      teacherId: scheduleClasses[0].teacherId,
+      weekday: 1,
+      startTime: "08:00",
+      endTime: "08:40",
+      reason: "固定教研会"
+    }
+  });
+  assert.equal(teacherUnavailableCreate.status, 200, `POST /api/school/schedules/teacher-unavailability failed: ${teacherUnavailableCreate.raw}`);
+  assert.equal(teacherUnavailableCreate.body?.data?.teacherId, scheduleClasses[0].teacherId, "Teacher unavailable slot should persist teacherId");
+
+  const teacherUnavailableList = await apiFetch("/api/school/schedules/teacher-unavailability?schoolId=school-default");
+  assert.equal(teacherUnavailableList.status, 200, `GET /api/school/schedules/teacher-unavailability failed: ${teacherUnavailableList.raw}`);
+  const savedUnavailable = (teacherUnavailableList.body?.data ?? []).find((item) => item.id === teacherUnavailableCreate.body?.data?.id);
+  assert.ok(savedUnavailable, "Teacher unavailable slot should be queryable");
+
+  const aiScheduleGenerate = await apiFetch("/api/school/schedules/ai-generate", {
+    method: "POST",
+    json: {
+      schoolId: "school-default",
+      classIds: [scheduleClasses[0].id],
+      weeklyLessonsPerClass: 1,
+      lessonDurationMinutes: 45,
+      periodsPerDay: 5,
+      weekdays: [1, 2, 3, 4, 5],
+      dayStartTime: "08:00",
+      shortBreakMinutes: 10,
+      lunchBreakAfterPeriod: 3,
+      lunchBreakMinutes: 40,
+      mode: "replace_all"
+    }
+  });
+  assert.equal(aiScheduleGenerate.status, 200, `POST /api/school/schedules/ai-generate failed: ${aiScheduleGenerate.raw}`);
+  assert.equal(aiScheduleGenerate.body?.data?.summary?.targetClassCount, 1, "AI scheduling should target requested class");
+  assert.equal(aiScheduleGenerate.body?.data?.summary?.createdSessions, 3, "AI scheduling should apply grade-subject template lesson count");
+  assert.equal(aiScheduleGenerate.body?.data?.summary?.templateAppliedClassCount, 1, "AI scheduling should report template-applied classes");
+  assert.ok(Array.isArray(aiScheduleGenerate.body?.data?.createdSessions), "AI scheduling should return createdSessions array");
+  assert.ok(
+    (aiScheduleGenerate.body?.data?.createdSessions ?? []).every((item) => !(item.weekday === 1 && item.startTime === "08:00")),
+    "AI scheduling should avoid teacher unavailable slots"
+  );
+
+  const schoolSchedulesAfterAi = await apiFetch("/api/school/schedules?schoolId=school-default");
+  assert.equal(schoolSchedulesAfterAi.status, 200, `GET /api/school/schedules after AI generation failed: ${schoolSchedulesAfterAi.raw}`);
+  const firstClassCount = (schoolSchedulesAfterAi.body?.data?.sessions ?? []).filter((session) => session.classId === scheduleClasses[0].id).length;
+  assert.equal(firstClassCount, 3, "School schedule store should keep template-generated lessons for the target class");
+
+  const roomOwnerCreate = await apiFetch("/api/school/schedules", {
+    method: "POST",
+    json: {
+      classId: scheduleClasses[1].id,
+      weekday: 5,
+      startTime: "15:00",
+      endTime: "15:40",
+      room: "共享教室A",
+      campus: "主校区",
+      slotLabel: "测试节次"
+    }
+  });
+  assert.equal(roomOwnerCreate.status, 200, `POST /api/school/schedules for room owner failed: ${roomOwnerCreate.raw}`);
+
+  const roomConflictCreate = await apiFetch("/api/school/schedules", {
+    method: "POST",
+    json: {
+      classId: scheduleClasses[2].id,
+      weekday: 5,
+      startTime: "15:00",
+      endTime: "15:40",
+      room: "共享教室A",
+      campus: "主校区",
+      slotLabel: "冲突节次"
+    }
+  });
+  assert.equal(roomConflictCreate.status, 409, "Creating a schedule in the same room and time should be rejected");
+  assert.equal(roomConflictCreate.body?.error, "教室时间冲突");
+
   const adminLogs = await apiFetch("/api/admin/logs?limit=5");
   assert.equal(adminLogs.status, 200, `GET /api/admin/logs failed: ${adminLogs.raw}`);
   assert.equal(adminLogs.body?.code, 0, "Admin logs should use standard envelope");
