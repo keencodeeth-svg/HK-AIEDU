@@ -9,6 +9,7 @@ import StudentDashboardGuideCard from "./_components/StudentDashboardGuideCard";
 import StudentEntryCompactCard from "./_components/StudentEntryCompactCard";
 import StudentEntryDetailCard from "./_components/StudentEntryDetailCard";
 import StudentMotivationCard from "./_components/StudentMotivationCard";
+import StudentNextActionCard from "./_components/StudentNextActionCard";
 import StudentPriorityTasksCard from "./_components/StudentPriorityTasksCard";
 import StudentQuickTutorCard from "./_components/StudentQuickTutorCard";
 import StudentTaskOverviewCard from "./_components/StudentTaskOverviewCard";
@@ -241,6 +242,11 @@ export default function StudentPage() {
     return entriesByCategory.slice(0, CATEGORY_META[activeCategory].defaultCount);
   }, [activeCategory, entriesByCategory, showAllEntries]);
 
+  const recommendedTask = useMemo(
+    () => todayTasks?.topTasks?.[0] ?? visiblePriorityTasks[0] ?? null,
+    [todayTasks, visiblePriorityTasks]
+  );
+
   const hasDashboardData = plan.length > 0 || motivation !== null || todayTasks !== null || joinRequests.length > 0;
 
   async function handleJoinClass(event: FormEvent<HTMLFormElement>) {
@@ -381,10 +387,20 @@ export default function StudentPage() {
         onShow={showDashboardGuideAgain}
       />
 
-      <StudentQuickTutorCard
-        mustDoCount={todayTasks?.summary?.mustDo ?? visiblePriorityTasks.length}
-        weakPlanCount={weakPlanCount}
-      />
+      <div className="student-focus-grid">
+        <StudentNextActionCard
+          recommendedTask={recommendedTask}
+          mustDoCount={todayTasks?.summary?.mustDo ?? visiblePriorityTasks.length}
+          totalTaskCount={todayTasks?.summary?.total ?? visiblePriorityTasks.length}
+          weakPlanCount={weakPlanCount}
+          onTaskEvent={handleTaskEvent}
+        />
+
+        <StudentQuickTutorCard
+          mustDoCount={todayTasks?.summary?.mustDo ?? visiblePriorityTasks.length}
+          weakPlanCount={weakPlanCount}
+        />
+      </div>
 
       <div className="student-overview-grid">
         <StudentPriorityTasksCard
@@ -406,11 +422,13 @@ export default function StudentPage() {
         </div>
       </div>
 
-      <StudentUnifiedTaskQueueCard
-        todayTasks={todayTasks}
-        todayTaskError={todayTaskError}
-        onTaskEvent={handleTaskEvent}
-      />
+      <div id="student-task-queue">
+        <StudentUnifiedTaskQueueCard
+          todayTasks={todayTasks}
+          todayTaskError={todayTaskError}
+          onTaskEvent={handleTaskEvent}
+        />
+      </div>
 
       <div className="section-head">
         <div>
@@ -420,34 +438,46 @@ export default function StudentPage() {
         <span className="chip">{CATEGORY_META[activeCategory].label}</span>
       </div>
 
-      <div className="cta-row no-margin">
-        {ENTRY_CATEGORIES.map((category) => (
+      <div className="student-entry-toolbar">
+        <div className="student-entry-filter-group" role="toolbar" aria-label="切换学习入口分类">
+          {ENTRY_CATEGORIES.map((category) => (
+            <button
+              key={category}
+              className={activeCategory === category ? "button secondary" : "button ghost"}
+              type="button"
+              aria-pressed={activeCategory === category}
+              onClick={() => setActiveCategory(category)}
+            >
+              {CATEGORY_META[category].label} ({categoryCounts[category]})
+            </button>
+          ))}
+        </div>
+        <div className="student-entry-view-group" role="toolbar" aria-label="切换学习入口显示方式">
           <button
-            key={category}
-            className={activeCategory === category ? "button secondary" : "button ghost"}
+            className={showAllEntries ? "button secondary" : "button ghost"}
             type="button"
-            onClick={() => setActiveCategory(category)}
+            aria-pressed={showAllEntries}
+            onClick={() => setShowAllEntries((prev) => !prev)}
           >
-            {CATEGORY_META[category].label} ({categoryCounts[category]})
+            {showAllEntries ? "收起入口" : `展开全部（${entriesByCategory.length}）`}
           </button>
-        ))}
-        <button className="button ghost" type="button" onClick={() => setShowAllEntries((prev) => !prev)}>
-          {showAllEntries ? "收起入口" : `展开全部（${entriesByCategory.length}）`}
-        </button>
-        <button
-          className={entryViewMode === "compact" ? "button secondary" : "button ghost"}
-          type="button"
-          onClick={() => setEntryViewMode("compact")}
-        >
-          紧凑视图
-        </button>
-        <button
-          className={entryViewMode === "detailed" ? "button secondary" : "button ghost"}
-          type="button"
-          onClick={() => setEntryViewMode("detailed")}
-        >
-          详细视图
-        </button>
+          <button
+            className={entryViewMode === "compact" ? "button secondary" : "button ghost"}
+            type="button"
+            aria-pressed={entryViewMode === "compact"}
+            onClick={() => setEntryViewMode("compact")}
+          >
+            紧凑视图
+          </button>
+          <button
+            className={entryViewMode === "detailed" ? "button secondary" : "button ghost"}
+            type="button"
+            aria-pressed={entryViewMode === "detailed"}
+            onClick={() => setEntryViewMode("detailed")}
+          >
+            详细视图
+          </button>
+        </div>
       </div>
 
       {entryViewMode === "detailed" ? (

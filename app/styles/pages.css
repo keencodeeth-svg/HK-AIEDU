@@ -2372,3 +2372,111 @@ html[data-density="compact"] .main {
   background: rgba(255, 255, 255, 0.72);
   border: 1px solid rgba(148, 172, 201, 0.18);
 }
+
+.student-focus-grid {
+  display: grid;
+  gap: var(--grid-gap);
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 1fr);
+  align-items: start;
+}
+
+.student-next-action-layout {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(220px, 0.85fr);
+  align-items: start;
+}
+
+.student-next-action-hero,
+.student-next-action-rail {
+  display: grid;
+  gap: 12px;
+}
+
+.student-next-action-kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand-0);
+}
+
+.student-next-action-title {
+  margin-top: 6px;
+  font-size: clamp(22px, 2.4vw, 30px);
+  line-height: 1.25;
+  font-weight: 800;
+  color: var(--ink-0);
+  font-family: var(--font-display);
+}
+
+.student-next-action-description {
+  margin: 8px 0 0;
+  color: var(--ink-1);
+  line-height: 1.7;
+}
+
+.student-next-action-reason,
+.student-next-action-summary,
+.student-next-action-metric {
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(132, 165, 202, 0.2);
+  background: linear-gradient(160deg, rgba(247, 251, 255, 0.96), rgba(232, 240, 249, 0.92));
+  box-shadow: var(--shadow-soft);
+}
+
+.student-next-action-reason-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--brand-0);
+  margin-bottom: 6px;
+}
+
+.student-next-action-metric-value {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--ink-0);
+}
+
+.task-queue-toolbar,
+.student-entry-toolbar {
+  display: grid;
+  gap: 10px;
+}
+
+.task-queue-filter-row,
+.student-entry-filter-group,
+.student-entry-view-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.task-queue-summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-1);
+  line-height: 1.6;
+}
+
+.task-queue-group-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+#student-task-queue {
+  scroll-margin-top: 96px;
+}
+
+@media (max-width: 1080px) {
+  .student-focus-grid,
+  .student-next-action-layout {
+    grid-template-columns: 1fr;
+  }
+}

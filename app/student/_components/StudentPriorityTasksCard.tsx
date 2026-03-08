@@ -92,7 +92,14 @@ export default function StudentPriorityTasksCard({
           ))}
         </div>
       )}
-      {hiddenTodayTaskCount > 0 ? <p className="meta-note">还有 {hiddenTodayTaskCount} 项任务待处理。</p> : null}
+      {hiddenTodayTaskCount > 0 ? (
+        <div className="cta-row" style={{ alignItems: "center" }}>
+          <p className="meta-note" style={{ margin: 0 }}>还有 {hiddenTodayTaskCount} 项任务待处理。</p>
+          <a className="button ghost" href="#student-task-queue">
+            查看剩余任务
+          </a>
+        </div>
+      ) : null}
     </Card>
   );
 }

@@ -36,7 +36,7 @@ export default function StudentTaskOverviewCard({
         <span className="badge">复练任务 {todayTasks?.summary?.bySource?.wrongReview ?? 0}</span>
       </div>
       <div className="cta-row">
-        <button className="button secondary" type="button" onClick={onRefreshPlan}>
+        <button className="button secondary" type="button" onClick={onRefreshPlan} disabled={refreshing} aria-busy={refreshing}>
           {refreshing ? "刷新中..." : "刷新学习计划"}
         </button>
       </div>

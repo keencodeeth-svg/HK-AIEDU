@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import Card from "@/components/Card";
 import type { TodayTask, TodayTaskEventName, TodayTaskPayload } from "../types";
@@ -9,8 +12,11 @@ type StudentUnifiedTaskQueueCardProps = {
   onTaskEvent: (task: TodayTask, eventName: TodayTaskEventName) => void;
 };
 
+type QueueGroupKey = keyof TodayTaskPayload["groups"];
+type QueueFilterKey = "all" | QueueGroupKey;
+
 const GROUP_CONFIG: Array<{
-  key: keyof TodayTaskPayload["groups"];
+  key: QueueGroupKey;
   title: string;
   description: string;
 }> = [
@@ -31,6 +37,12 @@ const GROUP_CONFIG: Array<{
   }
 ];
 
+const DEFAULT_EXPANDED: Record<QueueGroupKey, boolean> = {
+  mustDo: false,
+  continueLearning: false,
+  growth: false
+};
+
 function formatDueAt(value: string | null) {
   if (!value) return "时间待定";
   return new Date(value).toLocaleString("zh-CN", {
@@ -46,34 +58,88 @@ export default function StudentUnifiedTaskQueueCard({
   todayTaskError,
   onTaskEvent
 }: StudentUnifiedTaskQueueCardProps) {
+  const [activeGroup, setActiveGroup] = useState<QueueFilterKey>("all");
+  const [expandedGroups, setExpandedGroups] = useState<Record<QueueGroupKey, boolean>>(DEFAULT_EXPANDED);
+
+  const visibleGroups = useMemo(() => {
+    if (activeGroup === "all") {
+      return GROUP_CONFIG;
+    }
+    return GROUP_CONFIG.filter((group) => group.key === activeGroup);
+  }, [activeGroup]);
+
+  const visibleTaskCount = useMemo(
+    () => visibleGroups.reduce((sum, group) => sum + (todayTasks?.groups?.[group.key]?.length ?? 0), 0),
+    [todayTasks, visibleGroups]
+  );
+
+  function toggleGroupExpanded(groupKey: QueueGroupKey) {
+    setExpandedGroups((current) => ({
+      ...current,
+      [groupKey]: !current[groupKey]
+    }));
+  }
+
   return (
     <Card title="统一任务队列" tag={`${todayTasks?.summary?.total ?? 0} 项`}>
       {todayTaskError ? <div className="status-note error">{todayTaskError}</div> : null}
       {!todayTasks ? <div className="status-note info">正在整理跨模块学习任务…</div> : null}
 
+      {todayTasks ? (
+        <div className="task-queue-toolbar">
+          <div className="task-queue-filter-row" role="toolbar" aria-label="筛选任务队列">
+            <button
+              className={activeGroup === "all" ? "button secondary" : "button ghost"}
+              type="button"
+              aria-pressed={activeGroup === "all"}
+              onClick={() => setActiveGroup("all")}
+            >
+              全部任务（{todayTasks.summary.total}）
+            </button>
+            {GROUP_CONFIG.map((group) => {
+              const count = todayTasks.groups[group.key]?.length ?? 0;
+              return (
+                <button
+                  key={group.key}
+                  className={activeGroup === group.key ? "button secondary" : "button ghost"}
+                  type="button"
+                  aria-pressed={activeGroup === group.key}
+                  onClick={() => setActiveGroup(group.key)}
+                >
+                  {group.title}（{count}）
+                </button>
+              );
+            })}
+          </div>
+          <div className="task-queue-summary">
+            当前显示 {visibleTaskCount} 项任务，默认按“先做这些 → 继续推进 → 成长加分”排序，减少你自己再做一轮判断。
+          </div>
+        </div>
+      ) : null}
+
       <div className="grid" style={{ gap: 14 }}>
-        {GROUP_CONFIG.map((group) => {
+        {visibleGroups.map((group) => {
           const items = todayTasks?.groups?.[group.key] ?? [];
-          const visibleItems = items.slice(0, 3);
+          const expanded = expandedGroups[group.key];
+          const visibleItems = expanded ? items : items.slice(0, 3);
 
           return (
             <div key={group.key} className="card" style={{ gap: 10 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  flexWrap: "wrap"
-                }}
-              >
+              <div className="task-queue-group-head">
                 <div>
                   <div className="section-title">{group.title}</div>
                   <div className="meta-text" style={{ marginTop: 4 }}>
                     {group.description}
                   </div>
                 </div>
-                <span className="badge">{items.length} 项</span>
+                <div className="cta-row no-margin" style={{ gap: 8 }}>
+                  <span className="badge">{items.length} 项</span>
+                  {items.length > 3 ? (
+                    <button className="button ghost" type="button" onClick={() => toggleGroupExpanded(group.key)}>
+                      {expanded ? "收起" : `查看全部（${items.length}）`}
+                    </button>
+                  ) : null}
+                </div>
               </div>
 
               {!visibleItems.length ? (
