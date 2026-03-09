@@ -28,6 +28,54 @@ export async function runTeacherExamSuite(context) {
   }
   assert.equal(teacherLogin?.status, 200, "Teacher login failed for both primary and fallback accounts");
 
+  async function reloginTeacherAccount() {
+    const primary = await apiFetch("/api/auth/login", {
+      method: "POST",
+      useCookies: false,
+      json: { email: teacherCandidates[0].email, password: teacherCandidates[0].password, role: "teacher" }
+    });
+    if (primary.status === 200) {
+      return primary;
+    }
+
+    const fallback = await apiFetch("/api/auth/login", {
+      method: "POST",
+      useCookies: false,
+      json: { email: teacherCandidates[1].email, password: teacherCandidates[1].password, role: "teacher" }
+    });
+    assert.equal(fallback.status, 200, `Teacher relogin failed: ${fallback.raw}`);
+    return fallback;
+  }
+
+  async function saveStudentProfileAsStudent(studentEmail, studentPassword, profilePatch) {
+    const login = await apiFetch("/api/auth/login", {
+      method: "POST",
+      useCookies: false,
+      json: { email: studentEmail, password: studentPassword, role: "student" }
+    });
+    assert.equal(login.status, 200, `Student login failed for profile save: ${login.raw}`);
+
+    const saveProfile = await apiFetch("/api/student/profile", {
+      method: "PUT",
+      json: {
+        grade: profilePatch.grade ?? "4",
+        subjects: profilePatch.subjects ?? ["math", "english"],
+        target: profilePatch.target ?? "课堂协作与成绩提升",
+        school: profilePatch.school ?? "API测试学校",
+        preferredName: profilePatch.preferredName ?? null,
+        gender: profilePatch.gender ?? null,
+        heightCm: profilePatch.heightCm ?? null,
+        eyesightLevel: profilePatch.eyesightLevel ?? null,
+        seatPreference: profilePatch.seatPreference ?? null,
+        personality: profilePatch.personality ?? null,
+        strengths: profilePatch.strengths ?? "",
+        supportNotes: profilePatch.supportNotes ?? ""
+      }
+    });
+    assert.equal(saveProfile.status, 200, `PUT /api/student/profile failed: ${saveProfile.raw}`);
+    return saveProfile;
+  }
+
   const teacherDashboardOverview = await apiFetch("/api/dashboard/overview");
   assert.equal(teacherDashboardOverview.status, 200, `Teacher GET /api/dashboard/overview failed: ${teacherDashboardOverview.raw}`);
   assert.equal(teacherDashboardOverview.body?.data?.role, "teacher", "Teacher dashboard overview should detect teacher role");
@@ -35,6 +83,9 @@ export async function runTeacherExamSuite(context) {
   const teacherCalendarQuickAction = (teacherDashboardOverview.body?.data?.quickActions ?? []).find((item) => item.id === "teacher-calendar");
   assert.ok(teacherCalendarQuickAction, "Teacher dashboard overview should include calendar quick action");
   assert.equal(teacherCalendarQuickAction?.href, "/calendar");
+  const teacherSeatingQuickAction = (teacherDashboardOverview.body?.data?.quickActions ?? []).find((item) => item.id === "teacher-seating");
+  assert.ok(teacherSeatingQuickAction, "Teacher dashboard overview should include seating quick action");
+  assert.equal(teacherSeatingQuickAction?.href, "/teacher/seating");
 
   const teacherSchedule = await apiFetch("/api/schedule");
   assert.equal(teacherSchedule.status, 200, `Teacher GET /api/schedule failed: ${teacherSchedule.raw}`);
@@ -125,6 +176,118 @@ export async function runTeacherExamSuite(context) {
   );
   const targetStudent = (classStudents.body?.data ?? []).find((item) => item.email === email);
   assert.ok(targetStudent?.id, "Target student should exist in class roster");
+
+  const seatingStudentSeeds = Array.from(
+    new Map(
+      [
+        {
+          email,
+          password,
+          grade: "4",
+          subjects: ["math", "english"],
+          target: "提升课堂参与与同桌协作",
+          school: "API测试学校",
+          preferredName: "前排同学",
+          gender: "female",
+          heightCm: 142,
+          eyesightLevel: "front_preferred",
+          seatPreference: "front",
+          personality: "quiet",
+          strengths: "专注度高，适合安静座位",
+          supportNotes: "希望优先保证前排视野"
+        },
+        {
+          email: "student2@demo.com",
+          password: "Student123",
+          grade: "4",
+          subjects: ["math", "science"],
+          target: "提升应用题协作与口头表达",
+          school: "API测试学校",
+          preferredName: "协作搭档",
+          gender: "male",
+          heightCm: 155,
+          eyesightLevel: "normal",
+          seatPreference: "middle",
+          personality: "active",
+          strengths: "讨论积极，愿意帮助同学",
+          supportNotes: "适合与安静同学配对形成互补"
+        },
+        {
+          email: "student3@demo.com",
+          password: "Student123",
+          grade: "4",
+          subjects: ["math", "chinese"],
+          target: "提升稳定性和课堂专注",
+          school: "API测试学校",
+          preferredName: "后排高个",
+          gender: "female",
+          heightCm: 168,
+          eyesightLevel: "normal",
+          seatPreference: "back",
+          personality: "balanced",
+          strengths: "节奏稳定，完成度高",
+          supportNotes: "身高较高，优先安排后排或中后排"
+        }
+      ].map((item) => [item.email, item])
+    ).values()
+  );
+
+  for (const seatSeed of seatingStudentSeeds) {
+    if (seatSeed.email === email) continue;
+    const addSeatStudent = await apiFetch(`/api/teacher/classes/${examClass.id}/students`, {
+      method: "POST",
+      json: { email: seatSeed.email }
+    });
+    assert.equal(
+      addSeatStudent.status,
+      200,
+      `POST /api/teacher/classes/[id]/students for seating seed failed: ${addSeatStudent.raw}`
+    );
+  }
+
+  const classStudentsForSeating = await apiFetch(`/api/teacher/classes/${examClass.id}/students`);
+  assert.equal(
+    classStudentsForSeating.status,
+    200,
+    `GET /api/teacher/classes/[id]/students for seating failed: ${classStudentsForSeating.raw}`
+  );
+  assert.ok(
+    (classStudentsForSeating.body?.data ?? []).length >= Math.min(3, seatingStudentSeeds.length),
+    "Teacher class roster should include seating test students"
+  );
+
+  const targetProfileSave = await saveStudentProfileAsStudent(seatingStudentSeeds[0].email, seatingStudentSeeds[0].password, seatingStudentSeeds[0]);
+  assert.equal(
+    targetProfileSave.body?.data?.preferredName,
+    seatingStudentSeeds[0].preferredName,
+    "Student profile save should persist preferredName"
+  );
+  assert.equal(
+    targetProfileSave.body?.data?.seatPreference,
+    seatingStudentSeeds[0].seatPreference,
+    "Student profile save should persist seatPreference"
+  );
+
+  const targetProfileGet = await apiFetch("/api/student/profile");
+  assert.equal(targetProfileGet.status, 200, `GET /api/student/profile failed: ${targetProfileGet.raw}`);
+  assert.equal(targetProfileGet.body?.data?.preferredName, seatingStudentSeeds[0].preferredName);
+  assert.equal(targetProfileGet.body?.data?.heightCm, seatingStudentSeeds[0].heightCm);
+  assert.ok(
+    Array.isArray(targetProfileGet.body?.data?.missingPersonaFields),
+    "Student profile GET should expose missingPersonaFields"
+  );
+  assert.equal(
+    typeof targetProfileGet.body?.data?.profileCompleteness,
+    "number",
+    "Student profile GET should expose profileCompleteness"
+  );
+
+  for (const seatSeed of seatingStudentSeeds.slice(1)) {
+    const saveProfile = await saveStudentProfileAsStudent(seatSeed.email, seatSeed.password, seatSeed);
+    assert.equal(saveProfile.body?.data?.preferredName, seatSeed.preferredName);
+  }
+
+  await reloginTeacherAccount();
 
   const submissionAssignment = await apiFetch("/api/teacher/assignments", {
     method: "POST",
@@ -923,4 +1086,63 @@ export async function runTeacherExamSuite(context) {
   assert.equal(alertImpact.body?.data?.alertId, studentRiskAlert.id);
   assert.equal(typeof alertImpact.body?.data?.impact?.tracked, "boolean");
   assert.equal(typeof alertImpact.body?.data?.impact?.elapsedHours, "number");
+
+  const teacherSeatingData = await apiFetch(`/api/teacher/seating?classId=${examClass.id}`);
+  assert.equal(teacherSeatingData.status, 200, `GET /api/teacher/seating failed: ${teacherSeatingData.raw}`);
+  assert.ok(Array.isArray(teacherSeatingData.body?.data?.classes), "Teacher seating should include classes array");
+  assert.ok(Array.isArray(teacherSeatingData.body?.data?.students), "Teacher seating should include students array");
+  assert.ok(
+    (teacherSeatingData.body?.data?.students ?? []).length >= Math.min(3, seatingStudentSeeds.length),
+    "Teacher seating should include enriched seating students"
+  );
+  const seatingTargetStudent = (teacherSeatingData.body?.data?.students ?? []).find((item) => item.email === email);
+  assert.ok(seatingTargetStudent, "Teacher seating should include target student");
+  assert.equal(typeof seatingTargetStudent?.profileCompleteness, "number");
+  assert.ok(Array.isArray(seatingTargetStudent?.missingProfileFields));
+
+  const teacherSeatingPreview = await apiFetch("/api/teacher/seating/ai-preview", {
+    method: "POST",
+    json: {
+      classId: examClass.id,
+      rows: 2,
+      columns: 2,
+      balanceGender: true,
+      pairByScoreComplement: true,
+      respectHeightGradient: true
+    }
+  });
+  assert.equal(
+    teacherSeatingPreview.status,
+    200,
+    `POST /api/teacher/seating/ai-preview failed: ${teacherSeatingPreview.raw}`
+  );
+  assert.ok(Array.isArray(teacherSeatingPreview.body?.data?.plan?.seats), "Teacher seating preview should include seats");
+  assert.equal(typeof teacherSeatingPreview.body?.data?.summary?.assignedCount, "number");
+  assert.ok(Array.isArray(teacherSeatingPreview.body?.data?.warnings), "Teacher seating preview should include warnings");
+  assert.ok(Array.isArray(teacherSeatingPreview.body?.data?.insights), "Teacher seating preview should include insights");
+  const previewTargetSeat = (teacherSeatingPreview.body?.data?.plan?.seats ?? []).find((seat) => seat.studentId === targetStudent.id);
+  assert.ok(previewTargetSeat, "Teacher seating preview should place the target student");
+  assert.equal(previewTargetSeat?.row, 1, "Front-priority student should be placed in the front row");
+
+  const saveTeacherSeating = await apiFetch("/api/teacher/seating", {
+    method: "POST",
+    json: {
+      classId: examClass.id,
+      rows: teacherSeatingPreview.body?.data?.plan?.rows ?? 2,
+      columns: teacherSeatingPreview.body?.data?.plan?.columns ?? 2,
+      generatedBy: "ai",
+      note: "API test seating save",
+      seats: teacherSeatingPreview.body?.data?.plan?.seats ?? []
+    }
+  });
+  assert.equal(saveTeacherSeating.status, 200, `POST /api/teacher/seating failed: ${saveTeacherSeating.raw}`);
+  assert.equal(saveTeacherSeating.body?.data?.plan?.generatedBy, "ai");
+
+  const teacherSeatingReload = await apiFetch(`/api/teacher/seating?classId=${examClass.id}`);
+  assert.equal(teacherSeatingReload.status, 200, `GET /api/teacher/seating reload failed: ${teacherSeatingReload.raw}`);
+  assert.equal(teacherSeatingReload.body?.data?.savedPlan?.generatedBy, "ai");
+  assert.ok(
+    (teacherSeatingReload.body?.data?.savedPlan?.seats ?? []).some((seat) => seat.studentId === targetStudent.id),
+    "Reloaded teacher seating should persist saved seat assignments"
+  );
 }

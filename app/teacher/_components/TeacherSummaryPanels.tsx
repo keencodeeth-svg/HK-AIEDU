@@ -272,7 +272,7 @@ export function TeacherInsightsCard({
 
 export function TeacherQuickAccessCards() {
   return (
-    <div className="grid grid-3">
+    <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
       <Card title="AI 教学工具" tag="智能">
         <div className="feature-card">
           <EduIcon name="brain" />
@@ -280,6 +280,15 @@ export function TeacherQuickAccessCards() {
         </div>
         <Link className="button secondary" href="/teacher/ai-tools" style={{ marginTop: 12 }}>
           进入工具
+        </Link>
+      </Card>
+      <Card title="AI 排座位" tag="班级">
+        <div className="feature-card">
+          <EduIcon name="board" />
+          <p>按成绩互补、性别、身高和前排需求生成座位预览，并支持老师微调。</p>
+        </div>
+        <Link className="button secondary" href="/teacher/seating" style={{ marginTop: 12 }}>
+          进入排座位
         </Link>
       </Card>
       <Card title="学情分析" tag="数据">
