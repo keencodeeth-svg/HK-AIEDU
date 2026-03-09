@@ -228,7 +228,7 @@ export default function StudentProfilePage() {
       if (!observerCode) {
         await loadObserverCode();
       }
-      setMessage("已保存，AI 排座位与个性化推荐会同步使用这些信息。");
+      setMessage("已保存，老师端学期排座配置与个性化推荐会同步使用这些信息。");
     } catch (nextError) {
       setError(getRequestErrorMessage(nextError, "保存失败"));
     } finally {
@@ -251,7 +251,7 @@ export default function StudentProfilePage() {
       <div className="section-head">
         <div>
           <h2>学生资料</h2>
-          <div className="section-sub">补齐学习画像、课堂偏好与支持信息，让 AI 推荐和排座位更准确。</div>
+          <div className="section-sub">补齐学习画像、课堂偏好与支持信息，让 AI 推荐和学期排座更准确。</div>
         </div>
         <span className="chip">学习档案</span>
       </div>
@@ -259,7 +259,7 @@ export default function StudentProfilePage() {
       <Card title="资料完整度" tag="AI 协同">
         <div className="feature-card">
           <EduIcon name="brain" />
-          <p>当前完整度 {personaCompleteness.percentage}% ，资料越完整，老师端 AI 排座位和系统推荐越精准。</p>
+          <p>当前完整度 {personaCompleteness.percentage}% ，资料越完整，老师端学期排座配置和系统推荐越精准。</p>
         </div>
         <div className="grid grid-3" style={{ marginTop: 12 }}>
           <div className="card">
@@ -268,7 +268,7 @@ export default function StudentProfilePage() {
           </div>
           <div className="card">
             <div className="section-title">主要用途</div>
-            <p>AI 排座位 · 个性化推荐 · 课堂协同 · 家校支持</p>
+            <p>学期排座配置 · 个性化推荐 · 课堂协同 · 家校支持</p>
           </div>
           <div className="card">
             <div className="section-title">建议动作</div>
@@ -335,10 +335,10 @@ export default function StudentProfilePage() {
           </div>
         </Card>
 
-        <Card title="课堂与座位偏好" tag="排座位">
+        <Card title="课堂与学期座位偏好" tag="学期排座">
           <div className="feature-card">
             <EduIcon name="board" />
-            <p>这些信息会进入老师端 AI 排座位，综合考虑成绩互补、性别、身高、前排需求、专注支持与同桌协作。</p>
+            <p>这些信息会进入老师端学期排座配置，综合考虑成绩互补、性别、身高、前排需求、专注支持与同桌协作。</p>
           </div>
           <div className="grid grid-2" style={{ gap: 12, marginTop: 12 }}>
             <label>

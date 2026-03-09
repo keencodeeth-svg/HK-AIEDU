@@ -75,7 +75,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         { href: "/teacher/exams", label: "在线考试" },
         { href: "/teacher/modules", label: "课程模块" },
         { href: "/teacher/gradebook", label: "成绩册" },
-        { href: "/teacher/seating", label: "AI排座位" },
+        { href: "/teacher/seating", label: "学期排座" },
         { href: "/teacher/analysis", label: "学情分析" }
       ],
       groups: [
@@ -84,7 +84,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           links: [
             { href: "/teacher/submissions", label: "提交箱" },
             { href: "/teacher/notifications", label: "通知规则" },
-            { href: "/teacher/seating", label: "AI排座位" },
+            { href: "/teacher/seating", label: "学期排座" },
             { href: "/teacher/ai-tools", label: "教师 AI 工具" }
           ]
         },

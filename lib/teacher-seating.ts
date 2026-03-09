@@ -741,7 +741,7 @@ export async function sendTeacherSeatingProfileReminders(input: {
   const studentNotifications = recipients.map((student) => ({
     userId: student.id,
     title: "请补充课堂资料",
-    content: `老师正在优化班级「${klass.name}」的排座位，请尽快补充 ${student.missingProfileFields.join("、")}。资料越完整，AI 排座位和课堂协作建议越准确。`,
+    content: `老师正在完成班级「${klass.name}」的本学期座位配置，请尽快补充 ${student.missingProfileFields.join("、")}。资料越完整，学期排座配置和课堂协作建议越准确。`,
     type: "student_profile_reminder"
   }));
 
@@ -759,7 +759,7 @@ export async function sendTeacherSeatingProfileReminders(input: {
         parentNotifications.push({
           userId: parent.id,
           title: "请协助补充孩子课堂资料",
-          content: `老师正在优化班级「${klass.name}」的排座位，孩子仍需补充 ${student.missingProfileFields.join("、")}，建议尽快在学生资料中完善。`,
+          content: `老师正在完成班级「${klass.name}」的本学期座位配置，孩子仍需补充 ${student.missingProfileFields.join("、")}，建议尽快在学生资料中完善。`,
           type: "student_profile_reminder"
         });
       });

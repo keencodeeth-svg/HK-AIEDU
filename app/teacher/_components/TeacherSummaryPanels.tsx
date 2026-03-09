@@ -282,13 +282,13 @@ export function TeacherQuickAccessCards() {
           进入工具
         </Link>
       </Card>
-      <Card title="AI 排座位" tag="班级">
+      <Card title="学期排座" tag="班级">
         <div className="feature-card">
           <EduIcon name="board" />
-          <p>按成绩互补、性别、身高和前排需求生成座位预览，并支持老师微调。</p>
+          <p>学期初生成班级座位方案，兼顾成绩互补、性别、身高与前排需求，后续只按需局部调整。</p>
         </div>
         <Link className="button secondary" href="/teacher/seating" style={{ marginTop: 12 }}>
-          进入排座位
+          进入学期排座
         </Link>
       </Card>
       <Card title="学情分析" tag="数据">

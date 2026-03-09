@@ -693,8 +693,8 @@ async function buildTeacherOverview(user: SafeUser, common: CommonOverviewData):
       },
       {
         id: "teacher-seating",
-        label: "AI排座位",
-        description: "预览排座方案并微调班级座位分布",
+        label: "学期排座",
+        description: "学期初生成座位方案，后续按需局部微调",
         href: "/teacher/seating",
         tone: "secondary"
       },
@@ -788,7 +788,7 @@ function buildFallbackOverview(user: SafeUser, common: CommonOverviewData): Dash
     teacher: [
       { id: "teacher-home", label: "教师端", description: "返回教学主控台", href: "/teacher", tone: "primary" },
       { id: "teacher-calendar", label: "教学课表", description: "先确认今天节次与下一节课安排", href: "/calendar", tone: "secondary" },
-      { id: "teacher-seating", label: "AI排座位", description: "快速生成班级排座方案并继续微调", href: "/teacher/seating", tone: "secondary" },
+      { id: "teacher-seating", label: "学期排座", description: "学期初快速初始化座位方案，后续仅在必要时调整", href: "/teacher/seating", tone: "secondary" },
       { id: "teacher-submissions", label: "提交箱", description: "继续查看待跟进提交", href: "/teacher/submissions", tone: "secondary" },
       { id: "teacher-analysis", label: "学情分析", description: "查看班级薄弱点与风险学生", href: "/teacher/analysis", tone: "ghost" }
     ],

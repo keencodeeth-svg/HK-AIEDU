@@ -326,7 +326,7 @@ export default function TeacherSeatingPage() {
         setSavedPlan(null);
         setPreview(null);
       } else {
-        setPageError(getRequestErrorMessage(nextError, "加载 AI 排座位失败"));
+        setPageError(getRequestErrorMessage(nextError, "加载学期排座配置失败"));
       }
     } finally {
       setLoading(false);
@@ -399,6 +399,41 @@ export default function TeacherSeatingPage() {
       }),
     [classLabel, draftSummary, lockedSeats.length, studentsNeedingProfileReminder, watchStudents]
   );
+  const frontPriorityGap = Math.max(
+    0,
+    (draftSummary?.frontPriorityStudentCount ?? 0) - (draftSummary?.frontPrioritySatisfiedCount ?? 0)
+  );
+  const focusPriorityGap = Math.max(
+    0,
+    (draftSummary?.focusPriorityStudentCount ?? 0) - (draftSummary?.focusPrioritySatisfiedCount ?? 0)
+  );
+  const semesterReplanReasons = useMemo(() => {
+    const reasons: string[] = [];
+
+    if (!savedPlan) {
+      reasons.push("本学期还没有保存正式座位方案");
+    }
+    if ((draftSummary?.unassignedCount ?? 0) > 0) {
+      reasons.push(`仍有 ${draftSummary?.unassignedCount ?? 0} 名学生未分配座位`);
+    }
+    if (frontPriorityGap > 0) {
+      reasons.push(`${frontPriorityGap} 名前排需求学生仍需优先照顾`);
+    }
+    if (focusPriorityGap > 0) {
+      reasons.push(`${focusPriorityGap} 名低干扰需求学生仍需优化`);
+    }
+    if (studentsNeedingProfileReminder.length > 0) {
+      reasons.push(`${studentsNeedingProfileReminder.length} 名学生关键画像待补`);
+    }
+    if (previewPlan) {
+      reasons.push("当前有一份未应用的学期预览");
+    }
+
+    return reasons;
+  }, [draftSummary, focusPriorityGap, frontPriorityGap, previewPlan, savedPlan, studentsNeedingProfileReminder]);
+  const semesterStatus = !savedPlan ? "待初始化" : semesterReplanReasons.length ? "建议重排" : "本学期稳定";
+  const semesterStatusTone =
+    semesterStatus === "本学期稳定" ? "#027a48" : semesterStatus === "建议重排" ? "#b54708" : "#4f46e5";
   const frontRowCount = draftPlan ? getFrontRowCount(draftPlan.rows) : 1;
 
   function toggleLockedSeat(seatId: string) {
@@ -447,11 +482,11 @@ export default function TeacherSeatingPage() {
       setPreview(payload.data ?? null);
       setSaveMessage(
         keepLockedSeats && lockedSeats.length
-          ? `AI 预览已生成，已保留 ${lockedSeats.length} 个锁定座位。`
-          : "AI 预览已生成，可先应用再微调。"
+          ? `学期预览已生成，已保留 ${lockedSeats.length} 个锁定座位。`
+          : "学期预览已生成，可先应用再做少量调整。"
       );
     } catch (nextError) {
-      setPageError(getRequestErrorMessage(nextError, "生成 AI 预览失败"));
+      setPageError(getRequestErrorMessage(nextError, "生成学期预览失败"));
     } finally {
       setPreviewing(false);
     }
@@ -462,7 +497,7 @@ export default function TeacherSeatingPage() {
     setDraftPlan({ ...previewPlan, updatedAt: new Date().toISOString() });
     setLayoutRows(previewPlan.rows);
     setLayoutColumns(previewPlan.columns);
-    setSaveMessage("已应用 AI 预览，请继续微调后保存。");
+    setSaveMessage("已应用学期预览，请确认关键座位后保存本学期方案。");
     setSaveError(null);
   }
 
@@ -472,7 +507,7 @@ export default function TeacherSeatingPage() {
     setLayoutRows(savedPlan.rows);
     setLayoutColumns(savedPlan.columns);
     setPreview(null);
-    setSaveMessage("已恢复到最近保存版本。");
+    setSaveMessage("已恢复到本学期最近保存版本。");
     setSaveError(null);
   }
 
@@ -506,9 +541,9 @@ export default function TeacherSeatingPage() {
       if (payload.data?.students) {
         setStudents(payload.data.students);
       }
-      setSaveMessage("座位方案已保存，老师端会继续基于此草稿微调。");
+      setSaveMessage("本学期座位方案已保存，后续可按需做少量微调。");
     } catch (nextError) {
-      setSaveError(getRequestErrorMessage(nextError, "保存排座位失败"));
+      setSaveError(getRequestErrorMessage(nextError, "保存学期排座失败"));
     } finally {
       setSaving(false);
     }
@@ -549,7 +584,7 @@ export default function TeacherSeatingPage() {
 
     try {
       await navigator.clipboard.writeText(followUpChecklist);
-      setFollowUpMessage("已复制本轮排座位观察清单。");
+      setFollowUpMessage("已复制本学期排座观察清单。");
     } catch {
       setFollowUpError("复制失败，请稍后重试。");
     } finally {
@@ -560,7 +595,7 @@ export default function TeacherSeatingPage() {
   if (loading) {
     return (
       <StatePanel
-        title="AI 排座位加载中"
+        title="学期排座配置加载中"
         description="正在同步班级名单、学生画像与当前座位草稿。"
         tone="loading"
       />
@@ -571,7 +606,7 @@ export default function TeacherSeatingPage() {
     return (
       <StatePanel
         title="需要教师账号登录"
-        description="请先用教师账号登录后，再进入 AI 排座位工作台。"
+        description="请先用教师账号登录后，再进入学期排座配置页面。"
         tone="info"
         action={
           <Link className="button primary" href="/login">
@@ -586,7 +621,7 @@ export default function TeacherSeatingPage() {
     return (
       <StatePanel
         title="暂时还没有可排座的班级"
-        description="先去教师工作台创建班级并加入学生，再回来生成 AI 排座位方案。"
+        description="先去教师工作台创建班级并加入学生，再回来完成本学期的座位初始化。"
         tone="empty"
         action={
           <Link className="button primary" href="/teacher">
@@ -601,16 +636,54 @@ export default function TeacherSeatingPage() {
     <div className="grid" style={{ gap: 18 }}>
       <div className="section-head">
         <div>
-          <h2>AI 排座位</h2>
-          <div className="section-sub">先生成预览，再让老师微调，兼顾成绩互补、性别、身高与课堂偏好。</div>
+          <h2>学期排座配置</h2>
+          <div className="section-sub">学期初先生成一版预览，再由老师确认与微调，兼顾成绩互补、性别、身高和课堂偏好。</div>
         </div>
-        <span className="chip">教师主页面重点功能</span>
+        <span className="chip">学期初始化</span>
       </div>
 
-      <Card title="班级与排座策略" tag="AI">
+      <Card title="学期状态" tag={semesterStatus}>
+        <div className="feature-card">
+          <EduIcon name="chart" />
+          <p>排座默认按学期初始化处理：学期初完成正式方案，只有在插班、关键画像明显变化或老师主动复盘时再重排。</p>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginTop: 12 }}>
+          <div className="card">
+            <div className="section-title">当前状态</div>
+            <p style={{ color: semesterStatusTone }}>{semesterStatus}</p>
+          </div>
+          <div className="card">
+            <div className="section-title">正式方案</div>
+            <p>{savedPlan ? formatLoadedTime(savedPlan.updatedAt) : "尚未保存"}</p>
+          </div>
+          <div className="card">
+            <div className="section-title">建议触发时机</div>
+            <p>插班 / 关键画像变化 / 老师主动复盘</p>
+          </div>
+          <div className="card">
+            <div className="section-title">当前班级</div>
+            <p>{classLabel}</p>
+          </div>
+        </div>
+        {semesterReplanReasons.length ? (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+            {semesterReplanReasons.map((reason) => (
+              <span key={reason} className="badge">
+                {reason}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <div className="card" style={{ marginTop: 12 }}>
+            本学期方案已相对稳定，建议只做个别座位微调，不必频繁整体重排。
+          </div>
+        )}
+      </Card>
+
+      <Card title="班级与学期排座策略" tag="学期">
         <div className="feature-card">
           <EduIcon name="brain" />
-          <p>选择班级、调整座位布局后即可生成 AI 预览；你可以先看摘要，再应用到草稿里微调。</p>
+          <p>选择班级、调整座位布局后即可生成学期预览；建议先定一版正式方案，后续只在必要时做局部调整。</p>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginTop: 12 }}>
           <label>
@@ -736,7 +809,7 @@ export default function TeacherSeatingPage() {
           </div>
         ) : (
           <div className="card" style={{ marginTop: 12 }}>
-            先在下方草稿里锁定关键座位，再生成 AI 预览，系统会只重排其余位置。
+            先在下方草稿里锁定本学期必须保留的关键座位，再生成学期预览，系统会只重排其余位置。
           </div>
         )}
 
@@ -749,25 +822,25 @@ export default function TeacherSeatingPage() {
             {refreshing ? "刷新中..." : "刷新数据"}
           </button>
           <button className="button secondary" type="button" onClick={() => void handleGeneratePreview()} disabled={previewing}>
-            {previewing ? "生成中..." : "生成 AI 预览"}
+            {previewing ? "生成中..." : "生成学期预览"}
           </button>
           <button className="button ghost" type="button" onClick={handleApplyPreview} disabled={!previewPlan}>
-            应用 AI 预览
+            应用学期预览
           </button>
           <button className="button ghost" type="button" onClick={handleRestoreSaved} disabled={!savedPlan}>
             恢复已保存版本
           </button>
           <button className="button primary" type="button" onClick={() => void handleSavePlan()} disabled={saving}>
-            {saving ? "保存中..." : "保存排座方案"}
+            {saving ? "保存中..." : "保存本学期方案"}
           </button>
         </div>
       </Card>
 
-      <Card title="AI 预览建议" tag="预览">
+      <Card title="学期方案预览" tag="预览">
         {!previewPlan ? (
           <StatePanel
-            title="还没有生成 AI 预览"
-            description="点击上方“生成 AI 预览”，系统会先安排前排需求，再尝试做成绩互补和性别/身高平衡。"
+            title="还没有生成学期预览"
+            description="点击上方“生成学期预览”，系统会先安排前排需求，再尝试做成绩互补和性别、身高平衡。"
             tone="info"
             compact
           />
@@ -863,10 +936,10 @@ export default function TeacherSeatingPage() {
         )}
       </Card>
 
-      <Card title="执行闭环" tag="跟进">
+      <Card title="学期收口动作" tag="跟进">
         <div className="feature-card">
           <EduIcon name="rocket" />
-          <p>排座位完成后，建议立刻处理资料待补学生，并保留一份课堂观察清单，方便下一次微调。</p>
+          <p>学期方案确定后，建议一次性处理资料待补学生，并保留一份观察清单，后续只在必要时复盘和微调。</p>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginTop: 12 }}>
           <div className="card">
@@ -903,7 +976,7 @@ export default function TeacherSeatingPage() {
             onClick={() => void handleRemindIncompleteProfiles()}
             disabled={followUpActing !== null || !studentsNeedingProfileReminder.length}
           >
-            {followUpActing === "remind" ? "发送中..." : "提醒补齐资料"}
+            {followUpActing === "remind" ? "发送中..." : "发送补齐提醒"}
           </button>
           <button
             className="button ghost"
@@ -911,7 +984,7 @@ export default function TeacherSeatingPage() {
             onClick={() => void handleCopyFollowUpChecklist()}
             disabled={followUpActing !== null}
           >
-            {followUpActing === "copy" ? "复制中..." : "复制观察清单"}
+            {followUpActing === "copy" ? "复制中..." : "复制学期观察清单"}
           </button>
         </div>
 
@@ -930,7 +1003,7 @@ export default function TeacherSeatingPage() {
                 ))}
               </div>
             ) : (
-              <p style={{ color: "var(--ink-1)", marginTop: 8 }}>本班用于排座位的关键画像已补齐。</p>
+              <p style={{ color: "var(--ink-1)", marginTop: 8 }}>本班用于学期排座的关键画像已补齐。</p>
             )}
           </div>
           <div className="card">
@@ -1086,7 +1159,7 @@ export default function TeacherSeatingPage() {
       <Card title="学生画像与排座因子" tag="画像">
         <div className="feature-card">
           <EduIcon name="chart" />
-          <p>这里能看到 AI 排座位用到的关键信息；资料缺口越少，预览结果通常越稳定。</p>
+          <p>这里能看到学期排座配置用到的关键信息；资料缺口越少，预览结果通常越稳定。</p>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, marginTop: 12 }}>
           {roster.map((student) => (
