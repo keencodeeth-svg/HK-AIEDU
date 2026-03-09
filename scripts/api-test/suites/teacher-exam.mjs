@@ -68,6 +68,8 @@ export async function runTeacherExamSuite(context) {
         eyesightLevel: profilePatch.eyesightLevel ?? null,
         seatPreference: profilePatch.seatPreference ?? null,
         personality: profilePatch.personality ?? null,
+        focusSupport: profilePatch.focusSupport ?? null,
+        peerSupport: profilePatch.peerSupport ?? null,
         strengths: profilePatch.strengths ?? "",
         supportNotes: profilePatch.supportNotes ?? ""
       }
@@ -193,6 +195,8 @@ export async function runTeacherExamSuite(context) {
           eyesightLevel: "front_preferred",
           seatPreference: "front",
           personality: "quiet",
+          focusSupport: "needs_focus",
+          peerSupport: "needs_support",
           strengths: "专注度高，适合安静座位",
           supportNotes: "希望优先保证前排视野"
         },
@@ -209,6 +213,8 @@ export async function runTeacherExamSuite(context) {
           eyesightLevel: "normal",
           seatPreference: "middle",
           personality: "active",
+          focusSupport: "balanced",
+          peerSupport: "can_support",
           strengths: "讨论积极，愿意帮助同学",
           supportNotes: "适合与安静同学配对形成互补"
         },
@@ -225,6 +231,8 @@ export async function runTeacherExamSuite(context) {
           eyesightLevel: "normal",
           seatPreference: "back",
           personality: "balanced",
+          focusSupport: "self_driven",
+          peerSupport: "balanced",
           strengths: "节奏稳定，完成度高",
           supportNotes: "身高较高，优先安排后排或中后排"
         }
@@ -272,6 +280,8 @@ export async function runTeacherExamSuite(context) {
   assert.equal(targetProfileGet.status, 200, `GET /api/student/profile failed: ${targetProfileGet.raw}`);
   assert.equal(targetProfileGet.body?.data?.preferredName, seatingStudentSeeds[0].preferredName);
   assert.equal(targetProfileGet.body?.data?.heightCm, seatingStudentSeeds[0].heightCm);
+  assert.equal(targetProfileGet.body?.data?.focusSupport, seatingStudentSeeds[0].focusSupport);
+  assert.equal(targetProfileGet.body?.data?.peerSupport, seatingStudentSeeds[0].peerSupport);
   assert.ok(
     Array.isArray(targetProfileGet.body?.data?.missingPersonaFields),
     "Student profile GET should expose missingPersonaFields"
@@ -1098,7 +1108,14 @@ export async function runTeacherExamSuite(context) {
   const seatingTargetStudent = (teacherSeatingData.body?.data?.students ?? []).find((item) => item.email === email);
   assert.ok(seatingTargetStudent, "Teacher seating should include target student");
   assert.equal(typeof seatingTargetStudent?.profileCompleteness, "number");
+  assert.equal(seatingTargetStudent?.focusSupport, seatingStudentSeeds[0].focusSupport);
+  assert.equal(seatingTargetStudent?.peerSupport, seatingStudentSeeds[0].peerSupport);
   assert.ok(Array.isArray(seatingTargetStudent?.missingProfileFields));
+
+  const lockedSeedSeat = (teacherSeatingData.body?.data?.plan?.seats ?? []).find(
+    (seat) => seat.studentId && seat.studentId !== targetStudent.id
+  );
+  assert.ok(lockedSeedSeat?.studentId, "Teacher seating draft should provide a lockable assigned seat");
 
   const teacherSeatingPreview = await apiFetch("/api/teacher/seating/ai-preview", {
     method: "POST",
@@ -1108,7 +1125,17 @@ export async function runTeacherExamSuite(context) {
       columns: 2,
       balanceGender: true,
       pairByScoreComplement: true,
-      respectHeightGradient: true
+      respectHeightGradient: true,
+      lockedSeats: lockedSeedSeat
+        ? [
+            {
+              seatId: lockedSeedSeat.seatId,
+              row: lockedSeedSeat.row,
+              column: lockedSeedSeat.column,
+              studentId: lockedSeedSeat.studentId
+            }
+          ]
+        : []
     }
   });
   assert.equal(
@@ -1118,8 +1145,17 @@ export async function runTeacherExamSuite(context) {
   );
   assert.ok(Array.isArray(teacherSeatingPreview.body?.data?.plan?.seats), "Teacher seating preview should include seats");
   assert.equal(typeof teacherSeatingPreview.body?.data?.summary?.assignedCount, "number");
+  assert.equal(typeof teacherSeatingPreview.body?.data?.summary?.lockedSeatCount, "number");
   assert.ok(Array.isArray(teacherSeatingPreview.body?.data?.warnings), "Teacher seating preview should include warnings");
   assert.ok(Array.isArray(teacherSeatingPreview.body?.data?.insights), "Teacher seating preview should include insights");
+  const lockedSeatAfterPreview = (teacherSeatingPreview.body?.data?.plan?.seats ?? []).find(
+    (seat) => seat.row === lockedSeedSeat?.row && seat.column === lockedSeedSeat?.column
+  );
+  assert.equal(
+    lockedSeatAfterPreview?.studentId,
+    lockedSeedSeat?.studentId,
+    "Teacher seating preview should preserve locked seat assignment"
+  );
   const previewTargetSeat = (teacherSeatingPreview.body?.data?.plan?.seats ?? []).find((seat) => seat.studentId === targetStudent.id);
   assert.ok(previewTargetSeat, "Teacher seating preview should place the target student");
   assert.equal(previewTargetSeat?.row, 1, "Front-priority student should be placed in the front row");

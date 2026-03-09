@@ -5,9 +5,11 @@ import { getStudentProfile, upsertStudentProfile } from "@/lib/profiles";
 import {
   calculateStudentPersonaCompleteness,
   STUDENT_EYESIGHT_LEVEL_VALUES,
+  STUDENT_FOCUS_SUPPORT_VALUES,
   STUDENT_GENDER_VALUES,
   STUDENT_PERSONALITY_VALUES,
   STUDENT_PERSONA_MUTABLE_FIELDS,
+  STUDENT_PEER_SUPPORT_VALUES,
   STUDENT_SEAT_PREFERENCE_VALUES
 } from "@/lib/student-persona-options";
 import { getStudentPersona, upsertStudentPersona } from "@/lib/student-personas";
@@ -23,6 +25,8 @@ const updateProfileBodySchema = v.object<{
   eyesightLevel?: (typeof STUDENT_EYESIGHT_LEVEL_VALUES)[number];
   seatPreference?: (typeof STUDENT_SEAT_PREFERENCE_VALUES)[number];
   personality?: (typeof STUDENT_PERSONALITY_VALUES)[number];
+  focusSupport?: (typeof STUDENT_FOCUS_SUPPORT_VALUES)[number];
+  peerSupport?: (typeof STUDENT_PEER_SUPPORT_VALUES)[number];
   strengths?: string;
   supportNotes?: string;
 }>(
@@ -37,6 +41,8 @@ const updateProfileBodySchema = v.object<{
     eyesightLevel: v.optional(v.enum(STUDENT_EYESIGHT_LEVEL_VALUES)),
     seatPreference: v.optional(v.enum(STUDENT_SEAT_PREFERENCE_VALUES)),
     personality: v.optional(v.enum(STUDENT_PERSONALITY_VALUES)),
+    focusSupport: v.optional(v.enum(STUDENT_FOCUS_SUPPORT_VALUES)),
+    peerSupport: v.optional(v.enum(STUDENT_PEER_SUPPORT_VALUES)),
     strengths: v.optional(v.string({ allowEmpty: true, trim: false })),
     supportNotes: v.optional(v.string({ allowEmpty: true, trim: false }))
   },
@@ -63,6 +69,8 @@ function buildMergedProfile(
     eyesightLevel: persona?.eyesightLevel,
     seatPreference: persona?.seatPreference,
     personality: persona?.personality,
+    focusSupport: persona?.focusSupport,
+    peerSupport: persona?.peerSupport,
     strengths: persona?.strengths ?? "",
     supportNotes: persona?.supportNotes ?? "",
     profileCompleteness: completeness.percentage,
@@ -130,6 +138,12 @@ export const PUT = createLearningRoute({
             : undefined,
           personality: Object.prototype.hasOwnProperty.call(rawRecord, "personality")
             ? body.personality ?? null
+            : undefined,
+          focusSupport: Object.prototype.hasOwnProperty.call(rawRecord, "focusSupport")
+            ? body.focusSupport ?? null
+            : undefined,
+          peerSupport: Object.prototype.hasOwnProperty.call(rawRecord, "peerSupport")
+            ? body.peerSupport ?? null
             : undefined,
           strengths: Object.prototype.hasOwnProperty.call(rawRecord, "strengths") ? body.strengths ?? null : undefined,
           supportNotes: Object.prototype.hasOwnProperty.call(rawRecord, "supportNotes")

@@ -1,4 +1,4 @@
-import { notFound } from "./api/http";
+import { badRequest, notFound } from "./api/http";
 import { getAssignmentProgress, getAssignmentsByClass } from "./assignments";
 import { getClassSeatPlan, type ClassSeatPlan } from "./class-seat-plans";
 import { getClassById, getClassesByTeacher, getClassStudents, type ClassItem } from "./classes";
@@ -28,6 +28,8 @@ export type TeacherSeatingStudent = {
   eyesightLevel?: StudentPersonaLike["eyesightLevel"];
   seatPreference?: StudentPersonaLike["seatPreference"];
   personality?: StudentPersonaLike["personality"];
+  focusSupport?: StudentPersonaLike["focusSupport"];
+  peerSupport?: StudentPersonaLike["peerSupport"];
   strengths?: string;
   supportNotes?: string;
   completed: number;
@@ -51,10 +53,13 @@ export type TeacherSeatingPlanSummary = {
   occupancyRate: number;
   frontPriorityStudentCount: number;
   frontPrioritySatisfiedCount: number;
+  focusPriorityStudentCount: number;
+  focusPrioritySatisfiedCount: number;
   scoreComplementPairCount: number;
   mixedGenderPairCount: number;
   lowCompletenessCount: number;
   inferredScoreCount: number;
+  lockedSeatCount: number;
 };
 
 export type TeacherSeatingPageData = {
@@ -65,6 +70,13 @@ export type TeacherSeatingPageData = {
   plan: ClassSeatPlan | null;
   recommendedLayout: { rows: number; columns: number } | null;
   summary: TeacherSeatingPlanSummary | null;
+};
+
+export type TeacherSeatingLockedSeatInput = {
+  seatId?: string;
+  row: number;
+  column: number;
+  studentId: string;
 };
 
 export type TeacherSeatingAiOptions = {
@@ -105,8 +117,61 @@ function isFrontPriority(student: TeacherSeatingStudent | null | undefined) {
   return student.eyesightLevel === "front_preferred" || student.seatPreference === "front";
 }
 
+function isFocusPriority(student: TeacherSeatingStudent | null | undefined) {
+  if (!student) return false;
+  return student.focusSupport === "needs_focus";
+}
+
+function getFocusPriorityRows(rows: number) {
+  return Math.min(rows, Math.max(getFrontRowCount(rows), 2));
+}
+
 function getSeatPositionKey(seat: SeatCell) {
   return `${seat.row}:${seat.column}`;
+}
+
+function normalizeLockedSeats(
+  seats: TeacherSeatingLockedSeatInput[] | undefined,
+  rows: number,
+  columns: number,
+  students: TeacherSeatingStudent[]
+) {
+  if (!seats?.length) return [] as Array<SeatCell & { studentId: string }>;
+
+  const studentIdSet = new Set(students.map((student) => student.id));
+  const positionKeys = new Set<string>();
+  const assignedStudentIds = new Set<string>();
+
+  return seats.map((seat) => {
+    const studentId = seat.studentId.trim();
+    if (!studentId) {
+      badRequest("locked seat studentId is required");
+    }
+    if (seat.row < 1 || seat.row > rows || seat.column < 1 || seat.column > columns) {
+      badRequest("locked seat position out of range");
+    }
+    if (!studentIdSet.has(studentId)) {
+      badRequest("locked seat student must belong to class");
+    }
+
+    const positionKey = `${seat.row}:${seat.column}`;
+    if (positionKeys.has(positionKey)) {
+      badRequest("duplicate locked seat position");
+    }
+    if (assignedStudentIds.has(studentId)) {
+      badRequest("duplicate locked seat student");
+    }
+
+    positionKeys.add(positionKey);
+    assignedStudentIds.add(studentId);
+
+    return {
+      seatId: seat.seatId?.trim() || createSeatId(seat.row, seat.column),
+      row: seat.row,
+      column: seat.column,
+      studentId
+    };
+  });
 }
 
 function buildDraftPlan(
@@ -202,6 +267,8 @@ async function buildTeacherSeatingStudents(classId: string) {
       eyesightLevel: persona?.eyesightLevel,
       seatPreference: persona?.seatPreference,
       personality: persona?.personality,
+      focusSupport: persona?.focusSupport,
+      peerSupport: persona?.peerSupport,
       strengths: persona?.strengths,
       supportNotes: persona?.supportNotes,
       completed,
@@ -219,10 +286,15 @@ async function buildTeacherSeatingStudents(classId: string) {
   });
 }
 
-export function buildTeacherSeatingPlanSummary(plan: ClassSeatPlan, students: TeacherSeatingStudent[]): TeacherSeatingPlanSummary {
+export function buildTeacherSeatingPlanSummary(
+  plan: ClassSeatPlan,
+  students: TeacherSeatingStudent[],
+  lockedSeatCount = 0
+): TeacherSeatingPlanSummary {
   const studentMap = new Map(students.map((student) => [student.id, student]));
   const assignedStudentIds = getAssignedStudentIds(plan.seats);
   const frontRowCount = getFrontRowCount(plan.rows);
+  const focusPriorityRows = getFocusPriorityRows(plan.rows);
   const seatPairs = buildSeatPairs(plan.seats);
   let scoreComplementPairCount = 0;
   let mixedGenderPairCount = 0;
@@ -252,6 +324,11 @@ export function buildTeacherSeatingPlanSummary(plan: ClassSeatPlan, students: Te
     return isFrontPriority(studentMap.get(seat.studentId));
   }).length;
 
+  const focusPrioritySatisfiedCount = plan.seats.filter((seat) => {
+    if (seat.row > focusPriorityRows || !seat.studentId) return false;
+    return isFocusPriority(studentMap.get(seat.studentId));
+  }).length;
+
   return {
     studentCount: students.length,
     seatCapacity: plan.rows * plan.columns,
@@ -260,19 +337,23 @@ export function buildTeacherSeatingPlanSummary(plan: ClassSeatPlan, students: Te
     occupancyRate: plan.rows * plan.columns ? Math.round((assignedStudentIds.length / (plan.rows * plan.columns)) * 100) : 0,
     frontPriorityStudentCount: students.filter((student) => isFrontPriority(student)).length,
     frontPrioritySatisfiedCount,
+    focusPriorityStudentCount: students.filter((student) => isFocusPriority(student)).length,
+    focusPrioritySatisfiedCount,
     scoreComplementPairCount,
     mixedGenderPairCount,
     lowCompletenessCount: students.filter((student) => student.profileCompleteness < 70).length,
-    inferredScoreCount: students.filter((student) => student.scoreSource === "completion").length
+    inferredScoreCount: students.filter((student) => student.scoreSource === "completion").length,
+    lockedSeatCount
   };
 }
 
 function buildTeacherSeatingDiagnostics(
   plan: ClassSeatPlan,
   students: TeacherSeatingStudent[],
-  options?: TeacherSeatingAiOptions
+  options?: TeacherSeatingAiOptions,
+  meta?: { lockedSeatCount?: number }
 ) {
-  const summary = buildTeacherSeatingPlanSummary(plan, students);
+  const summary = buildTeacherSeatingPlanSummary(plan, students, meta?.lockedSeatCount ?? 0);
   const warnings: string[] = [];
   const insights: string[] = [];
 
@@ -284,6 +365,11 @@ function buildTeacherSeatingDiagnostics(
       `${summary.frontPriorityStudentCount - summary.frontPrioritySatisfiedCount} 名前排需求学生暂未全部进入前排。`
     );
   }
+  if (summary.focusPriorityStudentCount > summary.focusPrioritySatisfiedCount) {
+    warnings.push(
+      `${summary.focusPriorityStudentCount - summary.focusPrioritySatisfiedCount} 名需要低干扰环境的学生暂未全部进入前两排优先区。`
+    );
+  }
   if (summary.lowCompletenessCount > 0) {
     warnings.push(`有 ${summary.lowCompletenessCount} 名学生资料不完整，AI 无法充分考虑全部约束。`);
   }
@@ -291,8 +377,14 @@ function buildTeacherSeatingDiagnostics(
     warnings.push(`有 ${summary.inferredScoreCount} 名学生缺少测验成绩，互补排座改用作业完成度推断。`);
   }
 
+  if (summary.lockedSeatCount > 0) {
+    insights.push(`已保留 ${summary.lockedSeatCount} 个老师锁定座位。`);
+  }
   if (summary.frontPrioritySatisfiedCount > 0) {
     insights.push(`已优先照顾 ${summary.frontPrioritySatisfiedCount} 名前排需求学生。`);
+  }
+  if (summary.focusPrioritySatisfiedCount > 0) {
+    insights.push(`已优先安排 ${summary.focusPrioritySatisfiedCount} 名需要低干扰环境的学生进入前两排优先区。`);
   }
   if (summary.scoreComplementPairCount > 0) {
     insights.push(`形成 ${summary.scoreComplementPairCount} 组高低分互补同桌。`);
@@ -365,6 +457,32 @@ function buildPairingGroups(
       ) {
         cost -= 4;
       }
+    }
+
+    if (
+      (anchor.focusSupport === "needs_focus" && candidate.personality === "active") ||
+      (candidate.focusSupport === "needs_focus" && anchor.personality === "active")
+    ) {
+      cost += 12;
+    }
+
+    if (anchor.focusSupport === "needs_focus" && candidate.focusSupport === "needs_focus") {
+      cost += 6;
+    }
+
+    if (
+      (anchor.peerSupport === "needs_support" && candidate.peerSupport === "can_support") ||
+      (anchor.peerSupport === "can_support" && candidate.peerSupport === "needs_support")
+    ) {
+      cost -= 12;
+    }
+
+    if (anchor.peerSupport === "needs_support" && candidate.peerSupport === "needs_support") {
+      cost += 14;
+    }
+
+    if (anchor.peerSupport === "can_support" && candidate.peerSupport === "can_support") {
+      cost += 3;
     }
 
     if (anchor.heightCm && candidate.heightCm && Math.abs(anchor.heightCm - candidate.heightCm) > 25) {
@@ -474,6 +592,7 @@ export async function generateTeacherSeatingAiPreview(input: {
   rows: number;
   columns: number;
   options: TeacherSeatingAiOptions;
+  lockedSeats?: TeacherSeatingLockedSeatInput[];
 }) {
   const klass = await getClassById(input.classId);
   if (!klass || klass.teacherId !== input.teacherId) {
@@ -483,21 +602,43 @@ export async function generateTeacherSeatingAiPreview(input: {
   const students = await buildTeacherSeatingStudents(klass.id);
   const seatGrid = buildSeatGrid(input.rows, input.columns);
   const frontRowCount = getFrontRowCount(input.rows);
-  const frontPriorityStudents = students
-    .filter((student) => isFrontPriority(student))
-    .sort((left, right) => getStudentHeight(left) - getStudentHeight(right) || left.name.localeCompare(right.name, "zh-CN"));
-  const assignedBySeat = new Map<string, string>();
-  let availableSeats = [...seatGrid].sort((left, right) => left.row - right.row || left.column - right.column);
+  const focusPriorityRows = getFocusPriorityRows(input.rows);
+  const lockedSeats = normalizeLockedSeats(input.lockedSeats, input.rows, input.columns, students);
+  const assignedBySeat = new Map(lockedSeats.map((seat) => [getSeatPositionKey(seat), seat.studentId]));
+  const assignedStudentIds = new Set(lockedSeats.map((seat) => seat.studentId));
+  let availableSeats = seatGrid
+    .filter((seat) => !assignedBySeat.has(getSeatPositionKey(seat)))
+    .sort((left, right) => left.row - right.row || left.column - right.column);
 
+  const frontPriorityStudents = students
+    .filter((student) => isFrontPriority(student) && !assignedStudentIds.has(student.id))
+    .sort((left, right) => getStudentHeight(left) - getStudentHeight(right) || left.name.localeCompare(right.name, "zh-CN"));
   const frontSeats = availableSeats.filter((seat) => seat.row <= frontRowCount);
   const maxFrontAssignments = Math.min(frontPriorityStudents.length, frontSeats.length);
   for (let index = 0; index < maxFrontAssignments; index += 1) {
     assignedBySeat.set(getSeatPositionKey(frontSeats[index]), frontPriorityStudents[index].id);
+    assignedStudentIds.add(frontPriorityStudents[index].id);
   }
   const occupiedFrontSeatKeys = new Set(frontSeats.slice(0, maxFrontAssignments).map((seat) => getSeatPositionKey(seat)));
   availableSeats = availableSeats.filter((seat) => !occupiedFrontSeatKeys.has(getSeatPositionKey(seat)));
 
-  const assignedStudentIds = new Set(frontPriorityStudents.slice(0, maxFrontAssignments).map((student) => student.id));
+  const focusPriorityStudents = students
+    .filter((student) => isFocusPriority(student) && !isFrontPriority(student) && !assignedStudentIds.has(student.id))
+    .sort(
+      (left, right) =>
+        getStudentHeight(left) - getStudentHeight(right) ||
+        right.placementScore - left.placementScore ||
+        left.name.localeCompare(right.name, "zh-CN")
+    );
+  const focusSeats = availableSeats.filter((seat) => seat.row <= focusPriorityRows);
+  const maxFocusAssignments = Math.min(focusPriorityStudents.length, focusSeats.length);
+  for (let index = 0; index < maxFocusAssignments; index += 1) {
+    assignedBySeat.set(getSeatPositionKey(focusSeats[index]), focusPriorityStudents[index].id);
+    assignedStudentIds.add(focusPriorityStudents[index].id);
+  }
+  const occupiedFocusSeatKeys = new Set(focusSeats.slice(0, maxFocusAssignments).map((seat) => getSeatPositionKey(seat)));
+  availableSeats = availableSeats.filter((seat) => !occupiedFocusSeatKeys.has(getSeatPositionKey(seat)));
+
   const remainingStudents = students.filter((student) => !assignedStudentIds.has(student.id));
   const groups = buildPairingGroups(remainingStudents, input.options);
 
@@ -530,7 +671,7 @@ export async function generateTeacherSeatingAiPreview(input: {
     class: klass,
     students,
     plan,
-    ...buildTeacherSeatingDiagnostics(plan, students, input.options)
+    ...buildTeacherSeatingDiagnostics(plan, students, input.options, { lockedSeatCount: lockedSeats.length })
   };
 }
 
@@ -549,6 +690,6 @@ export async function buildSavedTeacherSeatingResult(input: {
     class: klass,
     students,
     plan: input.plan,
-    ...buildTeacherSeatingDiagnostics(input.plan, students)
+    ...buildTeacherSeatingDiagnostics(input.plan, students, undefined, { lockedSeatCount: 0 })
   };
 }

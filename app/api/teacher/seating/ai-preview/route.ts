@@ -4,6 +4,21 @@ import { generateTeacherSeatingAiPreview } from "@/lib/teacher-seating";
 
 export const dynamic = "force-dynamic";
 
+const lockedSeatSchema = v.object<{
+  seatId?: string;
+  row: number;
+  column: number;
+  studentId: string;
+}>(
+  {
+    seatId: v.optional(v.string({ allowEmpty: true })),
+    row: v.number({ integer: true, min: 1, max: 12 }),
+    column: v.number({ integer: true, min: 1, max: 12 }),
+    studentId: v.string({ minLength: 1 })
+  },
+  { allowUnknown: false }
+);
+
 const aiPreviewBodySchema = v.object<{
   classId: string;
   rows: number;
@@ -11,6 +26,12 @@ const aiPreviewBodySchema = v.object<{
   balanceGender?: boolean;
   pairByScoreComplement?: boolean;
   respectHeightGradient?: boolean;
+  lockedSeats?: Array<{
+    seatId?: string;
+    row: number;
+    column: number;
+    studentId: string;
+  }>;
 }>(
   {
     classId: v.string({ minLength: 1 }),
@@ -18,7 +39,8 @@ const aiPreviewBodySchema = v.object<{
     columns: v.number({ integer: true, min: 1, max: 12 }),
     balanceGender: v.optional(v.boolean()),
     pairByScoreComplement: v.optional(v.boolean()),
-    respectHeightGradient: v.optional(v.boolean())
+    respectHeightGradient: v.optional(v.boolean()),
+    lockedSeats: v.optional(v.array(lockedSeatSchema))
   },
   { allowUnknown: false }
 );
@@ -38,7 +60,13 @@ export const POST = createLearningRoute({
         balanceGender: body.balanceGender ?? true,
         pairByScoreComplement: body.pairByScoreComplement ?? true,
         respectHeightGradient: body.respectHeightGradient ?? true
-      }
+      },
+      lockedSeats: body.lockedSeats?.map((seat) => ({
+        seatId: seat.seatId?.trim() || undefined,
+        row: seat.row,
+        column: seat.column,
+        studentId: seat.studentId.trim()
+      }))
     });
   }
 });

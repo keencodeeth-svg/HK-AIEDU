@@ -22,7 +22,9 @@ import {
 } from "@/lib/seat-plan-utils";
 import {
   STUDENT_EYESIGHT_LEVEL_LABELS,
+  STUDENT_FOCUS_SUPPORT_LABELS,
   STUDENT_GENDER_LABELS,
+  STUDENT_PEER_SUPPORT_LABELS,
   STUDENT_PERSONALITY_LABELS,
   STUDENT_SEAT_PREFERENCE_LABELS
 } from "@/lib/student-persona-options";
@@ -45,6 +47,8 @@ type TeacherSeatingStudent = {
   eyesightLevel?: keyof typeof STUDENT_EYESIGHT_LEVEL_LABELS;
   seatPreference?: keyof typeof STUDENT_SEAT_PREFERENCE_LABELS;
   personality?: keyof typeof STUDENT_PERSONALITY_LABELS;
+  focusSupport?: keyof typeof STUDENT_FOCUS_SUPPORT_LABELS;
+  peerSupport?: keyof typeof STUDENT_PEER_SUPPORT_LABELS;
   strengths?: string;
   supportNotes?: string;
   completed: number;
@@ -81,10 +85,13 @@ type PlanSummary = {
   occupancyRate: number;
   frontPriorityStudentCount: number;
   frontPrioritySatisfiedCount: number;
+  focusPriorityStudentCount: number;
+  focusPrioritySatisfiedCount: number;
   scoreComplementPairCount: number;
   mixedGenderPairCount: number;
   lowCompletenessCount: number;
   inferredScoreCount: number;
+  lockedSeatCount: number;
 };
 
 type SeatingResponse = {
@@ -134,10 +141,16 @@ function isFrontPriorityStudent(student: TeacherSeatingStudent | null | undefine
   return student.eyesightLevel === "front_preferred" || student.seatPreference === "front";
 }
 
-function summarizePlan(plan: SeatPlan | null, students: TeacherSeatingStudent[]) {
+function isFocusPriorityStudent(student: TeacherSeatingStudent | null | undefined) {
+  if (!student) return false;
+  return student.focusSupport === "needs_focus";
+}
+
+function summarizePlan(plan: SeatPlan | null, students: TeacherSeatingStudent[], lockedSeatCount = 0) {
   if (!plan) return null;
   const studentMap = new Map(students.map((student) => [student.id, student]));
   const frontRowCount = getFrontRowCount(plan.rows);
+  const focusPriorityRows = Math.min(plan.rows, Math.max(frontRowCount, 2));
   const assignedIds = getAssignedStudentIds(plan.seats);
   let scoreComplementPairCount = 0;
   let mixedGenderPairCount = 0;
@@ -173,10 +186,16 @@ function summarizePlan(plan: SeatPlan | null, students: TeacherSeatingStudent[])
       if (seat.row > frontRowCount || !seat.studentId) return false;
       return isFrontPriorityStudent(studentMap.get(seat.studentId));
     }).length,
+    focusPriorityStudentCount: students.filter((student) => isFocusPriorityStudent(student)).length,
+    focusPrioritySatisfiedCount: plan.seats.filter((seat) => {
+      if (seat.row > focusPriorityRows || !seat.studentId) return false;
+      return isFocusPriorityStudent(studentMap.get(seat.studentId));
+    }).length,
     scoreComplementPairCount,
     mixedGenderPairCount,
     lowCompletenessCount: students.filter((student) => student.profileCompleteness < 70).length,
-    inferredScoreCount: students.filter((student) => student.scoreSource === "completion").length
+    inferredScoreCount: students.filter((student) => student.scoreSource === "completion").length,
+    lockedSeatCount
   } satisfies PlanSummary;
 }
 
@@ -200,6 +219,8 @@ export default function TeacherSeatingPage() {
   const [savedPlan, setSavedPlan] = useState<SeatPlan | null>(null);
   const [preview, setPreview] = useState<AiPreviewResponse["data"] | null>(null);
   const [aiOptions, setAiOptions] = useState<AiOptions>(DEFAULT_AI_OPTIONS);
+  const [keepLockedSeats, setKeepLockedSeats] = useState(true);
+  const [lockedSeatIds, setLockedSeatIds] = useState<string[]>([]);
   const [layoutRows, setLayoutRows] = useState(4);
   const [layoutColumns, setLayoutColumns] = useState(6);
   const [loading, setLoading] = useState(true);
@@ -261,7 +282,23 @@ export default function TeacherSeatingPage() {
     void loadData();
   }, [loadData]);
 
-  const draftSummary = useMemo(() => summarizePlan(draftPlan, students), [draftPlan, students]);
+  useEffect(() => {
+    if (!draftPlan) {
+      setLockedSeatIds([]);
+      return;
+    }
+
+    const validSeatIds = new Set(draftPlan.seats.filter((seat) => Boolean(seat.studentId)).map((seat) => seat.seatId));
+    setLockedSeatIds((prev) => prev.filter((seatId) => validSeatIds.has(seatId)));
+  }, [draftPlan]);
+
+  const lockedSeats = useMemo(() => {
+    if (!draftPlan) return [] as Array<SeatCell & { studentId: string }>;
+    return draftPlan.seats.filter(
+      (seat): seat is SeatCell & { studentId: string } => Boolean(seat.studentId) && lockedSeatIds.includes(seat.seatId)
+    );
+  }, [draftPlan, lockedSeatIds]);
+  const draftSummary = useMemo(() => summarizePlan(draftPlan, students, lockedSeats.length), [draftPlan, lockedSeats.length, students]);
   const previewPlan = preview?.plan ?? null;
   const previewSummary = preview?.summary ?? null;
   const previewWarnings = preview?.warnings ?? [];
@@ -283,6 +320,11 @@ export default function TeacherSeatingPage() {
     [students]
   );
   const frontRowCount = draftPlan ? getFrontRowCount(draftPlan.rows) : 1;
+
+  function toggleLockedSeat(seatId: string) {
+    setLockedSeatIds((prev) => (prev.includes(seatId) ? prev.filter((item) => item !== seatId) : [...prev, seatId]));
+    setSaveMessage(null);
+  }
 
   function handleLayoutChange(type: "rows" | "columns", value: number) {
     if (!draftPlan) return;
@@ -318,11 +360,16 @@ export default function TeacherSeatingPage() {
           classId,
           rows: layoutRows,
           columns: layoutColumns,
+          lockedSeats: keepLockedSeats ? lockedSeats.map((seat) => ({ seatId: seat.seatId, row: seat.row, column: seat.column, studentId: seat.studentId })) : undefined,
           ...aiOptions
         })
       });
       setPreview(payload.data ?? null);
-      setSaveMessage("AI 预览已生成，可先应用再微调。");
+      setSaveMessage(
+        keepLockedSeats && lockedSeats.length
+          ? `AI 预览已生成，已保留 ${lockedSeats.length} 个锁定座位。`
+          : "AI 预览已生成，可先应用再微调。"
+      );
     } catch (nextError) {
       setPageError(getRequestErrorMessage(nextError, "生成 AI 预览失败"));
     } finally {
@@ -519,6 +566,15 @@ export default function TeacherSeatingPage() {
             />
             身高梯度优先
           </label>
+          <label className="card" style={{ cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={keepLockedSeats}
+              onChange={(event) => setKeepLockedSeats(event.target.checked)}
+              style={{ marginRight: 8 }}
+            />
+            保留锁定座位
+          </label>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginTop: 12 }}>
@@ -538,7 +594,28 @@ export default function TeacherSeatingPage() {
             <div className="section-title">最近同步</div>
             <p>{formatLoadedTime(lastLoadedAt) || "刚刚"}</p>
           </div>
+          <div className="card">
+            <div className="section-title">已锁定位</div>
+            <p>{lockedSeats.length} 个</p>
+          </div>
         </div>
+
+        {lockedSeats.length ? (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+            {lockedSeats.map((seat) => {
+              const student = studentMap.get(seat.studentId);
+              return (
+                <span key={`locked-${seat.seatId}`} className="badge">
+                  锁定：第 {seat.row} 排第 {seat.column} 列 · {getStudentDisplayName(student)}
+                </span>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="card" style={{ marginTop: 12 }}>
+            先在下方草稿里锁定关键座位，再生成 AI 预览，系统会只重排其余位置。
+          </div>
+        )}
 
         {pageError ? <div style={{ color: "#b42318", fontSize: 13, marginTop: 12 }}>{pageError}</div> : null}
         {saveError ? <div style={{ color: "#b42318", fontSize: 13, marginTop: 12 }}>{saveError}</div> : null}
@@ -551,7 +628,7 @@ export default function TeacherSeatingPage() {
           <button className="button secondary" type="button" onClick={() => void handleGeneratePreview()} disabled={previewing}>
             {previewing ? "生成中..." : "生成 AI 预览"}
           </button>
-          <button className="button ghost" type="button" onClick={handleApplyPreview} disabled={!preview?.plan}>
+          <button className="button ghost" type="button" onClick={handleApplyPreview} disabled={!previewPlan}>
             应用 AI 预览
           </button>
           <button className="button ghost" type="button" onClick={handleRestoreSaved} disabled={!savedPlan}>
@@ -594,6 +671,19 @@ export default function TeacherSeatingPage() {
               </div>
             </div>
 
+            {previewSummary?.focusPriorityStudentCount ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <span className="badge">
+                  低干扰优先区 {previewSummary.focusPrioritySatisfiedCount} / {previewSummary.focusPriorityStudentCount}
+                </span>
+                {previewSummary.lockedSeatCount ? <span className="badge">保留锁定位 {previewSummary.lockedSeatCount} 个</span> : null}
+              </div>
+            ) : previewSummary?.lockedSeatCount ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <span className="badge">保留锁定位 {previewSummary.lockedSeatCount} 个</span>
+              </div>
+            ) : null}
+
             {previewWarnings.length ? (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {previewWarnings.map((warning) => (
@@ -625,17 +715,22 @@ export default function TeacherSeatingPage() {
               >
                 {previewPlan.seats.map((seat) => {
                   const student = seat.studentId ? studentMap.get(seat.studentId) : null;
+                  const locked = lockedSeatIds.includes(seat.seatId);
                   return (
                     <div
                       key={`preview-${seat.seatId}`}
                       className="card"
-                      style={{ background: seat.row <= getFrontRowCount(previewPlan.rows) ? "rgba(79, 70, 229, 0.06)" : undefined }}
+                      style={{
+                        background: seat.row <= getFrontRowCount(previewPlan.rows) ? "rgba(79, 70, 229, 0.06)" : undefined,
+                        boxShadow: locked ? "0 0 0 1px rgba(79, 70, 229, 0.45) inset" : undefined
+                      }}
                     >
                       <div className="section-title">第 {seat.row} 排 · 第 {seat.column} 列</div>
                       <p>{getStudentDisplayName(student)}</p>
                       <p style={{ fontSize: 12, color: "var(--ink-1)" }}>
                         {student ? `${student.placementScore} 分 · ${student.tags.join(" · ") || "资料待补"}` : "空位"}
                       </p>
+                      {locked ? <span className="badge">锁定保留</span> : null}
                     </div>
                   );
                 })}
@@ -671,6 +766,17 @@ export default function TeacherSeatingPage() {
           </div>
         </div>
 
+        {draftSummary?.focusPriorityStudentCount || lockedSeats.length ? (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+            {draftSummary?.focusPriorityStudentCount ? (
+              <span className="badge">
+                低干扰优先区 {draftSummary.focusPrioritySatisfiedCount} / {draftSummary.focusPriorityStudentCount}
+              </span>
+            ) : null}
+            {lockedSeats.length ? <span className="badge">已锁定 {lockedSeats.length} 个座位</span> : null}
+          </div>
+        ) : null}
+
         <div style={{ overflowX: "auto", marginTop: 12 }}>
           <div
             style={{
@@ -682,17 +788,35 @@ export default function TeacherSeatingPage() {
           >
             {draftPlan.seats.map((seat) => {
               const student = seat.studentId ? studentMap.get(seat.studentId) : null;
+              const locked = lockedSeatIds.includes(seat.seatId);
               return (
                 <div
                   key={seat.seatId}
                   className="card"
-                  style={{ background: seat.row <= frontRowCount ? "rgba(79, 70, 229, 0.06)" : undefined }}
+                  style={{
+                    background: seat.row <= frontRowCount ? "rgba(79, 70, 229, 0.06)" : undefined,
+                    boxShadow: locked ? "0 0 0 1px rgba(79, 70, 229, 0.45) inset" : undefined
+                  }}
                 >
                   <div className="section-title">第 {seat.row} 排 · 第 {seat.column} 列</div>
                   <p style={{ marginTop: 6 }}>{getStudentDisplayName(student)}</p>
                   <p style={{ fontSize: 12, color: "var(--ink-1)" }}>
                     {student ? `${student.placementScore} 分 · ${student.tags.join(" · ") || "资料待补"}` : "当前为空位"}
                   </p>
+                  {student ? (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                      <button
+                        className="button ghost"
+                        type="button"
+                        aria-pressed={locked}
+                        onClick={() => toggleLockedSeat(seat.seatId)}
+                        style={{ minHeight: 44, padding: "0 12px" }}
+                      >
+                        {locked ? "取消锁定" : "锁定此座位"}
+                      </button>
+                      {locked ? <span className="badge">重排保留</span> : null}
+                    </div>
+                  ) : null}
                   <select
                     value={seat.studentId ?? ""}
                     onChange={(event) => {
@@ -707,6 +831,9 @@ export default function TeacherSeatingPage() {
                             }
                           : prev
                       );
+                      if (!nextStudentId) {
+                        setLockedSeatIds((prev) => prev.filter((item) => item !== seat.seatId));
+                      }
                       setSaveMessage(null);
                     }}
                     style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)", marginTop: 8 }}
@@ -763,6 +890,7 @@ export default function TeacherSeatingPage() {
                   </span>
                 ))}
                 {isFrontPriorityStudent(student) ? <span className="badge">前排关注</span> : null}
+                {isFocusPriorityStudent(student) ? <span className="badge">低干扰优先</span> : null}
               </div>
               <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 8 }}>
                 完成 {student.completed} · 待完成 {student.pending} · 逾期 {student.overdue} · 迟交 {student.late}

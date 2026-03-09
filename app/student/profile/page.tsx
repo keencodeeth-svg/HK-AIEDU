@@ -10,10 +10,15 @@ import {
   calculateStudentPersonaCompleteness,
   STUDENT_EYESIGHT_LEVEL_LABELS,
   STUDENT_EYESIGHT_LEVEL_VALUES,
+  STUDENT_FOCUS_SUPPORT_LABELS,
+  STUDENT_FOCUS_SUPPORT_VALUES,
   STUDENT_GENDER_LABELS,
   STUDENT_GENDER_VALUES,
   STUDENT_PERSONALITY_LABELS,
   STUDENT_PERSONALITY_VALUES,
+  STUDENT_PERSONA_MUTABLE_FIELDS,
+  STUDENT_PEER_SUPPORT_LABELS,
+  STUDENT_PEER_SUPPORT_VALUES,
   STUDENT_SEAT_PREFERENCE_LABELS,
   STUDENT_SEAT_PREFERENCE_VALUES
 } from "@/lib/student-persona-options";
@@ -29,6 +34,8 @@ type StudentProfilePayload = {
   eyesightLevel?: (typeof STUDENT_EYESIGHT_LEVEL_VALUES)[number];
   seatPreference?: (typeof STUDENT_SEAT_PREFERENCE_VALUES)[number];
   personality?: (typeof STUDENT_PERSONALITY_VALUES)[number];
+  focusSupport?: (typeof STUDENT_FOCUS_SUPPORT_VALUES)[number];
+  peerSupport?: (typeof STUDENT_PEER_SUPPORT_VALUES)[number];
   strengths?: string;
   supportNotes?: string;
   profileCompleteness?: number;
@@ -49,6 +56,8 @@ type ProfileFormState = {
   eyesightLevel: "" | (typeof STUDENT_EYESIGHT_LEVEL_VALUES)[number];
   seatPreference: "" | (typeof STUDENT_SEAT_PREFERENCE_VALUES)[number];
   personality: "" | (typeof STUDENT_PERSONALITY_VALUES)[number];
+  focusSupport: "" | (typeof STUDENT_FOCUS_SUPPORT_VALUES)[number];
+  peerSupport: "" | (typeof STUDENT_PEER_SUPPORT_VALUES)[number];
   strengths: string;
   supportNotes: string;
 };
@@ -64,6 +73,8 @@ const INITIAL_FORM: ProfileFormState = {
   eyesightLevel: "",
   seatPreference: "",
   personality: "",
+  focusSupport: "",
+  peerSupport: "",
   strengths: "",
   supportNotes: ""
 };
@@ -100,6 +111,8 @@ export default function StudentProfilePage() {
         eyesightLevel: form.eyesightLevel || undefined,
         seatPreference: form.seatPreference || undefined,
         personality: form.personality || undefined,
+        focusSupport: form.focusSupport || undefined,
+        peerSupport: form.peerSupport || undefined,
         strengths: form.strengths,
         supportNotes: form.supportNotes
       }),
@@ -126,6 +139,8 @@ export default function StudentProfilePage() {
             eyesightLevel: profile.eyesightLevel ?? "",
             seatPreference: profile.seatPreference ?? "",
             personality: profile.personality ?? "",
+            focusSupport: profile.focusSupport ?? "",
+            peerSupport: profile.peerSupport ?? "",
             strengths: profile.strengths ?? "",
             supportNotes: profile.supportNotes ?? ""
           });
@@ -184,6 +199,8 @@ export default function StudentProfilePage() {
           eyesightLevel: form.eyesightLevel || null,
           seatPreference: form.seatPreference || null,
           personality: form.personality || null,
+          focusSupport: form.focusSupport || null,
+          peerSupport: form.peerSupport || null,
           strengths: form.strengths,
           supportNotes: form.supportNotes
         })
@@ -202,6 +219,8 @@ export default function StudentProfilePage() {
           eyesightLevel: nextProfile.eyesightLevel ?? "",
           seatPreference: nextProfile.seatPreference ?? "",
           personality: nextProfile.personality ?? "",
+          focusSupport: nextProfile.focusSupport ?? "",
+          peerSupport: nextProfile.peerSupport ?? "",
           strengths: nextProfile.strengths ?? "",
           supportNotes: nextProfile.supportNotes ?? ""
         }));
@@ -245,11 +264,11 @@ export default function StudentProfilePage() {
         <div className="grid grid-3" style={{ marginTop: 12 }}>
           <div className="card">
             <div className="section-title">已完成字段</div>
-            <p>{personaCompleteness.completedFields} / 8</p>
+            <p>{personaCompleteness.completedFields} / {STUDENT_PERSONA_MUTABLE_FIELDS.length}</p>
           </div>
           <div className="card">
             <div className="section-title">主要用途</div>
-            <p>AI 排座位 · 个性化推荐 · 课堂协同</p>
+            <p>AI 排座位 · 个性化推荐 · 课堂协同 · 家校支持</p>
           </div>
           <div className="card">
             <div className="section-title">建议动作</div>
@@ -319,7 +338,7 @@ export default function StudentProfilePage() {
         <Card title="课堂与座位偏好" tag="排座位">
           <div className="feature-card">
             <EduIcon name="board" />
-            <p>这些信息会进入老师端 AI 排座位，综合考虑成绩互补、性别、身高与前排需求。</p>
+            <p>这些信息会进入老师端 AI 排座位，综合考虑成绩互补、性别、身高、前排需求、专注支持与同桌协作。</p>
           </div>
           <div className="grid grid-2" style={{ gap: 12, marginTop: 12 }}>
             <label>
@@ -393,6 +412,36 @@ export default function StudentProfilePage() {
                 {STUDENT_PERSONALITY_VALUES.map((item) => (
                   <option key={item} value={item}>
                     {STUDENT_PERSONALITY_LABELS[item]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <div className="section-title">专注支持</div>
+              <select
+                value={form.focusSupport}
+                onChange={(event) => updateForm("focusSupport", event.target.value as ProfileFormState["focusSupport"])}
+                style={inputStyle}
+              >
+                <option value="">请选择</option>
+                {STUDENT_FOCUS_SUPPORT_VALUES.map((item) => (
+                  <option key={item} value={item}>
+                    {STUDENT_FOCUS_SUPPORT_LABELS[item]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <div className="section-title">同桌协作</div>
+              <select
+                value={form.peerSupport}
+                onChange={(event) => updateForm("peerSupport", event.target.value as ProfileFormState["peerSupport"])}
+                style={inputStyle}
+              >
+                <option value="">请选择</option>
+                {STUDENT_PEER_SUPPORT_VALUES.map((item) => (
+                  <option key={item} value={item}>
+                    {STUDENT_PEER_SUPPORT_LABELS[item]}
                   </option>
                 ))}
               </select>

@@ -2,9 +2,11 @@ import crypto from "crypto";
 import { readJson, writeJson } from "./storage";
 import type {
   StudentEyesightLevel,
+  StudentFocusSupport,
   StudentGender,
   StudentPersonaLike,
   StudentPersonality,
+  StudentPeerSupport,
   StudentSeatPreference
 } from "./student-persona-options";
 
@@ -22,6 +24,8 @@ type StudentPersonaUpsertInput = {
   eyesightLevel?: StudentEyesightLevel | null;
   seatPreference?: StudentSeatPreference | null;
   personality?: StudentPersonality | null;
+  focusSupport?: StudentFocusSupport | null;
+  peerSupport?: StudentPeerSupport | null;
   strengths?: string | null;
   supportNotes?: string | null;
 };
@@ -72,6 +76,8 @@ export async function upsertStudentPersona(input: StudentPersonaUpsertInput): Pr
     seatPreference:
       input.seatPreference !== undefined ? input.seatPreference ?? undefined : existing?.seatPreference,
     personality: input.personality !== undefined ? input.personality ?? undefined : existing?.personality,
+    focusSupport: input.focusSupport !== undefined ? input.focusSupport ?? undefined : existing?.focusSupport,
+    peerSupport: input.peerSupport !== undefined ? input.peerSupport ?? undefined : existing?.peerSupport,
     strengths: input.strengths !== undefined ? normalizeText(input.strengths) : existing?.strengths,
     supportNotes:
       input.supportNotes !== undefined ? normalizeText(input.supportNotes) : existing?.supportNotes,

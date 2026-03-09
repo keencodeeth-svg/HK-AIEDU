@@ -10,6 +10,12 @@ export type StudentSeatPreference = (typeof STUDENT_SEAT_PREFERENCE_VALUES)[numb
 export const STUDENT_PERSONALITY_VALUES = ["quiet", "balanced", "active"] as const;
 export type StudentPersonality = (typeof STUDENT_PERSONALITY_VALUES)[number];
 
+export const STUDENT_FOCUS_SUPPORT_VALUES = ["needs_focus", "balanced", "self_driven"] as const;
+export type StudentFocusSupport = (typeof STUDENT_FOCUS_SUPPORT_VALUES)[number];
+
+export const STUDENT_PEER_SUPPORT_VALUES = ["needs_support", "balanced", "can_support"] as const;
+export type StudentPeerSupport = (typeof STUDENT_PEER_SUPPORT_VALUES)[number];
+
 export type StudentPersonaLike = {
   preferredName?: string;
   gender?: StudentGender;
@@ -17,6 +23,8 @@ export type StudentPersonaLike = {
   eyesightLevel?: StudentEyesightLevel;
   seatPreference?: StudentSeatPreference;
   personality?: StudentPersonality;
+  focusSupport?: StudentFocusSupport;
+  peerSupport?: StudentPeerSupport;
   strengths?: string;
   supportNotes?: string;
 };
@@ -46,6 +54,18 @@ export const STUDENT_PERSONALITY_LABELS: Record<StudentPersonality, string> = {
   active: "活跃型"
 };
 
+export const STUDENT_FOCUS_SUPPORT_LABELS: Record<StudentFocusSupport, string> = {
+  needs_focus: "需要低干扰",
+  balanced: "专注稳定",
+  self_driven: "自驱专注"
+};
+
+export const STUDENT_PEER_SUPPORT_LABELS: Record<StudentPeerSupport, string> = {
+  needs_support: "需要同伴支持",
+  balanced: "协作均衡",
+  can_support: "可带动同桌"
+};
+
 export const STUDENT_PERSONA_FIELD_LABELS: Record<keyof StudentPersonaLike, string> = {
   preferredName: "常用称呼",
   gender: "性别信息",
@@ -53,6 +73,8 @@ export const STUDENT_PERSONA_FIELD_LABELS: Record<keyof StudentPersonaLike, stri
   eyesightLevel: "视力/前排需求",
   seatPreference: "座位偏好",
   personality: "课堂性格",
+  focusSupport: "专注支持",
+  peerSupport: "同桌协作",
   strengths: "个人优势",
   supportNotes: "老师特别关注"
 };
@@ -64,6 +86,8 @@ export const STUDENT_PERSONA_MUTABLE_FIELDS = [
   "eyesightLevel",
   "seatPreference",
   "personality",
+  "focusSupport",
+  "peerSupport",
   "strengths",
   "supportNotes"
 ] as const;
@@ -112,6 +136,12 @@ export function getStudentPersonaTags(persona?: Partial<StudentPersonaLike> | nu
   }
   if (persona.personality) {
     tags.push(STUDENT_PERSONALITY_LABELS[persona.personality]);
+  }
+  if (persona.focusSupport) {
+    tags.push(STUDENT_FOCUS_SUPPORT_LABELS[persona.focusSupport]);
+  }
+  if (persona.peerSupport) {
+    tags.push(STUDENT_PEER_SUPPORT_LABELS[persona.peerSupport]);
   }
 
   return tags;
