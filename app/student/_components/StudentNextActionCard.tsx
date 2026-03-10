@@ -53,9 +53,11 @@ export default function StudentNextActionCard({
   const lessonActionHref = nextLesson?.actionHref ?? linkedLessonTask?.href ?? "/calendar";
   const lessonActionLabel = lessonInProgress
     ? nextLesson?.actionLabel ?? "回到课堂任务"
-    : nextLesson?.pendingAssignmentCount
-      ? nextLesson?.actionLabel ?? "先做课前准备"
-      : nextLesson?.actionLabel ?? "先看下节课";
+    : nextLesson?.prestudyAssignmentTitle
+      ? nextLesson?.actionLabel ?? "先完成预习"
+      : nextLesson?.pendingAssignmentCount
+        ? nextLesson?.actionLabel ?? "先做课前准备"
+        : nextLesson?.actionLabel ?? "先看下节课";
 
   function trackAuxiliaryAction(action: "queue" | "tutor" | "practice" | "lesson" | "post_lesson_queue") {
     trackEvent({
@@ -85,9 +87,11 @@ export default function StudentNextActionCard({
         : "当前已进入上课时段，先聚焦课堂任务和老师要求，别再开新坑。"
       : !canStartRecommendedNow && recommendedTask
         ? `距离上课还有 ${minutesUntilNextLesson} 分钟，而“${recommendedTask.title}”预计需要 ${recommendedTask.effortMinutes} 分钟，现在开新任务大概率会被打断。`
-        : nextLesson.pendingAssignmentCount > 0
-          ? `距离上课还有 ${minutesUntilNextLesson} 分钟，先确认关联作业和课堂焦点，临上课会更从容。`
-          : `距离上课还有 ${minutesUntilNextLesson} 分钟，适合做课前准备或快速核对问题，不适合再开长任务。`;
+        : nextLesson.prestudyAssignmentTitle
+          ? `距离上课还有 ${minutesUntilNextLesson} 分钟，先把“${nextLesson.prestudyAssignmentTitle}”推进掉，进入课堂会更顺。`
+          : nextLesson.pendingAssignmentCount > 0
+            ? `距离上课还有 ${minutesUntilNextLesson} 分钟，先确认关联作业和课堂焦点，临上课会更从容。`
+            : `距离上课还有 ${minutesUntilNextLesson} 分钟，适合做课前准备或快速核对问题，不适合再开长任务。`;
     const postLessonHint = recommendedTask && recommendedTask.source !== "lesson"
       ? `课后第一项仍是“${recommendedTask.title}”，预计 ${recommendedTask.effortMinutes} 分钟。`
       : "课后再回到今日任务队列继续推进，不需要现在重新判断。";
@@ -110,6 +114,7 @@ export default function StudentNextActionCard({
               <span className="badge">{nextLesson.subjectLabel}</span>
               <span className="badge">{formatLessonRange(nextLesson.startAt, nextLesson.endAt)}</span>
               {nextLesson.room ? <span className="badge">{nextLesson.room}</span> : null}
+              {nextLesson.prestudyAssignmentTitle ? <span className="badge">预习已布置</span> : null}
               {nextLesson.pendingAssignmentCount ? <span className="badge">关联任务 {nextLesson.pendingAssignmentCount} 项</span> : null}
             </div>
 
@@ -117,6 +122,7 @@ export default function StudentNextActionCard({
               <div className="student-next-action-reason-label">为什么现在先这样做</div>
               <div className="meta-text" style={{ lineHeight: 1.65 }}>
                 {nextLesson.focusSummary ? `课堂焦点：${nextLesson.focusSummary}。` : "先围绕课堂准备，能显著减少临近上课时的手忙脚乱。"}
+                {nextLesson.prestudyAssignmentTitle ? ` 课前预习是“${nextLesson.prestudyAssignmentTitle}”。` : ""}
                 {" "}{postLessonHint}
               </div>
             </div>
@@ -159,8 +165,8 @@ export default function StudentNextActionCard({
             </div>
             <div className="student-next-action-metric">
               <div className="section-title">关联待办</div>
-              <div className="student-next-action-metric-value">{nextLesson.pendingAssignmentCount}</div>
-              <div className="meta-text">先清课堂相关事项，切换成本最低。</div>
+              <div className="student-next-action-metric-value">{nextLesson.prestudyAssignmentTitle ? 1 : nextLesson.pendingAssignmentCount}</div>
+              <div className="meta-text">{nextLesson.prestudyAssignmentTitle ? "预习先完成，进入课堂更顺手。" : "先清课堂相关事项，切换成本最低。"}</div>
             </div>
             <div className="student-next-action-metric">
               <div className="section-title">课后第一项</div>

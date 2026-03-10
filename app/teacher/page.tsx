@@ -1,12 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { CourseModule } from "@/lib/modules";
-import Card from "@/components/Card";
-import StatePanel from "@/components/StatePanel";
 import RoleScheduleFocusCard from "@/components/RoleScheduleFocusCard";
-import { formatLoadedTime } from "@/lib/client-request";
+import WorkspacePage, { WorkspaceAuthState, WorkspaceLoadingState, buildSuccessNotice, type WorkspaceNoticeItem } from "@/components/WorkspacePage";
 import { TeacherAssignmentsCard, TeacherClassListCard, TeacherJoinRequestsCard } from "./_components/TeacherCollectionPanels";
 import { TeacherAddStudentCard, TeacherAssignmentComposerCard, TeacherCreateClassCard } from "./_components/TeacherFormPanels";
 import { TeacherExamModuleCard, TeacherInsightsCard, TeacherOverviewCard, TeacherQuickAccessCards } from "./_components/TeacherSummaryPanels";
@@ -257,48 +254,34 @@ export default function TeacherPage() {
   }
 
   if (loading && !classes.length && !assignments.length && !insights && !unauthorized) {
-    return (
-      <StatePanel
-        title="教师工作台加载中"
-        description="正在同步班级、作业、预警和教学执行数据。"
-        tone="loading"
-      />
-    );
+    return <WorkspaceLoadingState title="教师工作台加载中" description="正在同步班级、作业、预警和教学执行数据。" />;
   }
 
   if (unauthorized) {
-    return (
-      <StatePanel
-        title="需要教师账号登录"
-        description="请先使用教师账号登录后，再查看教学工作台和班级执行动作。"
-        tone="info"
-        action={
-          <Link className="button secondary" href="/login">
-            前往登录
-          </Link>
-        }
-      />
-    );
+    return <WorkspaceAuthState title="需要教师账号登录" description="请先使用教师账号登录后，再查看教学工作台和班级执行动作。" />;
+  }
+
+  const notices: WorkspaceNoticeItem[] = [];
+  if (error) {
+    notices.push({ id: "teacher-error", tone: "error", title: "本次操作存在异常", description: error });
+  }
+  if (message) {
+    notices.push(buildSuccessNotice(message));
   }
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
-      <div className="section-head">
-        <div>
-          <h2>教师工作台</h2>
-          <div className="section-sub">先处理阻塞项，再发作业、看学情和安排本周课堂动作。</div>
-        </div>
-        <div className="cta-row no-margin" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(lastLoadedAt)}</span> : null}
-          <span className="chip">教学进度跟踪</span>
-          <button className="button secondary" type="button" onClick={() => void loadAll()} disabled={loading}>
-            {loading ? "刷新中..." : "刷新"}
-          </button>
-        </div>
-      </div>
-
-      {error ? <StatePanel title="本次操作存在异常" description={error} tone="error" compact /> : null}
-      {message ? <StatePanel title="最近一次操作已完成" description={message} tone="success" compact /> : null}
+    <WorkspacePage
+      title="教师工作台"
+      subtitle="先处理阻塞项，再发作业、看学情和安排本周课堂动作。"
+      lastLoadedAt={lastLoadedAt}
+      chips={[<span key="teacher-progress" className="chip">教学进度跟踪</span>]}
+      actions={
+        <button className="button secondary" type="button" onClick={() => void loadAll()} disabled={loading}>
+          {loading ? "刷新中..." : "刷新"}
+        </button>
+      }
+      notices={notices}
+    >
 
       <RoleScheduleFocusCard variant="teacher" />
 
@@ -371,6 +354,6 @@ export default function TeacherPage() {
       <div id="teacher-assignment-list">
         <TeacherAssignmentsCard assignments={assignments} />
       </div>
-    </div>
+    </WorkspacePage>
   );
 }

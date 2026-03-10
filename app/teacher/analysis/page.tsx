@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import StatePanel from "@/components/StatePanel";
-import { formatLoadedTime, getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
+import WorkspacePage, { WorkspaceAuthState, WorkspaceEmptyState, WorkspaceErrorState, WorkspaceLoadingState, buildStaleDataNotice } from "@/components/WorkspacePage";
+import { getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
 import AnalysisAlertsCard from "./_components/AnalysisAlertsCard";
 import AnalysisCausalityCard from "./_components/AnalysisCausalityCard";
 import AnalysisFavoritesCard from "./_components/AnalysisFavoritesCard";
@@ -358,51 +358,22 @@ export default function TeacherAnalysisPage() {
   const showReportSkeleton = reportLoading && !report;
 
   if (loading && !classes.length && !authRequired) {
-    return (
-      <StatePanel
-        title="教师分析看板加载中"
-        description="正在汇总班级、预警、热力图和家长协同数据。"
-        tone="loading"
-      />
-    );
+    return <WorkspaceLoadingState title="教师分析看板加载中" description="正在汇总班级、预警、热力图和家长协同数据。" />;
   }
 
   if (authRequired) {
-    return (
-      <StatePanel
-        title="需要教师账号登录"
-        description="请使用教师账号登录后查看班级学情分析。"
-        tone="info"
-        action={
-          <Link className="button secondary" href="/login">
-            前往登录
-          </Link>
-        }
-      />
-    );
+    return <WorkspaceAuthState title="需要教师账号登录" description="请使用教师账号登录后查看班级学情分析。" />;
   }
 
   if (pageError && !classes.length) {
-    return (
-      <StatePanel
-        title="教师分析看板加载失败"
-        description={pageError}
-        tone="error"
-        action={
-          <button className="button secondary" type="button" onClick={() => void loadBootstrap()}>
-            重试
-          </button>
-        }
-      />
-    );
+    return <WorkspaceErrorState title="教师分析看板加载失败" description={pageError} onRetry={() => void loadBootstrap()} />;
   }
 
   if (!loading && !classes.length) {
     return (
-      <StatePanel
+      <WorkspaceEmptyState
         title="暂无班级数据"
         description="请先在教师端创建或加入班级后，再查看学情分析。"
-        tone="empty"
         action={
           <Link className="button secondary" href="/teacher">
             前往教师工作台
@@ -413,22 +384,29 @@ export default function TeacherAnalysisPage() {
   }
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
-      <div className="section-head">
-        <div>
-          <h2>班级学情分析</h2>
-          <div className="section-sub">掌握热力图、预警闭环、家长协同与学情报告统一收敛。</div>
-        </div>
-        <div className="cta-row no-margin" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(lastLoadedAt)}</span> : null}
-          <span className="chip">数据面板</span>
-          <button className="button secondary" type="button" onClick={() => void loadBootstrap("refresh")} disabled={loading || refreshing}>
-            {refreshing ? "刷新中..." : "刷新"}
-          </button>
-        </div>
-      </div>
-
-      {pageError ? <StatePanel title="本次刷新存在异常" description={pageError} tone="error" compact /> : null}
+    <WorkspacePage
+      title="班级学情分析"
+      subtitle="掌握热力图、预警闭环、家长协同与学情报告统一收敛。"
+      lastLoadedAt={lastLoadedAt}
+      chips={[<span key="analysis-data" className="chip">数据面板</span>]}
+      actions={
+        <button className="button secondary" type="button" onClick={() => void loadBootstrap("refresh")} disabled={loading || refreshing}>
+          {refreshing ? "刷新中..." : "刷新"}
+        </button>
+      }
+      notices={
+        pageError
+          ? [
+              buildStaleDataNotice(
+                pageError,
+                <button className="button secondary" type="button" onClick={() => void loadBootstrap("refresh")}>
+                  再试一次
+                </button>
+              )
+            ]
+          : undefined
+      }
+    >
 
       <AnalysisFiltersCard classes={classes} classId={classId} onClassChange={setClassId} />
       <AnalysisAlertsCard
@@ -466,6 +444,6 @@ export default function TeacherAnalysisPage() {
         favorites={favorites}
         onStudentChange={setStudentId}
       />
-    </div>
+    </WorkspacePage>
   );
 }

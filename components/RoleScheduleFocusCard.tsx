@@ -214,11 +214,19 @@ export default function RoleScheduleFocusCard({ variant }: RoleScheduleFocusCard
                 <div className="badge-row" style={{ marginTop: 0 }}>
                   <span className="badge">{getStatusLabel(nextLesson.status)}</span>
                   {nextLesson.slotLabel ? <span className="badge">{nextLesson.slotLabel}</span> : null}
+                  {nextLesson.prestudyAssignmentTitle ? <span className="badge">预习已布置</span> : null}
                   {nextLesson.pendingAssignmentCount ? <span className="badge">待完成 {nextLesson.pendingAssignmentCount} 项</span> : null}
                 </div>
               </div>
               {nextLesson.focusSummary ? <div className="meta-text" style={{ marginTop: 8 }}>课堂焦点：{nextLesson.focusSummary}</div> : null}
-              {nextLesson.nextAssignmentTitle ? (
+              {nextLesson.prestudyAssignmentTitle ? (
+                <div className="meta-text" style={{ marginTop: 8 }}>
+                  课前预习：{nextLesson.prestudyAssignmentTitle}
+                  {nextLesson.prestudyAssignmentDueAt ? ` · 截止 ${formatLoadedTime(nextLesson.prestudyAssignmentDueAt)}` : ""}
+                  {variant === "teacher" && typeof nextLesson.prestudyTotalCount === "number" ? ` · 已完成 ${nextLesson.prestudyCompletedCount ?? 0}/${nextLesson.prestudyTotalCount}` : ""}
+                  {variant === "parent" && nextLesson.prestudyAssignmentStatus ? ` · 孩子当前${nextLesson.prestudyAssignmentStatus === "completed" ? "已完成" : "待完成"}` : ""}
+                </div>
+              ) : nextLesson.nextAssignmentTitle ? (
                 <div className="meta-text" style={{ marginTop: 8 }}>
                   课后联动：{nextLesson.nextAssignmentTitle}
                   {nextLesson.nextAssignmentDueAt ? ` · 截止 ${formatLoadedTime(nextLesson.nextAssignmentDueAt)}` : ""}
@@ -244,6 +252,13 @@ export default function RoleScheduleFocusCard({ variant }: RoleScheduleFocusCard
                     <span className="pill">{getStatusLabel(lesson.status)}</span>
                   </div>
                   {lesson.focusSummary ? <div className="meta-text" style={{ marginTop: 6 }}>课堂焦点：{lesson.focusSummary}</div> : null}
+                  {lesson.prestudyAssignmentTitle ? (
+                    <div className="meta-text" style={{ marginTop: 6 }}>
+                      预习：{lesson.prestudyAssignmentTitle}
+                      {variant === "teacher" && typeof lesson.prestudyTotalCount === "number" ? ` · ${lesson.prestudyCompletedCount ?? 0}/${lesson.prestudyTotalCount} 已完成` : ""}
+                      {variant === "parent" && lesson.prestudyAssignmentStatus ? ` · 孩子当前${lesson.prestudyAssignmentStatus === "completed" ? "已完成" : "待完成"}` : ""}
+                    </div>
+                  ) : null}
                 </div>
               ))
             ) : (

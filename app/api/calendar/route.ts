@@ -3,6 +3,7 @@ import { getClassesByStudent, getClassesByTeacher } from "@/lib/classes";
 import { getAssignmentsByClassIds, getAssignmentProgressByStudent } from "@/lib/assignments";
 import { getAnnouncementsByClassIds } from "@/lib/announcements";
 import { getCorrectionTasksByUser } from "@/lib/corrections";
+import { listAssignmentLessonLinks } from "@/lib/assignment-lesson-links";
 import { combineDateAndTime, getDateKey, getWeekdayFromDate, listClassScheduleSessions } from "@/lib/class-schedules";
 import { badRequest, unauthorized } from "@/lib/api/http";
 import { createLearningRoute } from "@/lib/api/domains";
@@ -101,14 +102,22 @@ export const GET = createLearningRoute({
       items.push(...(await buildLessonTimelineItems(classMap, classIds)));
 
       const assignments = await getAssignmentsByClassIds(classIds);
+      const lessonLinks = await listAssignmentLessonLinks({
+        classIds,
+        assignmentIds: assignments.map((item) => item.id),
+        taskKind: "prestudy"
+      });
+      const linkByAssignmentId = new Map(lessonLinks.map((item) => [item.assignmentId, item]));
       assignments.forEach((assignment) => {
         if (!inWindow(assignment.dueDate)) return;
+        const link = linkByAssignmentId.get(assignment.id);
         items.push({
           id: assignment.id,
           type: "assignment",
-          title: assignment.title,
+          title: link ? `预习任务：${assignment.title}` : assignment.title,
           date: assignment.dueDate,
-          className: classMap.get(assignment.classId)?.name ?? "-"
+          className: classMap.get(assignment.classId)?.name ?? "-",
+          description: link ? `关联课次：${link.lessonDate} · 课前任务` : undefined
         });
       });
       const announcements = await getAnnouncementsByClassIds(classIds);
@@ -136,16 +145,24 @@ export const GET = createLearningRoute({
       const assignments = await getAssignmentsByClassIds(classIds);
       const progress = await getAssignmentProgressByStudent(studentId);
       const progressMap = new Map(progress.map((item) => [item.assignmentId, item]));
+      const lessonLinks = await listAssignmentLessonLinks({
+        classIds,
+        assignmentIds: assignments.map((item) => item.id),
+        taskKind: "prestudy"
+      });
+      const linkByAssignmentId = new Map(lessonLinks.map((item) => [item.assignmentId, item]));
       assignments.forEach((assignment) => {
         if (!inWindow(assignment.dueDate)) return;
         const record = progressMap.get(assignment.id);
+        const link = linkByAssignmentId.get(assignment.id);
         items.push({
           id: assignment.id,
           type: "assignment",
-          title: assignment.title,
+          title: link ? `预习任务：${assignment.title}` : assignment.title,
           date: assignment.dueDate,
           className: classMap.get(assignment.classId)?.name ?? "-",
-          status: record?.status ?? "pending"
+          status: record?.status ?? "pending",
+          description: link ? `关联课次：${link.lessonDate} · 上课前完成更顺手` : undefined
         });
       });
       const announcements = await getAnnouncementsByClassIds(classIds);

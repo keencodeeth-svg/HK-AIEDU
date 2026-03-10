@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import StatePanel from "@/components/StatePanel";
 import { trackEvent } from "@/lib/analytics-client";
-import { formatLoadedTime, getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
+import WorkspacePage, { WorkspaceAuthState, WorkspaceErrorState, WorkspaceLoadingState, buildStaleDataNotice } from "@/components/WorkspacePage";
+import { getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
 import type { ScheduleResponse } from "@/lib/class-schedules";
 import StudentDashboardGuideCard from "./_components/StudentDashboardGuideCard";
 import StudentExecutionSummaryCard from "./_components/StudentExecutionSummaryCard";
@@ -379,62 +378,42 @@ export default function StudentPage() {
   }
 
   if (loading && !hasDashboardData && !authRequired) {
-    return (
-      <StatePanel
-        title="学习控制台加载中"
-        description="正在汇总课表、学习计划、今日任务和成长激励。"
-        tone="loading"
-      />
-    );
+    return <WorkspaceLoadingState title="学习控制台加载中" description="正在汇总课表、学习计划、今日任务和成长激励。" />;
   }
 
   if (authRequired) {
-    return (
-      <StatePanel
-        title="需要学生账号登录"
-        description="请先登录学生账号，再查看学习控制台和今日任务。"
-        tone="info"
-        action={
-          <Link className="button secondary" href="/login">
-            前往登录
-          </Link>
-        }
-      />
-    );
+    return <WorkspaceAuthState title="需要学生账号登录" description="请先登录学生账号，再查看学习控制台和今日任务。" />;
   }
 
   if (pageError && !hasDashboardData) {
-    return (
-      <StatePanel
-        title="学习控制台加载失败"
-        description={pageError}
-        tone="error"
-        action={
-          <button className="button secondary" type="button" onClick={() => void loadDashboard()}>
-            重试
-          </button>
-        }
-      />
-    );
+    return <WorkspaceErrorState title="学习控制台加载失败" description={pageError} onRetry={() => void loadDashboard()} />;
   }
 
   return (
-    <div className="grid dashboard-stack">
-      <div className="section-head">
-        <div>
-          <h2>学习控制台</h2>
-          <div className="section-sub">今日课表、任务闭环、成长激励与学习入口。</div>
-        </div>
-        <div className="cta-row no-margin" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(lastLoadedAt)}</span> : null}
-          <span className="chip">学期进行中</span>
-          <button className="button secondary" type="button" onClick={() => void loadDashboard("refresh")} disabled={loading || refreshing}>
-            {refreshing ? "刷新中..." : "刷新"}
-          </button>
-        </div>
-      </div>
-
-      {pageError ? <StatePanel title="本次刷新存在异常" description={pageError} tone="error" compact /> : null}
+    <WorkspacePage
+      className="grid dashboard-stack"
+      title="学习控制台"
+      subtitle="今日课表、任务闭环、成长激励与学习入口。"
+      lastLoadedAt={lastLoadedAt}
+      chips={[<span key="student-term" className="chip">学期进行中</span>]}
+      actions={
+        <button className="button secondary" type="button" onClick={() => void loadDashboard("refresh")} disabled={loading || refreshing}>
+          {refreshing ? "刷新中..." : "刷新"}
+        </button>
+      }
+      notices={
+        pageError
+          ? [
+              buildStaleDataNotice(
+                pageError,
+                <button className="button secondary" type="button" onClick={() => void loadDashboard("refresh")} disabled={loading || refreshing}>
+                  再试一次
+                </button>
+              )
+            ]
+          : undefined
+      }
+    >
 
       <StudentScheduleCard
         schedule={schedule}
@@ -590,6 +569,6 @@ export default function StudentPage() {
           ))}
         </div>
       )}
-    </div>
+    </WorkspacePage>
   );
 }

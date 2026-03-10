@@ -14,37 +14,36 @@ export async function runTeacherExamSuite(context) {
       password: process.env.API_TEST_TEACHER_FALLBACK_PASSWORD || "Teacher123"
     }
   ];
-  let teacherLogin = null;
-  for (const candidate of teacherCandidates) {
-    const resp = await apiFetch("/api/auth/login", {
+  async function loginTeacherCandidate(candidate) {
+    return apiFetch("/api/auth/login", {
       method: "POST",
       useCookies: false,
       json: { email: candidate.email, password: candidate.password, role: "teacher" }
     });
+  }
+
+  let teacherLogin = null;
+  let activeTeacherCandidate = teacherCandidates[0];
+  for (const candidate of teacherCandidates) {
+    const resp = await loginTeacherCandidate(candidate);
     if (resp.status === 200) {
       teacherLogin = resp;
+      activeTeacherCandidate = candidate;
       break;
     }
   }
   assert.equal(teacherLogin?.status, 200, "Teacher login failed for both primary and fallback accounts");
 
-  async function reloginTeacherAccount() {
-    const primary = await apiFetch("/api/auth/login", {
-      method: "POST",
-      useCookies: false,
-      json: { email: teacherCandidates[0].email, password: teacherCandidates[0].password, role: "teacher" }
-    });
-    if (primary.status === 200) {
-      return primary;
+  async function reloginTeacherAccount(preferredCandidate = activeTeacherCandidate) {
+    const candidates = [preferredCandidate, ...teacherCandidates.filter((item) => item.email !== preferredCandidate.email)];
+    for (const candidate of candidates) {
+      const resp = await loginTeacherCandidate(candidate);
+      if (resp.status === 200) {
+        activeTeacherCandidate = candidate;
+        return resp;
+      }
     }
-
-    const fallback = await apiFetch("/api/auth/login", {
-      method: "POST",
-      useCookies: false,
-      json: { email: teacherCandidates[1].email, password: teacherCandidates[1].password, role: "teacher" }
-    });
-    assert.equal(fallback.status, 200, `Teacher relogin failed: ${fallback.raw}`);
-    return fallback;
+    assert.fail("Teacher relogin failed");
   }
 
   async function saveStudentProfileAsStudent(studentEmail, studentPassword, profilePatch) {
@@ -93,6 +92,119 @@ export async function runTeacherExamSuite(context) {
   assert.equal(teacherSchedule.status, 200, `Teacher GET /api/schedule failed: ${teacherSchedule.raw}`);
   assert.equal(teacherSchedule.body?.data?.role, "teacher", "Schedule API should detect teacher role");
   assert.ok(Array.isArray(teacherSchedule.body?.data?.weekly), "Teacher schedule should include weekly lessons");
+  let workingTeacherSchedule = teacherSchedule;
+  if (!workingTeacherSchedule.body?.data?.nextLesson) {
+    const fallbackTeacher = teacherCandidates.find((item) => item.email !== activeTeacherCandidate.email);
+    if (fallbackTeacher) {
+      const fallbackLogin = await reloginTeacherAccount(fallbackTeacher);
+      assert.equal(fallbackLogin.status, 200, `Teacher fallback login failed: ${fallbackLogin.raw}`);
+      workingTeacherSchedule = await apiFetch("/api/schedule");
+      assert.equal(workingTeacherSchedule.status, 200, `Teacher fallback GET /api/schedule failed: ${workingTeacherSchedule.raw}`);
+    }
+  }
+
+  const prestudyLesson = workingTeacherSchedule.body?.data?.nextLesson ?? null;
+  if (prestudyLesson?.classId && prestudyLesson?.date) {
+    const addPrestudyStudent = await apiFetch(`/api/teacher/classes/${prestudyLesson.classId}/students`, {
+      method: "POST",
+      json: { email }
+    });
+    assert.equal(
+      addPrestudyStudent.status,
+      200,
+      `POST /api/teacher/classes/[id]/students for prestudy failed: ${addPrestudyStudent.raw}`
+    );
+
+    const prestudyTitle = `API_TEST_PRESTUDY_${Date.now().toString(36)}`;
+    const createPrestudy = await apiFetch("/api/teacher/schedule-prestudy", {
+      method: "POST",
+      json: {
+        classId: prestudyLesson.classId,
+        scheduleSessionId: prestudyLesson.id,
+        lessonDate: prestudyLesson.date,
+        title: prestudyTitle,
+        description: "API 测试课表预习任务",
+        submissionType: "essay",
+        gradingFocus: "课前知识梳理"
+      }
+    });
+    assert.equal(createPrestudy.status, 200, `POST /api/teacher/schedule-prestudy failed: ${createPrestudy.raw}`);
+    const prestudyAssignmentId = createPrestudy.body?.data?.id;
+    assert.ok(prestudyAssignmentId, "Schedule prestudy API should return assignment id");
+
+    const teacherScheduleAfterPrestudy = await apiFetch("/api/schedule");
+    assert.equal(
+      teacherScheduleAfterPrestudy.status,
+      200,
+      `Teacher GET /api/schedule after prestudy failed: ${teacherScheduleAfterPrestudy.raw}`
+    );
+    assert.equal(
+      teacherScheduleAfterPrestudy.body?.data?.nextLesson?.prestudyAssignmentId,
+      prestudyAssignmentId,
+      "Teacher next lesson should include linked prestudy assignment"
+    );
+    assert.equal(
+      typeof teacherScheduleAfterPrestudy.body?.data?.nextLesson?.prestudyTotalCount,
+      "number",
+      "Teacher next lesson should expose prestudy total count"
+    );
+
+    const teacherPrestudyDetail = await apiFetch(`/api/teacher/assignments/${prestudyAssignmentId}`);
+    assert.equal(
+      teacherPrestudyDetail.status,
+      200,
+      `Teacher GET /api/teacher/assignments/[id] for prestudy failed: ${teacherPrestudyDetail.raw}`
+    );
+    assert.equal(teacherPrestudyDetail.body?.lessonLink?.taskKind, "prestudy", "Teacher assignment detail should expose prestudy link");
+    assert.equal(teacherPrestudyDetail.body?.lessonLink?.lessonDate, prestudyLesson.date);
+
+    const reloginStudent = await apiFetch("/api/auth/login", {
+      method: "POST",
+      useCookies: false,
+      json: { email, password, role: "student" }
+    });
+    assert.equal(reloginStudent.status, 200, `Student relogin for prestudy failed: ${reloginStudent.raw}`);
+
+    const studentScheduleAfterPrestudy = await apiFetch("/api/schedule");
+    assert.equal(
+      studentScheduleAfterPrestudy.status,
+      200,
+      `Student GET /api/schedule after prestudy failed: ${studentScheduleAfterPrestudy.raw}`
+    );
+    const studentLinkedLesson =
+      studentScheduleAfterPrestudy.body?.data?.nextLesson?.prestudyAssignmentId === prestudyAssignmentId
+        ? studentScheduleAfterPrestudy.body?.data?.nextLesson
+        : (studentScheduleAfterPrestudy.body?.data?.weekly ?? [])
+            .flatMap((day) => day.lessons ?? [])
+            .find((lesson) => lesson.prestudyAssignmentId === prestudyAssignmentId);
+    assert.ok(studentLinkedLesson, "Student schedule should surface the linked prestudy assignment");
+    assert.equal(studentLinkedLesson?.prestudyAssignmentTitle, prestudyTitle);
+    assert.equal(studentLinkedLesson?.prestudyAssignmentStatus, "pending", "Student linked prestudy should start pending");
+
+    const studentPrestudyDetail = await apiFetch(`/api/student/assignments/${prestudyAssignmentId}`);
+    assert.equal(
+      studentPrestudyDetail.status,
+      200,
+      `Student GET /api/student/assignments/[id] for prestudy failed: ${studentPrestudyDetail.raw}`
+    );
+    assert.equal(studentPrestudyDetail.body?.lessonLink?.taskKind, "prestudy", "Student assignment detail should expose prestudy link");
+    assert.equal(studentPrestudyDetail.body?.lessonLink?.lessonDate, prestudyLesson.date);
+
+    const studentCalendarAfterPrestudy = await apiFetch("/api/calendar");
+    assert.equal(
+      studentCalendarAfterPrestudy.status,
+      200,
+      `Student GET /api/calendar after prestudy failed: ${studentCalendarAfterPrestudy.raw}`
+    );
+    assert.ok(
+      (studentCalendarAfterPrestudy.body?.data ?? []).some(
+        (item) => item.id === prestudyAssignmentId && String(item.title ?? "").startsWith("预习任务：")
+      ),
+      "Student calendar should mark linked assignments as prestudy"
+    );
+
+    await reloginTeacherAccount();
+  }
 
   const teacherInsights = await apiFetch("/api/teacher/insights");
   assert.equal(teacherInsights.status, 200, `GET /api/teacher/insights failed: ${teacherInsights.raw}`);
@@ -664,19 +776,8 @@ export async function runTeacherExamSuite(context) {
   );
   assert.equal(examAutosave.body?.status, "in_progress", "Exam autosave should switch status to in_progress");
 
-  const reloginTeacherForClose = await apiFetch("/api/auth/login", {
-    method: "POST",
-    useCookies: false,
-    json: { email: teacherCandidates[0].email, password: teacherCandidates[0].password, role: "teacher" }
-  });
-  if (reloginTeacherForClose.status !== 200) {
-    const fallbackTeacherLogin = await apiFetch("/api/auth/login", {
-      method: "POST",
-      useCookies: false,
-      json: { email: teacherCandidates[1].email, password: teacherCandidates[1].password, role: "teacher" }
-    });
-    assert.equal(fallbackTeacherLogin.status, 200, `Teacher relogin failed: ${fallbackTeacherLogin.raw}`);
-  }
+  const reloginTeacherForClose = await reloginTeacherAccount();
+  assert.equal(reloginTeacherForClose.status, 200, `Teacher relogin failed: ${reloginTeacherForClose.raw}`);
 
   const teacherTutorShareThreads = await apiFetch("/api/inbox/threads");
   assert.equal(teacherTutorShareThreads.status, 200, `Teacher GET /api/inbox/threads for tutor-share failed: ${teacherTutorShareThreads.raw}`);
@@ -725,19 +826,8 @@ export async function runTeacherExamSuite(context) {
   assert.equal(autosaveWhenClosed.status, 400, "Closed exam should reject autosave");
   assert.equal(autosaveWhenClosed.body?.error, "考试已关闭");
 
-  const reloginTeacherForReopen = await apiFetch("/api/auth/login", {
-    method: "POST",
-    useCookies: false,
-    json: { email: teacherCandidates[0].email, password: teacherCandidates[0].password, role: "teacher" }
-  });
-  if (reloginTeacherForReopen.status !== 200) {
-    const fallbackTeacherLogin = await apiFetch("/api/auth/login", {
-      method: "POST",
-      useCookies: false,
-      json: { email: teacherCandidates[1].email, password: teacherCandidates[1].password, role: "teacher" }
-    });
-    assert.equal(fallbackTeacherLogin.status, 200, `Teacher relogin failed: ${fallbackTeacherLogin.raw}`);
-  }
+  const reloginTeacherForReopen = await reloginTeacherAccount();
+  assert.equal(reloginTeacherForReopen.status, 200, `Teacher relogin failed: ${reloginTeacherForReopen.raw}`);
 
   const reopenExam = await apiFetch(`/api/teacher/exams/${createdExamId}`, {
     method: "PATCH",
@@ -835,19 +925,8 @@ export async function runTeacherExamSuite(context) {
   const submittedExam = (studentExamsAfterSubmit.body?.data ?? []).find((item) => item.id === createdExamId);
   assert.equal(submittedExam?.status, "submitted", "Student exam should be marked as submitted");
 
-  const reloginTeacher = await apiFetch("/api/auth/login", {
-    method: "POST",
-    useCookies: false,
-    json: { email: teacherCandidates[0].email, password: teacherCandidates[0].password, role: "teacher" }
-  });
-  if (reloginTeacher.status !== 200) {
-    const fallbackTeacherLogin = await apiFetch("/api/auth/login", {
-      method: "POST",
-      useCookies: false,
-      json: { email: teacherCandidates[1].email, password: teacherCandidates[1].password, role: "teacher" }
-    });
-    assert.equal(fallbackTeacherLogin.status, 200, `Teacher relogin failed: ${fallbackTeacherLogin.raw}`);
-  }
+  const reloginTeacher = await reloginTeacherAccount();
+  assert.equal(reloginTeacher.status, 200, `Teacher relogin failed: ${reloginTeacher.raw}`);
 
   const teacherExamDetailAfter = await apiFetch(`/api/teacher/exams/${createdExamId}`);
   assert.equal(

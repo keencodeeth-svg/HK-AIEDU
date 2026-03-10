@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import RoleScheduleFocusCard from "@/components/RoleScheduleFocusCard";
-import StatePanel from "@/components/StatePanel";
-import { formatLoadedTime, requestJson, type RequestError } from "@/lib/client-request";
+import WorkspacePage, { WorkspaceAuthState, WorkspaceEmptyState, WorkspaceErrorState, WorkspaceLoadingState, buildStaleDataNotice } from "@/components/WorkspacePage";
+import { requestJson, type RequestError } from "@/lib/client-request";
 import ParentAssignmentsCard from "./_components/ParentAssignmentsCard";
 import ParentCorrectionsCard from "./_components/ParentCorrectionsCard";
 import ParentFavoritesCard from "./_components/ParentFavoritesCard";
@@ -178,49 +177,20 @@ export default function ParentPage() {
   }
 
   if (loading && !report && !authRequired) {
-    return (
-      <StatePanel
-        tone="loading"
-        title="家长空间加载中"
-        description="正在同步学情周报、作业提醒、订正任务和收藏题目。"
-      />
-    );
+    return <WorkspaceLoadingState title="家长空间加载中" description="正在同步学情周报、作业提醒、订正任务和收藏题目。" />;
   }
 
   if (authRequired) {
-    return (
-      <StatePanel
-        tone="info"
-        title="请先使用家长账号登录"
-        description="登录后即可查看孩子的周报、作业提醒、订正任务和监督建议。"
-        action={
-          <Link className="button secondary" href="/login">
-            去登录
-          </Link>
-        }
-      />
-    );
+    return <WorkspaceAuthState title="请先使用家长账号登录" description="登录后即可查看孩子的周报、作业提醒、订正任务和监督建议。" />;
   }
 
   if (pageError && !report) {
-    return (
-      <StatePanel
-        tone="error"
-        title="家长空间暂时不可用"
-        description={pageError}
-        action={
-          <button className="button secondary" type="button" onClick={() => void loadAll("refresh")}>
-            重新加载
-          </button>
-        }
-      />
-    );
+    return <WorkspaceErrorState title="家长空间暂时不可用" description={pageError} onRetry={() => void loadAll("refresh")} retryLabel="重新加载" />;
   }
 
   if (!report) {
     return (
-      <StatePanel
-        tone="empty"
+      <WorkspaceEmptyState
         title="暂时还没有可查看的家长周报"
         description="当前未生成本周学情数据，可稍后刷新，或等待孩子产生新的学习记录。"
         action={
@@ -250,42 +220,39 @@ export default function ParentPage() {
     .join("\n");
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
-      <div className="section-head">
-        <div>
-          <h2>家长空间</h2>
-          <div className="section-sub">把“看报告”改成“今晚先做什么”，帮助家长真正完成陪伴闭环。</div>
-        </div>
-        <div className="workflow-toolbar">
-          <span className="chip">家校协作</span>
-          <span className="chip">待回执动作 {pendingWeeklyActionItems.length + pendingAssignmentActionItems.length} 项</span>
-          <span className="chip">今晚必跟进 {(summary?.overdue ?? overdueTasks.length) + (assignmentSummary?.overdue ?? 0)} 项</span>
-          <span className="chip">收藏 {favorites.length} 题</span>
-          {lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(lastLoadedAt)}</span> : null}
-          <button
-            className="button secondary"
-            type="button"
-            onClick={() => void loadAll("refresh")}
-            disabled={loading || refreshing || receiptLoadingKey !== null}
-          >
-            {refreshing ? "刷新中..." : "刷新"}
-          </button>
-        </div>
-      </div>
-
-      {pageError ? (
-        <StatePanel
-          compact
-          tone="error"
-          title="已展示最近一次成功数据"
-          description={`最新刷新失败：${pageError}`}
-          action={
-            <button className="button secondary" type="button" onClick={() => void loadAll("refresh")}>
-              再试一次
-            </button>
-          }
-        />
-      ) : null}
+    <WorkspacePage
+      title="家长空间"
+      subtitle="把“看报告”改成“今晚先做什么”，帮助家长真正完成陪伴闭环。"
+      lastLoadedAt={lastLoadedAt}
+      chips={[
+        <span key="parent-collab" className="chip">家校协作</span>,
+        <span key="parent-pending" className="chip">待回执动作 {pendingWeeklyActionItems.length + pendingAssignmentActionItems.length} 项</span>,
+        <span key="parent-must" className="chip">今晚必跟进 {(summary?.overdue ?? overdueTasks.length) + (assignmentSummary?.overdue ?? 0)} 项</span>,
+        <span key="parent-favorites" className="chip">收藏 {favorites.length} 题</span>
+      ]}
+      actions={
+        <button
+          className="button secondary"
+          type="button"
+          onClick={() => void loadAll("refresh")}
+          disabled={loading || refreshing || receiptLoadingKey !== null}
+        >
+          {refreshing ? "刷新中..." : "刷新"}
+        </button>
+      }
+      notices={
+        pageError
+          ? [
+              buildStaleDataNotice(
+                pageError,
+                <button className="button secondary" type="button" onClick={() => void loadAll("refresh")}>
+                  再试一次
+                </button>
+              )
+            ]
+          : undefined
+      }
+    >
 
       <RoleScheduleFocusCard variant="parent" />
 
@@ -366,6 +333,6 @@ export default function ParentPage() {
       <div id="parent-favorites">
         <ParentFavoritesCard favorites={favorites} />
       </div>
-    </div>
+    </WorkspacePage>
   );
 }

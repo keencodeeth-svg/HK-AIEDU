@@ -24,6 +24,17 @@ type AssignmentDetail = {
     subject: string;
     grade: string;
   };
+  lessonLink?: {
+    taskKind: "prestudy";
+    lessonDate: string;
+    note?: string;
+    scheduleSessionId: string;
+    slotLabel?: string;
+    startTime?: string;
+    endTime?: string;
+    room?: string;
+    focusSummary?: string;
+  } | null;
   students: Array<{
     id: string;
     name: string;
@@ -199,7 +210,10 @@ export default function TeacherAssignmentDetailPage({ params }: { params: { id: 
             {data.class.name} · {SUBJECT_LABELS[data.class.subject] ?? data.class.subject} · {data.class.grade} 年级
           </div>
         </div>
-        <span className="chip">已完成 {completedCount}/{data.students.length}</span>
+        <div className="pill-list">
+          <span className="chip">已完成 {completedCount}/{data.students.length}</span>
+          {data.lessonLink ? <span className="chip">课前预习</span> : null}
+        </div>
       </div>
 
       <Card title="作业概览" tag="概览">
@@ -216,6 +230,16 @@ export default function TeacherAssignmentDetailPage({ params }: { params: { id: 
             {data.module ? (
               <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-1)" }}>
                 关联模块：{data.module.title}
+              </div>
+            ) : null}
+            {data.lessonLink ? (
+              <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-1)", lineHeight: 1.6 }}>
+                关联课次：{data.lessonLink.lessonDate}
+                {data.lessonLink.startTime && data.lessonLink.endTime ? ` · ${data.lessonLink.startTime}-${data.lessonLink.endTime}` : ""}
+                {data.lessonLink.slotLabel ? ` · ${data.lessonLink.slotLabel}` : ""}
+                {data.lessonLink.room ? ` · ${data.lessonLink.room}` : ""}
+                {data.lessonLink.focusSummary ? ` · 课堂焦点：${data.lessonLink.focusSummary}` : ""}
+                {data.lessonLink.note ? ` · 老师提醒：${data.lessonLink.note}` : ""}
               </div>
             ) : null}
           </div>

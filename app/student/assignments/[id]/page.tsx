@@ -328,9 +328,31 @@ export default function StudentAssignmentDetailPage({ params }: { params: { id: 
         </div>
         <div className="pill-list">
           <span className="chip">{statusLabel}</span>
+          {data.lessonLink ? <span className="chip">课前预习</span> : null}
           <span className="chip">截止 {new Date(data.assignment.dueDate).toLocaleDateString("zh-CN")}</span>
         </div>
       </div>
+      {data.lessonLink ? (
+        <div className="card">
+          <div className="cta-row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+            <div>
+              <div className="section-title">这是一份课前预习任务</div>
+              <div className="section-sub" style={{ marginTop: 4 }}>
+                {data.lessonLink.lessonDate}
+                {data.lessonLink.startTime && data.lessonLink.endTime ? ` · ${data.lessonLink.startTime}-${data.lessonLink.endTime}` : ""}
+                {data.lessonLink.slotLabel ? ` · ${data.lessonLink.slotLabel}` : ""}
+                {data.lessonLink.room ? ` · ${data.lessonLink.room}` : ""}
+              </div>
+            </div>
+            <Link className="button ghost" href="/calendar">
+              回到课程表
+            </Link>
+          </div>
+          {data.lessonLink.focusSummary ? <div className="meta-text" style={{ marginTop: 8 }}>课堂焦点：{data.lessonLink.focusSummary}</div> : null}
+          {data.lessonLink.note ? <div className="meta-text" style={{ marginTop: 6 }}>老师提醒：{data.lessonLink.note}</div> : null}
+        </div>
+      ) : null}
+
       <MathViewControls
         fontScale={mathView.fontScale}
         lineMode={mathView.lineMode}

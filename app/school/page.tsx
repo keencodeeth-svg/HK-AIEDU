@@ -5,8 +5,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
 import StatePanel from "@/components/StatePanel";
+import WorkspacePage, { WorkspaceAuthState, WorkspaceEmptyState, WorkspaceErrorState, WorkspaceLoadingState, buildStaleDataNotice } from "@/components/WorkspacePage";
 import Stat from "@/components/Stat";
-import { formatLoadedTime, getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
+import { getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
 import type { SchoolActionTone, SchoolClassRecord, SchoolOverview, SchoolUserRecord } from "@/lib/school-admin-types";
 
 type SchoolOverviewResponse = { data?: SchoolOverview | null };
@@ -78,77 +79,50 @@ export default function SchoolPage() {
   const classPreview = useMemo(() => classes.slice(0, 6), [classes]);
 
   if (loading && !overview && !authRequired) {
-    return (
-      <StatePanel
-        title="学校控制台加载中"
-        description="正在汇总学校组织、班级和成员数据。"
-        tone="loading"
-      />
-    );
+    return <WorkspaceLoadingState title="学校控制台加载中" description="正在汇总学校组织、班级和成员数据。" />;
   }
 
   if (authRequired) {
-    return (
-      <StatePanel
-        title="需要学校管理员权限"
-        description="请使用学校管理员或平台主管账号登录后查看学校控制台。"
-        tone="info"
-        action={
-          <Link className="button secondary" href="/login">
-            前往登录
-          </Link>
-        }
-      />
-    );
+    return <WorkspaceAuthState title="需要学校管理员权限" description="请使用学校管理员或平台主管账号登录后查看学校控制台。" />;
   }
 
   if (error && !overview) {
-    return (
-      <StatePanel
-        title="学校控制台加载失败"
-        description={error}
-        tone="error"
-        action={
-          <button className="button secondary" type="button" onClick={() => void loadAll()}>
-            重试
-          </button>
-        }
-      />
-    );
+    return <WorkspaceErrorState title="学校控制台加载失败" description={error} onRetry={() => void loadAll()} />;
   }
 
   if (!overview) {
-    return (
-      <StatePanel
-        title="暂无学校数据"
-        description="当前租户还没有生成学校概览数据，请稍后再试。"
-        tone="empty"
-      />
-    );
+    return <WorkspaceEmptyState title="暂无学校数据" description="当前租户还没有生成学校概览数据，请稍后再试。" />;
   }
 
   return (
-    <div className="grid" style={{ gap: 18 }}>
-      <div className="section-head">
-        <div>
-          <h2>学校控制台</h2>
-          <div className="section-sub">统一查看学校组织运行、班级执行、课程表覆盖与成员状态，并给出优先整改动作。</div>
-        </div>
-        <div className="cta-row no-margin" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(lastLoadedAt)}</span> : null}
-          <span className="chip">School Admin</span>
+    <WorkspacePage
+      title="学校控制台"
+      subtitle="统一查看学校组织运行、班级执行、课程表覆盖与成员状态，并给出优先整改动作。"
+      lastLoadedAt={lastLoadedAt}
+      chips={[<span key="school-admin" className="chip">School Admin</span>]}
+      actions={
+        <>
           <Link className="button ghost" href="/school/schedules">
             课程表管理
           </Link>
           <button className="button secondary" type="button" onClick={() => void loadAll("refresh")} disabled={loading || refreshing}>
             {refreshing ? "刷新中..." : "刷新"}
           </button>
-        </div>
-      </div>
-
-      {error ? (
-        <StatePanel title="本次刷新存在异常" description={error} tone="error" compact />
-      ) : null}
+        </>
+      }
+      notices={
+        error
+          ? [
+              buildStaleDataNotice(
+                error,
+                <button className="button secondary" type="button" onClick={() => void loadAll("refresh")}>
+                  再试一次
+                </button>
+              )
+            ]
+          : undefined
+      }
+    >
 
       <Card title="组织与执行概览" tag="运营">
         <div className="feature-card">
@@ -305,6 +279,6 @@ export default function SchoolPage() {
           </div>
         </Card>
       </div>
-    </div>
+    </WorkspacePage>
   );
 }

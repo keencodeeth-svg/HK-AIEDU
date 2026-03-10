@@ -1,5 +1,7 @@
 import { getClassesByStudent } from "@/lib/classes";
 import { getAssignmentById, getAssignmentItems, getAssignmentProgressForStudent } from "@/lib/assignments";
+import { listAssignmentLessonLinks } from "@/lib/assignment-lesson-links";
+import { getClassScheduleSessionById } from "@/lib/class-schedules";
 import { getQuestions } from "@/lib/content";
 import { getModuleById } from "@/lib/modules";
 import { notFound, unauthorized } from "@/lib/api/http";
@@ -50,11 +52,26 @@ export const GET = createLearningRoute({
       }));
 
     const progress = await getAssignmentProgressForStudent(assignment.id, user.id);
+    const lessonLinkRecord = (await listAssignmentLessonLinks({ assignmentId: assignment.id, taskKind: "prestudy" }))[0] ?? null;
+    const lessonSession = lessonLinkRecord ? await getClassScheduleSessionById(lessonLinkRecord.scheduleSessionId) : null;
 
     return {
       assignment,
       module: assignment.moduleId ? await getModuleById(assignment.moduleId) : null,
       class: { id: klass.id, name: klass.name, subject: klass.subject, grade: klass.grade },
+      lessonLink: lessonLinkRecord
+        ? {
+            taskKind: lessonLinkRecord.taskKind,
+            lessonDate: lessonLinkRecord.lessonDate,
+            note: lessonLinkRecord.note,
+            scheduleSessionId: lessonLinkRecord.scheduleSessionId,
+            slotLabel: lessonSession?.slotLabel,
+            startTime: lessonSession?.startTime,
+            endTime: lessonSession?.endTime,
+            room: lessonSession?.room,
+            focusSummary: lessonSession?.focusSummary
+          }
+        : null,
       questions: payloadQuestions,
       progress
     };

@@ -110,11 +110,18 @@ export default function StudentScheduleCard({
                 <div className="badge-row" style={{ marginTop: 0 }}>
                   <span className="badge">{schedule.nextLesson.status === "in_progress" ? "进行中" : "待上课"}</span>
                   {schedule.nextLesson.slotLabel ? <span className="badge">{schedule.nextLesson.slotLabel}</span> : null}
+                  {schedule.nextLesson.prestudyAssignmentTitle ? <span className="badge">预习已布置</span> : null}
                   {schedule.nextLesson.pendingAssignmentCount ? <span className="badge">待完成 {schedule.nextLesson.pendingAssignmentCount} 项</span> : null}
                 </div>
               </div>
               {schedule.nextLesson.focusSummary ? <div className="meta-text" style={{ marginTop: 8 }}>课堂焦点：{schedule.nextLesson.focusSummary}</div> : null}
-              {schedule.nextLesson.nextAssignmentTitle ? (
+              {schedule.nextLesson.prestudyAssignmentTitle ? (
+                <div className="meta-text" style={{ marginTop: 6 }}>
+                  课前预习：{schedule.nextLesson.prestudyAssignmentTitle}
+                  {schedule.nextLesson.prestudyAssignmentDueAt ? ` · 截止 ${formatLoadedTime(schedule.nextLesson.prestudyAssignmentDueAt)}` : ""}
+                  {schedule.nextLesson.prestudyAssignmentStatus ? ` · 当前 ${schedule.nextLesson.prestudyAssignmentStatus === "completed" ? "已完成" : "待完成"}` : ""}
+                </div>
+              ) : schedule.nextLesson.nextAssignmentTitle ? (
                 <div className="meta-text" style={{ marginTop: 6 }}>
                   课前联动：{schedule.nextLesson.nextAssignmentTitle}
                   {schedule.nextLesson.nextAssignmentDueAt ? ` · 截止 ${formatLoadedTime(schedule.nextLesson.nextAssignmentDueAt)}` : ""}

@@ -16,6 +16,17 @@ export type AssignmentDetail = {
     subject: string;
     grade: string;
   };
+  lessonLink?: {
+    taskKind: "prestudy";
+    lessonDate: string;
+    note?: string;
+    scheduleSessionId: string;
+    slotLabel?: string;
+    startTime?: string;
+    endTime?: string;
+    room?: string;
+    focusSummary?: string;
+  } | null;
   questions: Array<{
     id: string;
     stem: string;
