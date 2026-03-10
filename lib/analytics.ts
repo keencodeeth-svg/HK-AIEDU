@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import type { UserRole } from "./auth";
 import { isDbEnabled, query } from "./db";
-import { readJson, writeJson } from "./storage";
+import { readJson, updateJson } from "./storage";
 
 const ANALYTICS_FILE = "analytics-events.json";
 const MAX_EVENTS = 50000;
@@ -237,10 +237,10 @@ export async function appendAnalyticsEvents(events: AnalyticsEventRecord[]) {
     return;
   }
 
-  const list = readJson<AnalyticsEventRecord[]>(ANALYTICS_FILE, []);
-  list.push(...events);
-  const next = list.length > MAX_EVENTS ? list.slice(list.length - MAX_EVENTS) : list;
-  writeJson(ANALYTICS_FILE, next);
+  await updateJson<AnalyticsEventRecord[]>(ANALYTICS_FILE, [], (list) => {
+    list.push(...events);
+    return list.length > MAX_EVENTS ? list.slice(list.length - MAX_EVENTS) : list;
+  });
 }
 
 function mapDbAnalyticsEvent(row: DbAnalyticsEvent): AnalyticsEventRecord {

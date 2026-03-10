@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { isDbEnabled, query } from "./db";
-import { readJson, writeJson } from "./storage";
+import { readJson, updateJson } from "./storage";
 
 type ApiRouteLog = {
   id: string;
@@ -70,10 +70,10 @@ function mapDbLog(row: DbApiRouteLog): ApiRouteLog {
 
 async function appendRouteLog(log: ApiRouteLog) {
   if (!isDbEnabled()) {
-    const list = readJson<ApiRouteLog[]>(API_ROUTE_LOG_FILE, []);
-    list.push(log);
-    const next = list.length > MAX_ROUTE_LOGS ? list.slice(list.length - MAX_ROUTE_LOGS) : list;
-    writeJson(API_ROUTE_LOG_FILE, next);
+    await updateJson<ApiRouteLog[]>(API_ROUTE_LOG_FILE, [], (list) => {
+      list.push(log);
+      return list.length > MAX_ROUTE_LOGS ? list.slice(list.length - MAX_ROUTE_LOGS) : list;
+    });
     return;
   }
 

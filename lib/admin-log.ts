@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { readJson, writeJson } from "./storage";
+import { readJson, updateJson } from "./storage";
 import { isDbEnabled, query, queryOne } from "./db";
 
 export type AdminLog = {
@@ -46,9 +46,10 @@ export async function addAdminLog(log: Omit<AdminLog, "id" | "createdAt">) {
   };
 
   if (!isDbEnabled()) {
-    const list = readJson<AdminLog[]>(LOG_FILE, []);
-    list.unshift(entry);
-    writeJson(LOG_FILE, list.slice(0, 200));
+    await updateJson<AdminLog[]>(LOG_FILE, [], (list) => {
+      list.unshift(entry);
+      return list.slice(0, 200);
+    });
     return entry;
   }
 
@@ -103,9 +104,9 @@ export async function updateAdminLog(id: string, updates: AdminLogMutation) {
   };
 
   if (!isDbEnabled()) {
-    const list = readJson<AdminLog[]>(LOG_FILE, []);
-    const nextList = list.map((item) => (item.id === id ? next : item));
-    writeJson(LOG_FILE, nextList.slice(0, 200));
+    await updateJson<AdminLog[]>(LOG_FILE, [], (list) =>
+      list.map((item) => (item.id === id ? next : item)).slice(0, 200)
+    );
     return next;
   }
 

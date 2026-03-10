@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { readJson, writeJson } from "./storage";
+import { mutateJson, readJson, updateJson, writeJson } from "./storage";
 import { isDbEnabled, query, queryOne } from "./db";
 
 export type StudentProfile = {
@@ -104,15 +104,15 @@ export async function ensureObserverCode(userId: string) {
   const observerCode = await createUniqueObserverCode(userId);
 
   if (!isDbEnabled()) {
-    const list = await getStudentProfiles();
-    const index = list.findIndex((item) => item.userId === userId);
-    if (index >= 0) {
+    return mutateJson<StudentProfile[], string | null>(PROFILE_FILE, [], (list) => {
+      const index = list.findIndex((item) => item.userId === userId);
+      if (index < 0) {
+        return { result: null };
+      }
       const next = { ...list[index], observerCode };
       list[index] = next;
-      await saveStudentProfiles(list);
-      return observerCode;
-    }
-    return observerCode;
+      return { result: observerCode };
+    });
   }
 
   await query("UPDATE student_profiles SET observer_code = $2 WHERE user_id = $1", [userId, observerCode]);
@@ -124,15 +124,15 @@ export async function rotateObserverCode(userId: string) {
   if (!profile) return null;
   const observerCode = await createUniqueObserverCode(userId);
   if (!isDbEnabled()) {
-    const list = await getStudentProfiles();
-    const index = list.findIndex((item) => item.userId === userId);
-    if (index >= 0) {
+    return mutateJson<StudentProfile[], string | null>(PROFILE_FILE, [], (list) => {
+      const index = list.findIndex((item) => item.userId === userId);
+      if (index < 0) {
+        return { result: null };
+      }
       const next = { ...list[index], observerCode };
       list[index] = next;
-      await saveStudentProfiles(list);
-      return observerCode;
-    }
-    return observerCode;
+      return { result: observerCode };
+    });
   }
   await query("UPDATE student_profiles SET observer_code = $2 WHERE user_id = $1", [userId, observerCode]);
   return observerCode;
@@ -142,24 +142,23 @@ export async function upsertStudentProfile(input: Omit<StudentProfile, "id" | "u
   const updatedAt = new Date().toISOString();
 
   if (!isDbEnabled()) {
-    const list = await getStudentProfiles();
-    const existingIndex = list.findIndex((item) => item.userId === input.userId);
-    if (existingIndex >= 0) {
-      const next = { ...list[existingIndex], ...input, updatedAt };
-      list[existingIndex] = next;
-      await saveStudentProfiles(list);
-      return next;
-    }
     const observerCode = input.observerCode ?? (await createUniqueObserverCode(input.userId));
-    const next: StudentProfile = {
-      id: `sp-${crypto.randomBytes(6).toString("hex")}`,
-      updatedAt,
-      observerCode,
-      ...input
-    };
-    list.push(next);
-    await saveStudentProfiles(list);
-    return next;
+    return updateJson<StudentProfile[]>(PROFILE_FILE, [], (list) => {
+      const existingIndex = list.findIndex((item) => item.userId === input.userId);
+      if (existingIndex >= 0) {
+        const next = { ...list[existingIndex], ...input, updatedAt };
+        list[existingIndex] = next;
+        return list;
+      }
+      const next: StudentProfile = {
+        id: `sp-${crypto.randomBytes(6).toString("hex")}`,
+        updatedAt,
+        observerCode,
+        ...input
+      };
+      list.push(next);
+      return list;
+    }).then((list) => list.find((item) => item.userId === input.userId) ?? null);
   }
 
   const id = `sp-${crypto.randomBytes(6).toString("hex")}`;

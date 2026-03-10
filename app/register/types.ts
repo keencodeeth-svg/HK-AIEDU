@@ -15,7 +15,6 @@ export type ParentRegisterPayload = {
   email: string;
   password: string;
   observerCode: string;
-  studentEmail: string;
 };
 
 export type RegisterPayload = StudentRegisterPayload | ParentRegisterPayload;

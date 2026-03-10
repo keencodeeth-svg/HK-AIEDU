@@ -43,6 +43,9 @@ async function run() {
   const state = {
     email: "",
     password: "",
+    observerCode: "",
+    parentEmail: "",
+    parentPassword: "",
     createdExamId: null,
     createdKnowledgePointId: null,
     createdQuestionId: null,

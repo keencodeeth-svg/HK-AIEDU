@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { isDbEnabled, query, queryOne } from "./db";
-import { readJson, writeJson } from "./storage";
+import { mutateJson, readJson, updateJson } from "./storage";
 
 type AuthLoginAttempt = {
   key: string;
@@ -70,7 +70,15 @@ function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
+function shouldTrustProxyHeaders() {
+  return process.env.AUTH_TRUST_PROXY_HEADERS === "true";
+}
+
 function normalizeIp(forwardedFor?: string | null) {
+  if (!shouldTrustProxyHeaders()) {
+    // Default to email-scoped lockout unless the deployment explicitly trusts proxy headers.
+    return "email-only";
+  }
   const first = String(forwardedFor ?? "")
     .split(",")[0]
     ?.trim();
@@ -122,15 +130,15 @@ async function readAttempt(key: string) {
 
 async function writeAttempt(attempt: AuthLoginAttempt) {
   if (!isDbEnabled()) {
-    const list = readJson<AuthLoginAttempt[]>(AUTH_LOGIN_ATTEMPTS_FILE, []);
-    const index = list.findIndex((item) => item.key === attempt.key);
-    if (index >= 0) {
-      list[index] = attempt;
-    } else {
-      list.push(attempt);
-    }
-    const next = list.length > MAX_FILE_RECORDS ? list.slice(list.length - MAX_FILE_RECORDS) : list;
-    writeJson(AUTH_LOGIN_ATTEMPTS_FILE, next);
+    await updateJson<AuthLoginAttempt[]>(AUTH_LOGIN_ATTEMPTS_FILE, [], (list) => {
+      const index = list.findIndex((item) => item.key === attempt.key);
+      if (index >= 0) {
+        list[index] = attempt;
+      } else {
+        list.push(attempt);
+      }
+      return list.length > MAX_FILE_RECORDS ? list.slice(list.length - MAX_FILE_RECORDS) : list;
+    });
     return;
   }
 
@@ -160,11 +168,9 @@ async function writeAttempt(attempt: AuthLoginAttempt) {
 
 async function removeAttempt(key: string) {
   if (!isDbEnabled()) {
-    const list = readJson<AuthLoginAttempt[]>(AUTH_LOGIN_ATTEMPTS_FILE, []);
-    const next = list.filter((item) => item.key !== key);
-    if (next.length !== list.length) {
-      writeJson(AUTH_LOGIN_ATTEMPTS_FILE, next);
-    }
+    await updateJson<AuthLoginAttempt[]>(AUTH_LOGIN_ATTEMPTS_FILE, [], (list) =>
+      list.filter((item) => item.key !== key)
+    );
     return;
   }
   await query("DELETE FROM auth_login_attempts WHERE key = $1", [key]);
@@ -251,6 +257,56 @@ export async function registerFailedLoginAttempt(identity: LoginAttemptIdentity)
   }
 
   const nowIso = new Date().toISOString();
+  if (!isDbEnabled()) {
+    return mutateJson<AuthLoginAttempt[], LoginAttemptStatus>(AUTH_LOGIN_ATTEMPTS_FILE, [], (list) => {
+      const existing = list.find((item) => item.key === identity.key) ?? null;
+      const nowTs = Date.now();
+      const lockTs = existing?.lockUntil ? new Date(existing.lockUntil).getTime() : NaN;
+      if (Number.isFinite(lockTs) && lockTs > nowTs) {
+        return {
+          result: {
+            enforced,
+            locked: true,
+            remainingAttempts: 0,
+            failedCount: existing?.failedCount ?? 0,
+            maxFailedAttempts: policy.maxFailedAttempts,
+            lockUntil: existing?.lockUntil ?? null
+          } satisfies LoginAttemptStatus
+        };
+      }
+
+      const firstTs = existing ? new Date(existing.firstFailedAt).getTime() : NaN;
+      const withinWindow = existing && Number.isFinite(firstTs) && nowTs - firstTs <= policy.failWindowMs;
+      const firstFailedAt = withinWindow ? existing!.firstFailedAt : nowIso;
+      const failedCount = (withinWindow ? existing?.failedCount ?? 0 : 0) + 1;
+      const reachedLimit = failedCount >= policy.maxFailedAttempts;
+      const lockUntil = reachedLimit ? new Date(nowTs + policy.lockMs).toISOString() : null;
+      const nextAttempt: AuthLoginAttempt = {
+        key: identity.key,
+        email: identity.email,
+        ip: identity.ip,
+        failedCount,
+        firstFailedAt,
+        lockUntil,
+        updatedAt: nowIso
+      };
+      const nextList = list.filter((item) => item.key !== identity.key);
+      nextList.push(nextAttempt);
+      const trimmed = nextList.length > MAX_FILE_RECORDS ? nextList.slice(nextList.length - MAX_FILE_RECORDS) : nextList;
+      return {
+        next: trimmed,
+        result: {
+          enforced,
+          locked: reachedLimit,
+          remainingAttempts: reachedLimit ? 0 : Math.max(0, policy.maxFailedAttempts - failedCount),
+          failedCount,
+          maxFailedAttempts: policy.maxFailedAttempts,
+          lockUntil
+        } satisfies LoginAttemptStatus
+      };
+    });
+  }
+
   const current = await getLoginAttemptStatus(identity);
   if (current.locked) {
     return current;
@@ -285,4 +341,3 @@ export async function clearLoginAttempt(identity: LoginAttemptIdentity) {
   if (!isAuthSecurityEnforced()) return;
   await removeAttempt(identity.key);
 }
-

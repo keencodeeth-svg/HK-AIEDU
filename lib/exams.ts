@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { readJson, writeJson } from "./storage";
+import { readJson, transactJsonFiles, updateJson, writeJson } from "./storage";
 import { isDbEnabled, query, queryOne } from "./db";
 import { getClassStudentIds } from "./classes";
 
@@ -316,10 +316,15 @@ export async function ensureExamAssignment(paperId: string, studentId: string): 
   };
 
   if (!isDbEnabled()) {
-    const list = readJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, []);
-    list.push(assignment);
-    writeJson(EXAM_ASSIGNMENT_FILE, list);
-    return assignment;
+    return updateJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, [], (list) => {
+      const exists = list.some((item) => item.paperId === paperId && item.studentId === studentId);
+      if (!exists) {
+        list.push(assignment);
+      }
+      return list;
+    }).then(
+      (list) => list.find((item) => item.paperId === paperId && item.studentId === studentId) ?? assignment
+    );
   }
 
   const row = await queryOne<DbExamAssignment>(
@@ -358,18 +363,23 @@ export async function ensureExamAssignmentsForPaper(paperId: string): Promise<Ex
 
   const assignedAt = new Date().toISOString();
   if (!isDbEnabled()) {
-    const list = readJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, []);
-    missing.forEach((studentId) => {
-      list.push({
-        id: `exam-assign-${crypto.randomBytes(6).toString("hex")}`,
-        paperId,
-        studentId,
-        status: "pending",
-        assignedAt
+    return updateJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, [], (list) => {
+      const assignedSet = new Set(
+        list.filter((item) => item.paperId === paperId).map((item) => item.studentId)
+      );
+      missing.forEach((studentId) => {
+        if (!assignedSet.has(studentId)) {
+          list.push({
+            id: `exam-assign-${crypto.randomBytes(6).toString("hex")}`,
+            paperId,
+            studentId,
+            status: "pending",
+            assignedAt
+          });
+        }
       });
-    });
-    writeJson(EXAM_ASSIGNMENT_FILE, list);
-    return list.filter((item) => item.paperId === paperId);
+      return list;
+    }).then((list) => list.filter((item) => item.paperId === paperId));
   }
 
   for (const studentId of missing) {
@@ -404,22 +414,25 @@ export async function upsertExamAnswerDraft(input: {
   const updatedAt = new Date().toISOString();
 
   if (!isDbEnabled()) {
-    const list = readJson<ExamAnswerDraft[]>(EXAM_ANSWER_FILE, []);
-    const index = list.findIndex((item) => item.paperId === input.paperId && item.studentId === input.studentId);
     const next: ExamAnswerDraft = {
-      id: index >= 0 ? list[index].id : `exam-answer-${crypto.randomBytes(6).toString("hex")}`,
+      id: `exam-answer-${crypto.randomBytes(6).toString("hex")}`,
       paperId: input.paperId,
       studentId: input.studentId,
       answers: input.answers,
       updatedAt
     };
-    if (index >= 0) {
-      list[index] = next;
-    } else {
-      list.push(next);
-    }
-    writeJson(EXAM_ANSWER_FILE, list);
-    return next;
+    return updateJson<ExamAnswerDraft[]>(EXAM_ANSWER_FILE, [], (list) => {
+      const index = list.findIndex((item) => item.paperId === input.paperId && item.studentId === input.studentId);
+      if (index >= 0) {
+        next.id = list[index].id;
+        list[index] = next;
+      } else {
+        list.push(next);
+      }
+      return list;
+    }).then(
+      (list) => list.find((item) => item.paperId === input.paperId && item.studentId === input.studentId) ?? next
+    );
   }
 
   const id = `exam-answer-${crypto.randomBytes(6).toString("hex")}`;
@@ -507,39 +520,42 @@ export async function createAndPublishExam(input: {
   };
 
   if (!isDbEnabled()) {
-    const papers = readJson<ExamPaper[]>(EXAM_PAPER_FILE, []);
-    papers.push(paper);
-    writeJson(EXAM_PAPER_FILE, papers);
-
-    const items = readJson<ExamPaperItem[]>(EXAM_PAPER_ITEM_FILE, []);
-    uniqueQuestionIds.forEach((questionId, index) => {
-      items.push({
-        id: `exam-item-${crypto.randomBytes(6).toString("hex")}`,
-        paperId: id,
-        questionId,
-        score: scorePerQuestion,
-        orderIndex: index + 1
-      });
-    });
-    writeJson(EXAM_PAPER_ITEM_FILE, items);
-
     const students = await getClassStudentIds(input.classId);
     // Guard against stale/invalid student ids by intersecting with class membership.
     const targetStudents =
       publishMode === "targeted" ? assignedStudentIds.filter((id) => students.includes(id)) : students;
-    if (targetStudents.length) {
-      const assignments = readJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, []);
-      targetStudents.forEach((studentId) => {
-        assignments.push({
-          id: `exam-assign-${crypto.randomBytes(6).toString("hex")}`,
-          paperId: id,
-          studentId,
-          status: "pending",
-          assignedAt: now
+    await transactJsonFiles<{
+      papers: ExamPaper[];
+      items: ExamPaperItem[];
+      assignments: ExamAssignment[];
+    }, void>(
+      {
+        papers: { fileName: EXAM_PAPER_FILE, fallback: [] },
+        items: { fileName: EXAM_PAPER_ITEM_FILE, fallback: [] },
+        assignments: { fileName: EXAM_ASSIGNMENT_FILE, fallback: [] }
+      },
+      ({ papers, items, assignments }) => {
+        papers.push(paper);
+        uniqueQuestionIds.forEach((questionId, index) => {
+          items.push({
+            id: `exam-item-${crypto.randomBytes(6).toString("hex")}`,
+            paperId: id,
+            questionId,
+            score: scorePerQuestion,
+            orderIndex: index + 1
+          });
         });
-      });
-      writeJson(EXAM_ASSIGNMENT_FILE, assignments);
-    }
+        targetStudents.forEach((studentId) => {
+          assignments.push({
+            id: `exam-assign-${crypto.randomBytes(6).toString("hex")}`,
+            paperId: id,
+            studentId,
+            status: "pending",
+            assignedAt: now
+          });
+        });
+      }
+    );
     return paper;
   }
 
@@ -609,16 +625,19 @@ export async function updateExamPaperStatus(input: {
   const now = new Date().toISOString();
 
   if (!isDbEnabled()) {
-    const papers = readJson<ExamPaper[]>(EXAM_PAPER_FILE, []).map(normalizeExamPaper);
-    const index = papers.findIndex((item) => item.id === input.paperId);
-    if (index === -1) return null;
-    papers[index] = {
-      ...papers[index],
-      status: input.status,
-      updatedAt: now
-    };
-    writeJson(EXAM_PAPER_FILE, papers);
-    return papers[index];
+    return updateJson<ExamPaper[]>(EXAM_PAPER_FILE, [], (papers) => {
+      const normalized = papers.map(normalizeExamPaper);
+      const index = normalized.findIndex((item) => item.id === input.paperId);
+      if (index === -1) {
+        return normalized;
+      }
+      normalized[index] = {
+        ...normalized[index],
+        status: input.status,
+        updatedAt: now
+      };
+      return normalized;
+    }).then((papers) => papers.find((item) => item.id === input.paperId) ?? null);
   }
 
   const row = await queryOne<DbExamPaper>(
@@ -644,21 +663,6 @@ export async function markExamAssignmentInProgress(input: {
   }
 
   if (!isDbEnabled()) {
-    const list = readJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, []);
-    const index = list.findIndex(
-      (item) => item.paperId === input.paperId && item.studentId === input.studentId
-    );
-    if (index >= 0) {
-      const next: ExamAssignment = {
-        ...list[index],
-        status: "in_progress",
-        startedAt: list[index].startedAt ?? now,
-        autoSavedAt: now
-      };
-      list[index] = next;
-      writeJson(EXAM_ASSIGNMENT_FILE, list);
-      return next;
-    }
     const fallback: ExamAssignment = {
       id: `exam-assign-${crypto.randomBytes(6).toString("hex")}`,
       paperId: input.paperId,
@@ -668,9 +672,24 @@ export async function markExamAssignmentInProgress(input: {
       startedAt: now,
       autoSavedAt: now
     };
-    list.push(fallback);
-    writeJson(EXAM_ASSIGNMENT_FILE, list);
-    return fallback;
+    return updateJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, [], (list) => {
+      const index = list.findIndex(
+        (item) => item.paperId === input.paperId && item.studentId === input.studentId
+      );
+      if (index >= 0) {
+        list[index] = {
+          ...list[index],
+          status: "in_progress",
+          startedAt: list[index].startedAt ?? now,
+          autoSavedAt: now
+        };
+        return list;
+      }
+      list.push(fallback);
+      return list;
+    }).then(
+      (list) => list.find((item) => item.paperId === input.paperId && item.studentId === input.studentId) ?? fallback
+    );
   }
 
   const row = await queryOne<DbExamAssignment>(
@@ -696,24 +715,6 @@ export async function markExamAssignmentSubmitted(input: {
   // Submission write also stamps final scoring snapshot onto assignment for teacher dashboards.
 
   if (!isDbEnabled()) {
-    const list = readJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, []);
-    const index = list.findIndex(
-      (item) => item.paperId === input.paperId && item.studentId === input.studentId
-    );
-    if (index >= 0) {
-      const next: ExamAssignment = {
-        ...list[index],
-        status: "submitted",
-        startedAt: list[index].startedAt ?? now,
-        autoSavedAt: now,
-        submittedAt: now,
-        score: input.score,
-        total: input.total
-      };
-      list[index] = next;
-      writeJson(EXAM_ASSIGNMENT_FILE, list);
-      return next;
-    }
     const fallback: ExamAssignment = {
       id: `exam-assign-${crypto.randomBytes(6).toString("hex")}`,
       paperId: input.paperId,
@@ -726,9 +727,27 @@ export async function markExamAssignmentSubmitted(input: {
       score: input.score,
       total: input.total
     };
-    list.push(fallback);
-    writeJson(EXAM_ASSIGNMENT_FILE, list);
-    return fallback;
+    return updateJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, [], (list) => {
+      const index = list.findIndex(
+        (item) => item.paperId === input.paperId && item.studentId === input.studentId
+      );
+      if (index >= 0) {
+        list[index] = {
+          ...list[index],
+          status: "submitted",
+          startedAt: list[index].startedAt ?? now,
+          autoSavedAt: now,
+          submittedAt: now,
+          score: input.score,
+          total: input.total
+        };
+        return list;
+      }
+      list.push(fallback);
+      return list;
+    }).then(
+      (list) => list.find((item) => item.paperId === input.paperId && item.studentId === input.studentId) ?? fallback
+    );
   }
 
   const row = await queryOne<DbExamAssignment>(
@@ -767,10 +786,8 @@ export async function upsertExamSubmission(input: {
   // Idempotent upsert allows repeated submit requests without creating duplicate attempts.
 
   if (!isDbEnabled()) {
-    const list = readJson<ExamSubmission[]>(EXAM_SUBMISSION_FILE, []);
-    const index = list.findIndex((item) => item.paperId === input.paperId && item.studentId === input.studentId);
     const next: ExamSubmission = {
-      id: index >= 0 ? list[index].id : `exam-sub-${crypto.randomBytes(6).toString("hex")}`,
+      id: `exam-sub-${crypto.randomBytes(6).toString("hex")}`,
       paperId: input.paperId,
       studentId: input.studentId,
       answers: input.answers,
@@ -778,13 +795,18 @@ export async function upsertExamSubmission(input: {
       total: input.total,
       submittedAt
     };
-    if (index >= 0) {
-      list[index] = next;
-    } else {
-      list.push(next);
-    }
-    writeJson(EXAM_SUBMISSION_FILE, list);
-    return next;
+    return updateJson<ExamSubmission[]>(EXAM_SUBMISSION_FILE, [], (list) => {
+      const index = list.findIndex((item) => item.paperId === input.paperId && item.studentId === input.studentId);
+      if (index >= 0) {
+        next.id = list[index].id;
+        list[index] = next;
+      } else {
+        list.push(next);
+      }
+      return list;
+    }).then(
+      (list) => list.find((item) => item.paperId === input.paperId && item.studentId === input.studentId) ?? next
+    );
   }
 
   const id = `exam-sub-${crypto.randomBytes(6).toString("hex")}`;

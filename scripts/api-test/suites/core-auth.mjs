@@ -203,6 +203,18 @@ export async function runCoreAuthSuite(context) {
   );
   assert.equal(lockedEvenWithCorrectPassword.body?.details?.remainingAttempts, 0, "Locked account should remain at zero remaining attempts");
 
+  const spoofedHeaderLogin = await apiFetch("/api/auth/login", {
+    method: "POST",
+    useCookies: false,
+    headers: { "x-forwarded-for": "198.51.100.88" },
+    json: { email: lockEmail, password: lockPassword, role: "student" }
+  });
+  assert.equal(
+    spoofedHeaderLogin.status,
+    429,
+    `Changing x-forwarded-for must not bypass login lockout: ${spoofedHeaderLogin.raw}`
+  );
+
   const invalidRecoveryRequest = await apiFetch("/api/auth/recovery-request", {
     method: "POST",
     useCookies: false,
@@ -287,6 +299,68 @@ export async function runCoreAuthSuite(context) {
   assert.equal(login.status, 200, `Login failed: ${login.raw}`);
   assert.ok(cookieJar.has("mvp_session"), "Login should set mvp_session cookie");
 
+  const studentProfile = await apiFetch("/api/student/profile");
+  assert.equal(studentProfile.status, 200, `GET /api/student/profile failed: ${studentProfile.raw}`);
+  const observerCode = studentProfile.body?.data?.observerCode;
+  assert.equal(typeof observerCode, "string", "Student profile should expose observerCode");
+  assert.ok(observerCode, "Student observerCode should not be empty");
+
+  const legacyParentRegister = await apiFetch("/api/auth/register", {
+    method: "POST",
+    useCookies: false,
+    json: {
+      role: "parent",
+      email: createLocalTestEmail("api-test-parent-email-bind"),
+      password: "ApiParent123!",
+      name: "Legacy Parent Bind",
+      studentEmail: email
+    }
+  });
+  assert.equal(legacyParentRegister.status, 400, "Parent register should reject studentEmail-only binding");
+  assert.equal(
+    legacyParentRegister.body?.error,
+    "studentEmail binding disabled, use observerCode from student profile"
+  );
+
+  const parentEmail = createLocalTestEmail("api-test-parent-observer-bind");
+  const parentPassword = "ApiParent123!";
+  const observerCodeParentRegister = await apiFetch("/api/auth/register", {
+    method: "POST",
+    useCookies: false,
+    json: {
+      role: "parent",
+      email: parentEmail,
+      password: parentPassword,
+      name: "Observer Parent Bind",
+      observerCode
+    }
+  });
+  assert.equal(
+    observerCodeParentRegister.status,
+    201,
+    `Parent register with observerCode failed: ${observerCodeParentRegister.raw}`
+  );
+
+  const parentLogin = await apiFetch("/api/auth/login", {
+    method: "POST",
+    useCookies: false,
+    json: { email: parentEmail, password: parentPassword, role: "parent" }
+  });
+  assert.equal(parentLogin.status, 200, `Parent login failed after observerCode bind: ${parentLogin.raw}`);
+
+  const restoreStudentSession = await apiFetch("/api/auth/login", {
+    method: "POST",
+    json: { email, password, role: "student" }
+  });
+  assert.equal(
+    restoreStudentSession.status,
+    200,
+    `Student session should be restored for downstream suites: ${restoreStudentSession.raw}`
+  );
+
   state.email = email;
   state.password = password;
+  state.observerCode = observerCode;
+  state.parentEmail = parentEmail;
+  state.parentPassword = parentPassword;
 }

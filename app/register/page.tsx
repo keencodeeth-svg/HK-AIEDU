@@ -16,7 +16,6 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [grade, setGrade] = useState("4");
   const [schoolCode, setSchoolCode] = useState("");
-  const [studentEmail, setStudentEmail] = useState("");
   const [observerCode, setObserverCode] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,8 +49,7 @@ export default function RegisterPage() {
             name,
             email,
             password,
-            observerCode,
-            studentEmail
+            observerCode
           };
 
     const res = await fetch("/api/auth/register", {
@@ -68,7 +66,6 @@ export default function RegisterPage() {
       setEmail("");
       setPassword("");
       setSchoolCode("");
-      setStudentEmail("");
       setObserverCode("");
     }
     setLoading(false);
@@ -131,22 +128,14 @@ export default function RegisterPage() {
           ) : (
             <>
               <label className="form-field">
-                <div className="section-title">绑定码（推荐）</div>
+                <div className="section-title">绑定码</div>
                 <input
                   className="form-control"
                   value={observerCode}
                   onChange={(event) => setObserverCode(event.target.value)}
                   placeholder="学生资料页获取绑定码"
                 />
-              </label>
-              <label className="form-field">
-                <div className="section-title">绑定学生邮箱（可选）</div>
-                <input
-                  className="form-control"
-                  value={studentEmail}
-                  onChange={(event) => setStudentEmail(event.target.value)}
-                  placeholder="student@demo.com"
-                />
+                <div className="form-note">家长注册必须使用学生资料页中的绑定码，避免仅凭邮箱误绑他人账号。</div>
               </label>
             </>
           )}

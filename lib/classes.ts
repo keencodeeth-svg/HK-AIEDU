@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { readJson, writeJson } from "./storage";
+import { readJson, updateJson, writeJson } from "./storage";
 import { isDbEnabled, query, queryOne } from "./db";
 import { getUsers } from "./auth";
 import { DEFAULT_SCHOOL_ID } from "./schools";
@@ -180,7 +180,6 @@ export async function createClass(input: {
   const joinCode = generateJoinCode();
   const joinMode: ClassItem["joinMode"] = "approval";
   if (!isDbEnabled()) {
-    const list = await getClasses();
     const next: ClassItem = {
       id: `class-${crypto.randomBytes(6).toString("hex")}`,
       name: input.name,
@@ -192,8 +191,9 @@ export async function createClass(input: {
       joinCode,
       joinMode
     };
-    list.push(next);
-    writeJson(CLASS_FILE, list);
+    await updateJson<ClassItem[]>(CLASS_FILE, [], (list) => {
+      list.push(next);
+    });
     return next;
   }
   const id = `class-${crypto.randomBytes(6).toString("hex")}`;
@@ -223,17 +223,17 @@ export async function updateClassSettings(
   input: { joinCode?: string; joinMode?: ClassItem["joinMode"] }
 ): Promise<ClassItem | null> {
   if (!isDbEnabled()) {
-    const list = await getClasses();
-    const index = list.findIndex((item) => item.id === id);
-    if (index === -1) return null;
-    const next: ClassItem = {
-      ...list[index],
-      joinCode: input.joinCode ?? list[index].joinCode,
-      joinMode: input.joinMode ?? list[index].joinMode
-    };
-    list[index] = next;
-    writeJson(CLASS_FILE, list);
-    return next;
+    return updateJson<ClassItem[]>(CLASS_FILE, [], (list) => {
+      const index = list.findIndex((item) => item.id === id);
+      if (index === -1) return list;
+      const next: ClassItem = {
+        ...list[index],
+        joinCode: input.joinCode ?? list[index].joinCode,
+        joinMode: input.joinMode ?? list[index].joinMode
+      };
+      list[index] = next;
+      return list;
+    }).then((list) => list.find((item) => item.id === id) ?? null);
   }
   const row = await queryOne<DbClass>(
     `UPDATE classes
@@ -311,17 +311,19 @@ export async function addStudentToClass(
         return false;
       }
     }
-    const classStudents = readJson<ClassStudent[]>(CLASS_STUDENT_FILE, []);
-    const exists = classStudents.some((item) => item.classId === classId && item.studentId === studentId);
-    if (exists) return false;
-    classStudents.push({
-      id: `class-student-${crypto.randomBytes(6).toString("hex")}`,
-      classId,
-      studentId,
-      joinedAt: new Date().toISOString()
-    });
-    writeJson(CLASS_STUDENT_FILE, classStudents);
-    return true;
+    const joinedAt = new Date().toISOString();
+    const nextId = `class-student-${crypto.randomBytes(6).toString("hex")}`;
+    return updateJson<ClassStudent[]>(CLASS_STUDENT_FILE, [], (classStudents) => {
+      const exists = classStudents.some((item) => item.classId === classId && item.studentId === studentId);
+      if (exists) return classStudents;
+      classStudents.push({
+        id: nextId,
+        classId,
+        studentId,
+        joinedAt
+      });
+      return classStudents;
+    }).then((classStudents) => classStudents.some((item) => item.id === nextId));
   }
   if (enforceSchoolMatch) {
     // Resolve both sides in one query to avoid race conditions across separate reads.
@@ -357,16 +359,17 @@ export async function addStudentToClass(
 export async function forceAddStudentToClass(classId: string, studentId: string): Promise<boolean> {
   // Last-resort idempotent insert used by approval flow to tolerate historical dirty data.
   if (!isDbEnabled()) {
-    const classStudents = readJson<ClassStudent[]>(CLASS_STUDENT_FILE, []);
-    const exists = classStudents.some((item) => item.classId === classId && item.studentId === studentId);
-    if (exists) return true;
-    classStudents.push({
-      id: `class-student-${crypto.randomBytes(6).toString("hex")}`,
-      classId,
-      studentId,
-      joinedAt: new Date().toISOString()
+    await updateJson<ClassStudent[]>(CLASS_STUDENT_FILE, [], (classStudents) => {
+      const exists = classStudents.some((item) => item.classId === classId && item.studentId === studentId);
+      if (!exists) {
+        classStudents.push({
+          id: `class-student-${crypto.randomBytes(6).toString("hex")}`,
+          classId,
+          studentId,
+          joinedAt: new Date().toISOString()
+        });
+      }
     });
-    writeJson(CLASS_STUDENT_FILE, classStudents);
     return true;
   }
   const row = await queryOne<DbClassStudent>(
@@ -460,11 +463,6 @@ export async function isStudentInTeacherClasses(teacherId: string, studentId: st
 export async function createJoinRequest(classId: string, studentId: string): Promise<ClassJoinRequest> {
   const createdAt = new Date().toISOString();
   if (!isDbEnabled()) {
-    const list = await getJoinRequests();
-    const existing = list.find(
-      (item) => item.classId === classId && item.studentId === studentId && item.status === "pending"
-    );
-    if (existing) return existing;
     const next: ClassJoinRequest = {
       id: `join-${crypto.randomBytes(6).toString("hex")}`,
       classId,
@@ -472,9 +470,21 @@ export async function createJoinRequest(classId: string, studentId: string): Pro
       status: "pending",
       createdAt
     };
-    list.push(next);
-    writeJson(JOIN_REQUEST_FILE, list);
-    return next;
+    return updateJson<ClassJoinRequest[]>(JOIN_REQUEST_FILE, [], (list) => {
+      const existing = list.find(
+        (item) => item.classId === classId && item.studentId === studentId && item.status === "pending"
+      );
+      if (existing) {
+        return list;
+      }
+      list.push(next);
+      return list;
+    }).then((list) => {
+      return (
+        list.find((item) => item.classId === classId && item.studentId === studentId && item.status === "pending") ??
+        next
+      );
+    });
   }
   const row = await queryOne<DbJoinRequest>(
     `INSERT INTO class_join_requests (id, class_id, student_id, status, created_at)
@@ -501,13 +511,13 @@ export async function createJoinRequest(classId: string, studentId: string): Pro
 export async function decideJoinRequest(id: string, status: "approved" | "rejected") {
   const decidedAt = new Date().toISOString();
   if (!isDbEnabled()) {
-    const list = await getJoinRequests();
-    const index = list.findIndex((item) => item.id === id);
-    if (index === -1) return null;
-    const next = { ...list[index], status, decidedAt };
-    list[index] = next;
-    writeJson(JOIN_REQUEST_FILE, list);
-    return next;
+    return updateJson<ClassJoinRequest[]>(JOIN_REQUEST_FILE, [], (list) => {
+      const index = list.findIndex((item) => item.id === id);
+      if (index === -1) return list;
+      const next = { ...list[index], status, decidedAt };
+      list[index] = next;
+      return list;
+    }).then((list) => list.find((item) => item.id === id) ?? null);
   }
   const row = await queryOne<DbJoinRequest>(
     `UPDATE class_join_requests

@@ -90,20 +90,19 @@ export const POST = createAuthRoute({
       );
     }
 
-    let student = null;
     const observerCode = body.observerCode?.trim();
-
-    if (observerCode) {
-      const profile = await getStudentProfileByObserverCode(observerCode);
-      if (!profile) {
-        notFound("observer code invalid");
+    if (!observerCode) {
+      if (body.studentEmail?.trim()) {
+        badRequest("studentEmail binding disabled, use observerCode from student profile");
       }
-      student = await getUserById(profile.userId);
-    } else if (body.studentEmail) {
-      student = await getUserByEmail(body.studentEmail);
-    } else {
-      badRequest("studentEmail or observerCode required");
+      badRequest("observerCode required");
     }
+
+    const profile = await getStudentProfileByObserverCode(observerCode);
+    if (!profile) {
+      notFound("observer code invalid");
+    }
+    const student = await getUserById(profile.userId);
 
     if (!student || student.role !== "student") {
       notFound("student not found");

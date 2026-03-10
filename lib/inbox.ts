@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { readJson, writeJson } from "./storage";
+import { mutateJson, readJson, transactJsonFiles } from "./storage";
 import { isDbEnabled, query } from "./db";
 import { getUsers } from "./auth";
 
@@ -194,11 +194,13 @@ export async function getThreadMessages(threadId: string, userId?: string) {
         return { id: p.userId, name: user?.name ?? "成员", role: user?.role ?? "student" };
       });
     if (userId) {
-      const index = participants.findIndex((p) => p.threadId === threadId && p.userId === userId);
-      if (index >= 0) {
-        participants[index] = { ...participants[index], lastReadAt: new Date().toISOString() };
-        writeJson(PARTICIPANT_FILE, participants);
-      }
+      await mutateJson<InboxParticipant[], void>(PARTICIPANT_FILE, [], (latestParticipants) => {
+        const index = latestParticipants.findIndex((p) => p.threadId === threadId && p.userId === userId);
+        if (index >= 0) {
+          latestParticipants[index] = { ...latestParticipants[index], lastReadAt: new Date().toISOString() };
+        }
+        return { result: undefined };
+      });
     }
     return { thread, participants: threadParticipants, messages: threadMessages };
   }
@@ -248,22 +250,29 @@ export async function createThread(input: {
   const allParticipants = Array.from(new Set([input.senderId, ...input.recipientIds]));
 
   if (!isDbEnabled()) {
-    const threads = readJson<InboxThread[]>(THREAD_FILE, []);
-    const participants = readJson<InboxParticipant[]>(PARTICIPANT_FILE, []);
-    const messages = readJson<InboxMessage[]>(MESSAGE_FILE, []);
-    threads.push({ id: threadId, subject: input.subject, createdAt: now, updatedAt: now });
-    allParticipants.forEach((userId) => {
-      participants.push({
-        id: `part-${crypto.randomBytes(6).toString("hex")}`,
-        threadId,
-        userId,
-        lastReadAt: userId === input.senderId ? now : undefined
-      });
-    });
-    messages.push({ id: messageId, threadId, senderId: input.senderId, content: input.content, createdAt: now });
-    writeJson(THREAD_FILE, threads);
-    writeJson(PARTICIPANT_FILE, participants);
-    writeJson(MESSAGE_FILE, messages);
+    await transactJsonFiles<{
+      threads: InboxThread[];
+      participants: InboxParticipant[];
+      messages: InboxMessage[];
+    }, void>(
+      {
+        threads: { fileName: THREAD_FILE, fallback: [] },
+        participants: { fileName: PARTICIPANT_FILE, fallback: [] },
+        messages: { fileName: MESSAGE_FILE, fallback: [] }
+      },
+      ({ threads, participants, messages }) => {
+        threads.push({ id: threadId, subject: input.subject, createdAt: now, updatedAt: now });
+        allParticipants.forEach((userId) => {
+          participants.push({
+            id: `part-${crypto.randomBytes(6).toString("hex")}`,
+            threadId,
+            userId,
+            lastReadAt: userId === input.senderId ? now : undefined
+          });
+        });
+        messages.push({ id: messageId, threadId, senderId: input.senderId, content: input.content, createdAt: now });
+      }
+    );
     return { threadId };
   }
 
@@ -297,23 +306,36 @@ export async function addMessage(input: { threadId: string; senderId: string; co
   const now = new Date().toISOString();
   const messageId = `msg-${crypto.randomBytes(6).toString("hex")}`;
   if (!isDbEnabled()) {
-    const threads = readJson<InboxThread[]>(THREAD_FILE, []);
-    const messages = readJson<InboxMessage[]>(MESSAGE_FILE, []);
-    const participants = readJson<InboxParticipant[]>(PARTICIPANT_FILE, []);
-    messages.push({ id: messageId, threadId: input.threadId, senderId: input.senderId, content: input.content, createdAt: now });
-    const threadIndex = threads.findIndex((t) => t.id === input.threadId);
-    if (threadIndex >= 0) {
-      threads[threadIndex] = { ...threads[threadIndex], updatedAt: now };
-    }
-    const participantIndex = participants.findIndex(
-      (p) => p.threadId === input.threadId && p.userId === input.senderId
+    await transactJsonFiles<{
+      threads: InboxThread[];
+      participants: InboxParticipant[];
+      messages: InboxMessage[];
+    }, void>(
+      {
+        threads: { fileName: THREAD_FILE, fallback: [] },
+        participants: { fileName: PARTICIPANT_FILE, fallback: [] },
+        messages: { fileName: MESSAGE_FILE, fallback: [] }
+      },
+      ({ threads, participants, messages }) => {
+        messages.push({
+          id: messageId,
+          threadId: input.threadId,
+          senderId: input.senderId,
+          content: input.content,
+          createdAt: now
+        });
+        const threadIndex = threads.findIndex((t) => t.id === input.threadId);
+        if (threadIndex >= 0) {
+          threads[threadIndex] = { ...threads[threadIndex], updatedAt: now };
+        }
+        const participantIndex = participants.findIndex(
+          (p) => p.threadId === input.threadId && p.userId === input.senderId
+        );
+        if (participantIndex >= 0) {
+          participants[participantIndex] = { ...participants[participantIndex], lastReadAt: now };
+        }
+      }
     );
-    if (participantIndex >= 0) {
-      participants[participantIndex] = { ...participants[participantIndex], lastReadAt: now };
-    }
-    writeJson(THREAD_FILE, threads);
-    writeJson(PARTICIPANT_FILE, participants);
-    writeJson(MESSAGE_FILE, messages);
     return { id: messageId };
   }
 

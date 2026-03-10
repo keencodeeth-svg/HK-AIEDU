@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { cookies } from "next/headers";
-import { readJson, writeJson } from "./storage";
+import { readJson, updateJson, writeJson } from "./storage";
 import { isDbEnabled, query, queryOne } from "./db";
 export { hashPassword, verifyPassword } from "./password";
 
@@ -95,9 +95,9 @@ export async function saveSessions(sessions: Session[]) {
 
 export async function createUser(user: User) {
   if (!isDbEnabled()) {
-    const users = await getUsers();
-    users.push(user);
-    await saveUsers(users);
+    await updateJson<User[]>(USER_FILE, [], (users) => {
+      users.push(user);
+    });
     return user;
   }
 
@@ -123,10 +123,11 @@ export async function createSession(user: User) {
   const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
   if (!isDbEnabled()) {
-    const sessions = await getSessions();
-    const nextSessions = sessions.filter((session) => session.userId !== user.id);
-    nextSessions.push({ id, userId: user.id, role: user.role, expiresAt });
-    await saveSessions(nextSessions);
+    await updateJson<Session[]>(SESSION_FILE, [], (sessions) => {
+      const nextSessions = sessions.filter((session) => session.userId !== user.id);
+      nextSessions.push({ id, userId: user.id, role: user.role, expiresAt });
+      return nextSessions;
+    });
     return { id, expiresAt };
   }
 
@@ -166,8 +167,9 @@ export async function getSessionByToken(token?: string | null) {
 
 export async function removeSession(token: string) {
   if (!isDbEnabled()) {
-    const sessions = await getSessions();
-    await saveSessions(sessions.filter((item) => item.id !== token));
+    await updateJson<Session[]>(SESSION_FILE, [], (sessions) =>
+      sessions.filter((item) => item.id !== token)
+    );
     return;
   }
   await query("DELETE FROM sessions WHERE id = $1", [token]);

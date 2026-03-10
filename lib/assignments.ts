@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { readJson, writeJson } from "./storage";
+import { readJson, transactJsonFiles, updateJson, writeJson } from "./storage";
 import { isDbEnabled, query, queryOne } from "./db";
 import { getClassStudentIds } from "./classes";
 
@@ -258,12 +258,8 @@ export async function upsertAssignmentSubmission(input: {
 }): Promise<AssignmentSubmission> {
   const submittedAt = new Date().toISOString();
   if (!isDbEnabled()) {
-    const list = readJson<AssignmentSubmission[]>(ASSIGNMENT_SUBMISSION_FILE, []);
-    const index = list.findIndex(
-      (item) => item.assignmentId === input.assignmentId && item.studentId === input.studentId
-    );
     const next: AssignmentSubmission = {
-      id: index >= 0 ? list[index].id : `assign-sub-${crypto.randomBytes(6).toString("hex")}`,
+      id: `assign-sub-${crypto.randomBytes(6).toString("hex")}`,
       assignmentId: input.assignmentId,
       studentId: input.studentId,
       answers: input.answers,
@@ -272,13 +268,21 @@ export async function upsertAssignmentSubmission(input: {
       submittedAt,
       submissionText: input.submissionText
     };
-    if (index >= 0) {
-      list[index] = next;
-    } else {
-      list.push(next);
-    }
-    writeJson(ASSIGNMENT_SUBMISSION_FILE, list);
-    return next;
+    return updateJson<AssignmentSubmission[]>(ASSIGNMENT_SUBMISSION_FILE, [], (list) => {
+      const index = list.findIndex(
+        (item) => item.assignmentId === input.assignmentId && item.studentId === input.studentId
+      );
+      if (index >= 0) {
+        next.id = list[index].id;
+        list[index] = next;
+      } else {
+        list.push(next);
+      }
+      return list;
+    }).then(
+      (list) =>
+        list.find((item) => item.assignmentId === input.assignmentId && item.studentId === input.studentId) ?? next
+    );
   }
 
   const id = `assign-sub-${crypto.randomBytes(6).toString("hex")}`;
@@ -355,9 +359,18 @@ export async function createAssignmentProgress(assignmentId: string, studentId: 
       studentId,
       status: "pending"
     };
-    list.push(next);
-    writeJson(ASSIGNMENT_PROGRESS_FILE, list);
-    return next;
+    return updateJson<AssignmentProgress[]>(ASSIGNMENT_PROGRESS_FILE, [], (current) => {
+      const alreadyExists = current.some(
+        (item) => item.assignmentId === assignmentId && item.studentId === studentId
+      );
+      if (!alreadyExists) {
+        current.push(next);
+      }
+      return current;
+    }).then(
+      (current) =>
+        current.find((item) => item.assignmentId === assignmentId && item.studentId === studentId) ?? next
+    );
   }
 
   const id = `assign-progress-${crypto.randomBytes(6).toString("hex")}`;
@@ -387,7 +400,6 @@ export async function createAssignment(input: {
   const maxUploads = Math.max(1, Math.min(input.maxUploads ?? 3, 10));
 
   if (!isDbEnabled()) {
-    const assignments = await getAssignments();
     const assignment: Assignment = {
       id: `assign-${crypto.randomBytes(6).toString("hex")}`,
       classId: input.classId,
@@ -400,18 +412,25 @@ export async function createAssignment(input: {
       maxUploads,
       gradingFocus: input.gradingFocus
     };
-    assignments.push(assignment);
-    writeJson(ASSIGNMENT_FILE, assignments);
-
-    const items = readJson<AssignmentItem[]>(ASSIGNMENT_ITEM_FILE, []);
-    uniqueQuestions.forEach((questionId) => {
-      items.push({
-        id: `assign-item-${crypto.randomBytes(6).toString("hex")}`,
-        assignmentId: assignment.id,
-        questionId
-      });
-    });
-    writeJson(ASSIGNMENT_ITEM_FILE, items);
+    await transactJsonFiles<{
+      assignments: Assignment[];
+      items: AssignmentItem[];
+    }, void>(
+      {
+        assignments: { fileName: ASSIGNMENT_FILE, fallback: [] },
+        items: { fileName: ASSIGNMENT_ITEM_FILE, fallback: [] }
+      },
+      ({ assignments, items }) => {
+        assignments.push(assignment);
+        uniqueQuestions.forEach((questionId) => {
+          items.push({
+            id: `assign-item-${crypto.randomBytes(6).toString("hex")}`,
+            assignmentId: assignment.id,
+            questionId
+          });
+        });
+      }
+    );
 
     const students = await getClassStudentIds(input.classId);
     // Pre-create per-student progress to make teacher dashboards immediately consistent.
@@ -481,12 +500,8 @@ export async function completeAssignmentProgress(input: {
   // Completion update is idempotent and can be safely retried after submission write.
 
   if (!isDbEnabled()) {
-    const list = readJson<AssignmentProgress[]>(ASSIGNMENT_PROGRESS_FILE, []);
-    const index = list.findIndex(
-      (item) => item.assignmentId === input.assignmentId && item.studentId === input.studentId
-    );
     const updated: AssignmentProgress = {
-      id: index >= 0 ? list[index].id : `assign-progress-${crypto.randomBytes(6).toString("hex")}`,
+      id: `assign-progress-${crypto.randomBytes(6).toString("hex")}`,
       assignmentId: input.assignmentId,
       studentId: input.studentId,
       status: "completed",
@@ -494,13 +509,21 @@ export async function completeAssignmentProgress(input: {
       score: input.score ?? undefined,
       total: input.total ?? undefined
     };
-    if (index >= 0) {
-      list[index] = updated;
-    } else {
-      list.push(updated);
-    }
-    writeJson(ASSIGNMENT_PROGRESS_FILE, list);
-    return updated;
+    return updateJson<AssignmentProgress[]>(ASSIGNMENT_PROGRESS_FILE, [], (list) => {
+      const index = list.findIndex(
+        (item) => item.assignmentId === input.assignmentId && item.studentId === input.studentId
+      );
+      if (index >= 0) {
+        updated.id = list[index].id;
+        list[index] = updated;
+      } else {
+        list.push(updated);
+      }
+      return list;
+    }).then(
+      (list) =>
+        list.find((item) => item.assignmentId === input.assignmentId && item.studentId === input.studentId) ?? updated
+    );
   }
 
   const existing = await getAssignmentProgressForStudent(input.assignmentId, input.studentId);

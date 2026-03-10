@@ -3,6 +3,16 @@ import assert from "node:assert/strict";
 export async function runLearningSuite(context) {
   const { apiFetch, state } = context;
   const { email, password } = state;
+  let observerCode = state.observerCode;
+
+  if (!observerCode) {
+    const studentProfile = await apiFetch("/api/student/profile");
+    assert.equal(studentProfile.status, 200, `GET /api/student/profile failed: ${studentProfile.raw}`);
+    observerCode = studentProfile.body?.data?.observerCode;
+    assert.equal(typeof observerCode, "string", "Student profile should expose observerCode");
+    assert.ok(observerCode, "Student observerCode should not be empty");
+    state.observerCode = observerCode;
+  }
 
   const invalidNotification = await apiFetch("/api/notifications", {
     method: "POST",
@@ -431,6 +441,10 @@ export async function runLearningSuite(context) {
 
   const parentCandidates = [
     {
+      email: state.parentEmail,
+      password: state.parentPassword
+    },
+    {
       email: process.env.API_TEST_PARENT_EMAIL || "parent@demo.com",
       password: process.env.API_TEST_PARENT_PASSWORD || "Parent123"
     },
@@ -438,7 +452,7 @@ export async function runLearningSuite(context) {
       email: process.env.API_TEST_PARENT_FALLBACK_EMAIL || "parent1@demo.com",
       password: process.env.API_TEST_PARENT_FALLBACK_PASSWORD || "Parent123"
     }
-  ];
+  ].filter((candidate) => candidate.email && candidate.password);
 
   let parentLogin = null;
   let parentAccount = null;
@@ -466,7 +480,7 @@ export async function runLearningSuite(context) {
         email: tempParentEmail,
         password: tempParentPassword,
         name: "API Test Parent",
-        studentEmail: email
+        observerCode
       }
     });
     assert.equal(registerParent.status, 201, `Parent register failed: ${registerParent.raw}`);
@@ -508,7 +522,7 @@ export async function runLearningSuite(context) {
         email: tutorShareParentEmail,
         password: tutorShareParentPassword,
         name: "API Tutor Share Parent",
-        studentEmail: email
+        observerCode
       }
     });
     assert.equal(
