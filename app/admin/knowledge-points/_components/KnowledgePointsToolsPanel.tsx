@@ -40,6 +40,7 @@ type Props = {
   onAiGenerate: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   form: KnowledgePointForm;
   setForm: Dispatch<SetStateAction<KnowledgePointForm>>;
+  formError: string | null;
   onCreate: (event: FormEvent<HTMLFormElement>) => Promise<void>;
 };
 
@@ -72,6 +73,7 @@ export default function KnowledgePointsToolsPanel({
   onAiGenerate,
   form,
   setForm,
+  formError,
   onCreate
 }: Props) {
   return (
@@ -452,6 +454,7 @@ export default function KnowledgePointsToolsPanel({
           <button className="button primary" type="submit">
             保存
           </button>
+          {formError ? <div style={{ marginTop: 8, color: "#b42318", fontSize: 13 }}>{formError}</div> : null}
         </form>
       </Card>
     </div>

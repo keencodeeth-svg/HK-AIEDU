@@ -253,8 +253,13 @@ export default function ParentPage() {
           : undefined
       }
     >
-
-      <RoleScheduleFocusCard variant="parent" />
+      <div className="section-head">
+        <div>
+          <h2>今晚先做什么</h2>
+          <div className="section-sub">先锁定今晚第一步和风险密度，再决定是否去看更完整的周报与分析。</div>
+        </div>
+        <span className="chip">Action-first</span>
+      </div>
 
       <div className="grid grid-2" style={{ alignItems: "start" }}>
         <ParentNextStepCard
@@ -279,6 +284,14 @@ export default function ParentPage() {
           dueSoonCorrectionCount={dueSoonTasks.length}
           favoritesCount={favorites.length}
         />
+      </div>
+
+      <div className="section-head">
+        <div>
+          <h2>今晚要跟进的任务</h2>
+          <div className="section-sub">把逾期、临近截止和行动卡放在一起看，避免家长在多个区域来回切换。</div>
+        </div>
+        <span className="chip">Tonight</span>
       </div>
 
       <div className="grid grid-2" style={{ alignItems: "start" }}>
@@ -314,6 +327,16 @@ export default function ParentPage() {
         </div>
       </div>
 
+      <div className="section-head">
+        <div>
+          <h2>补充判断</h2>
+          <div className="section-sub">今晚动作明确后，再看课表背景、本周建议和薄弱点，帮助陪伴更具体。</div>
+        </div>
+        <span className="chip">Context</span>
+      </div>
+
+      <RoleScheduleFocusCard variant="parent" />
+
       <div className="grid grid-2" style={{ alignItems: "start" }}>
         <div id="parent-weekly-report">
           <ParentWeeklyReportCard
@@ -328,6 +351,14 @@ export default function ParentPage() {
         <div id="parent-weak-points">
           <ParentWeakPointsCard report={report} />
         </div>
+      </div>
+
+      <div className="section-head">
+        <div>
+          <h2>低压力复盘</h2>
+          <div className="section-sub">没有硬性阻塞项时，再用收藏题做短复盘，而不是先把家长端看成报表页。</div>
+        </div>
+        <span className="chip">Review</span>
       </div>
 
       <div id="parent-favorites">

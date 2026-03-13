@@ -18,10 +18,17 @@ export default function TeacherRegisterPage() {
     setLoading(true);
     setError(null);
     try {
+      const payload = {
+        email,
+        name,
+        password,
+        schoolCode: schoolCode.trim() || undefined,
+        inviteCode: inviteCode.trim() || undefined
+      };
       const res = await fetch("/api/auth/teacher-register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, name, password, schoolCode, inviteCode })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (!res.ok) {
@@ -93,7 +100,7 @@ export default function TeacherRegisterPage() {
               placeholder="例如 HK-TEACH-2026（不区分大小写）"
             />
             <div className="form-note">
-              若后台配置了 TEACHER_INVITE_CODE(S)，则必须填写；支持多个邀请码。
+              默认需要邀请码；如后台配置了 TEACHER_INVITE_CODE(S)，支持多个邀请码。
             </div>
           </label>
           {error ? <div className="status-note error">{error}</div> : null}
@@ -102,7 +109,7 @@ export default function TeacherRegisterPage() {
           </button>
         </form>
         <div className="auth-footnote">
-          默认仅允许首位教师无需邀请码注册。配置了 TEACHER_INVITE_CODE(S) 后，必须提供邀请码。
+          默认必须填写邀请码。仅当服务端显式开启 `TEACHER_ALLOW_INITIAL_SELF_REGISTER=true` 且系统仍没有教师时，才允许首位教师无邀请码注册。
         </div>
         <div className="pill-list" style={{ marginTop: 10 }}>
           <span className="pill">AI 组卷</span>

@@ -4,9 +4,16 @@ node_modules/
 # Next.js
 .next/
 tsconfig.tsbuildinfo
+playwright-report/
+test-results/
 
 # Runtime app data (DATA_DIR)
 .runtime-data/
+data/admin-logs.json
+data/sessions.json
+
+# Generated exports
+exports/*.csv
 
 # Env
 .env

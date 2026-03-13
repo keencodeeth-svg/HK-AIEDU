@@ -107,7 +107,7 @@ export default function SchoolRegisterPage() {
               className="form-control"
               value={inviteCode}
               onChange={(event) => setInviteCode(event.target.value)}
-              placeholder="如果配置了 SCHOOL_ADMIN_INVITE_CODE(S) 则必填"
+              placeholder="如已配置 SCHOOL_ADMIN_INVITE_CODE(S)，请填写"
             />
           </label>
           {error ? <div className="status-note error">{error}</div> : null}
@@ -115,6 +115,9 @@ export default function SchoolRegisterPage() {
             {loading ? "提交中..." : "注册并登录"}
           </button>
         </form>
+        <div className="auth-footnote">
+          默认必须填写邀请码。仅当服务端显式开启 `SCHOOL_ADMIN_ALLOW_INITIAL_SELF_REGISTER=true` 且系统仍没有学校管理员时，才允许首位学校管理员无邀请码注册。
+        </div>
       </Card>
     </div>
   );

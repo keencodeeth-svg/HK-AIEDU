@@ -5,6 +5,7 @@ import { v } from "@/lib/api/validation";
 import { createAiRoute } from "@/lib/api/domains";
 
 const ANSWER_MODE_OPTIONS = ["answer_only", "step_by_step", "hints_first"] as const;
+const LEARNING_MODE_OPTIONS = ["direct", "study"] as const;
 const QUALITY_RISK_OPTIONS = ["low", "medium", "high"] as const;
 
 const qualitySchema = v.object<AiQualityMeta>(
@@ -23,6 +24,7 @@ const qualitySchema = v.object<AiQualityMeta>(
 const historyMetaSchema = v.object<AiHistoryMeta>(
   {
     origin: v.optional(v.enum(AI_HISTORY_ORIGINS)),
+    learningMode: v.optional(v.enum(LEARNING_MODE_OPTIONS)),
     subject: v.optional(v.string({ maxLength: 40 })),
     grade: v.optional(v.string({ maxLength: 20 })),
     answerMode: v.optional(v.enum(ANSWER_MODE_OPTIONS)),

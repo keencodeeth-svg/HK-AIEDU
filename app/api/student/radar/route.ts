@@ -1,6 +1,8 @@
+import { summarizeRecentStudyVariantAttempts } from "@/lib/ai-study-progress";
 import { getAbilityRadar } from "@/lib/portrait";
 import { getKnowledgePoints } from "@/lib/content";
 import { getMasteryRecordsByUser, getWeaknessRankMap } from "@/lib/mastery";
+import { getAttemptsByUser } from "@/lib/progress";
 import { unauthorized } from "@/lib/api/http";
 import { createLearningRoute } from "@/lib/api/domains";
 
@@ -14,9 +16,30 @@ export const GET = createLearningRoute({
 
     const abilities = await getAbilityRadar(user.id);
     const masteryRecords = await getMasteryRecordsByUser(user.id);
+    const attempts = await getAttemptsByUser(user.id);
     const knowledgePoints = await getKnowledgePoints();
     const kpMap = new Map(knowledgePoints.map((kp) => [kp.id, kp]));
     const weaknessRankMap = getWeaknessRankMap(masteryRecords);
+    const masteryMap = new Map(masteryRecords.map((item) => [item.knowledgePointId, item]));
+    const recentStudyVariantActivity = summarizeRecentStudyVariantAttempts({ attempts });
+    const recentStudyVariantCard = recentStudyVariantActivity
+      ? (() => {
+          const knowledgePoint = kpMap.get(recentStudyVariantActivity.latestKnowledgePointId);
+          const mastery = masteryMap.get(recentStudyVariantActivity.latestKnowledgePointId);
+          return {
+            recentAttemptCount: recentStudyVariantActivity.recentAttemptCount,
+            recentCorrectCount: recentStudyVariantActivity.recentCorrectCount,
+            latestAttemptAt: recentStudyVariantActivity.latestAttemptAt,
+            latestKnowledgePointId: recentStudyVariantActivity.latestKnowledgePointId,
+            latestKnowledgePointTitle: knowledgePoint?.title ?? recentStudyVariantActivity.latestKnowledgePointId,
+            latestSubject: recentStudyVariantActivity.latestSubject,
+            latestCorrect: recentStudyVariantActivity.latestCorrect,
+            masteryScore: mastery?.masteryScore ?? 0,
+            masteryLevel: mastery?.masteryLevel ?? "weak",
+            weaknessRank: weaknessRankMap.get(recentStudyVariantActivity.latestKnowledgePointId) ?? null
+          };
+        })()
+      : null;
 
     const weakKnowledgePoints = masteryRecords
       .map((item) => ({
@@ -86,7 +109,8 @@ export const GET = createLearningRoute({
           averageTrend7d,
           trackedKnowledgePoints: masteryRecords.length,
           weakKnowledgePoints,
-          subjects
+          subjects,
+          recentStudyVariantActivity: recentStudyVariantCard
         }
       }
     };

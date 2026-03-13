@@ -11,6 +11,20 @@ export async function runCoreAuthSuite(context) {
   assert.equal(health.status, 200, `GET /api/health failed: ${health.raw}`);
   assert.equal(health.body?.code, 0, "Health response should use standard envelope");
   assert.equal(health.body?.ok, true, "Health response should keep top-level ok=true");
+  assert.equal(health.body?.alive, true, "Health response should expose liveness state");
+  assert.equal(health.body?.mode, "liveness", "Health response should expose liveness mode");
+
+  const readiness = await apiFetch("/api/health/readiness", { useCookies: false });
+  assert.equal(readiness.status, 200, `GET /api/health/readiness failed: ${readiness.raw}`);
+  assert.equal(readiness.body?.code, 0, "Readiness response should use standard envelope");
+  assert.equal(readiness.body?.ok, true, "Readiness response should report ok=true in test runtime");
+  assert.equal(readiness.body?.ready, true, "Readiness response should report ready=true in test runtime");
+  assert.equal(readiness.body?.mode, "readiness", "Readiness response should expose mode=readiness");
+  assert.ok(Array.isArray(readiness.body?.data?.checks), "Readiness response should expose checks");
+  assert.ok(
+    readiness.body?.data?.checks?.some((item) => item.name === "runtimeGuardrails"),
+    "Readiness response should include runtime guardrails check"
+  );
 
   const passwordPolicy = await apiFetch("/api/auth/password-policy", { useCookies: false });
   assert.equal(passwordPolicy.status, 200, `GET /api/auth/password-policy failed: ${passwordPolicy.raw}`);
@@ -18,6 +32,35 @@ export async function runCoreAuthSuite(context) {
   assert.ok(passwordPolicy.body?.data?.policy, "Password policy should expose policy details");
   assert.ok(passwordPolicy.body?.hint, "Password policy response should expose top-level hint");
   assert.match(String(passwordPolicy.body?.hint ?? ""), /密码规则/, "Password policy hint should be human-readable");
+
+  const crossOriginRegister = await apiFetch("/api/auth/register", {
+    method: "POST",
+    useCookies: false,
+    headers: {
+      "x-test-origin": "https://evil.example"
+    },
+    json: {
+      role: "student",
+      email: createLocalTestEmail("api-test-cross-origin"),
+      password: "ApiTest123!",
+      name: "Cross Origin Student",
+      grade: "4"
+    }
+  });
+  assert.equal(crossOriginRegister.status, 403, "Cross-origin auth POST should be rejected");
+  assert.equal(crossOriginRegister.body?.error, "same-origin request required");
+
+  const unauthorizedAdminSelfRegister = await apiFetch("/api/auth/admin-register", {
+    method: "POST",
+    useCookies: false,
+    json: {
+      email: createLocalTestEmail("api-test-admin-register"),
+      password: "ApiTest123!",
+      name: "Admin Candidate"
+    }
+  });
+  assert.equal(unauthorizedAdminSelfRegister.status, 403, "Admin self-register should require invite by default");
+  assert.equal(unauthorizedAdminSelfRegister.body?.error, "invite code required");
 
   const invalidAnalytics = await apiFetch("/api/analytics/events", {
     method: "POST",
@@ -268,6 +311,35 @@ export async function runCoreAuthSuite(context) {
   );
   assert.match(String(duplicateRecoveryRequest.body?.message ?? ""), /相同恢复请求/, "Duplicate recovery request should acknowledge prior submission");
 
+  const recoveryRateLimitEmail = createLocalTestEmail("api-test-recovery-rate");
+  let recoveryRateLimited = null;
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    const response = await apiFetch("/api/auth/recovery-request", {
+      method: "POST",
+      useCookies: false,
+      json: {
+        role: "student",
+        email: recoveryRateLimitEmail,
+        issueType: "forgot_password",
+        name: "Recovery Rate Student",
+        note: `频控测试第 ${attempt} 次`
+      }
+    });
+    if (response.status === 429) {
+      recoveryRateLimited = response;
+      break;
+    }
+    assert.equal(response.status, 200, `Recovery rate-limit warmup should stay accepted before threshold: ${response.raw}`);
+  }
+  assert.ok(recoveryRateLimited, "Recovery requests should eventually hit the rate limit");
+  assert.equal(recoveryRateLimited.body?.error, "恢复请求提交过于频繁，请稍后再试");
+  assert.equal(recoveryRateLimited.body?.details?.limitedBy, "email", "Recovery rate limit should identify email scope");
+  assert.equal(typeof recoveryRateLimited.body?.details?.retryAt, "string", "Recovery rate limit should expose retryAt");
+  assert.ok(
+    Number(recoveryRateLimited.body?.details?.maxAttempts ?? 0) >= 2,
+    "Recovery rate limit should expose maxAttempts"
+  );
+
   const email = process.env.API_TEST_EMAIL || createLocalTestEmail("api-test-student");
   const password = process.env.API_TEST_PASSWORD || "ApiTest123!";
 
@@ -298,6 +370,19 @@ export async function runCoreAuthSuite(context) {
 
   assert.equal(login.status, 200, `Login failed: ${login.raw}`);
   assert.ok(cookieJar.has("mvp_session"), "Login should set mvp_session cookie");
+
+  const blockedCrossOriginLogout = await apiFetch("/api/auth/logout", {
+    method: "POST",
+    headers: {
+      "x-test-origin": "https://evil.example"
+    }
+  });
+  assert.equal(
+    blockedCrossOriginLogout.status,
+    403,
+    `Cross-origin logout should be rejected before mutating session state: ${blockedCrossOriginLogout.raw}`
+  );
+  assert.equal(blockedCrossOriginLogout.body?.error, "same-origin request required");
 
   const studentProfile = await apiFetch("/api/student/profile");
   assert.equal(studentProfile.status, 200, `GET /api/student/profile failed: ${studentProfile.raw}`);

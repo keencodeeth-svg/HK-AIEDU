@@ -12,6 +12,8 @@ export type DomainRouteConfig<
   TUser extends CurrentUser
 > = {
   role?: UserRole | UserRole[];
+  sameOrigin?: "auto" | "always" | "off";
+  runtimeGuardrails?: "auto" | "off";
   params?: Validator<TParams>;
   query?: Validator<TQuery>;
   body?: Validator<TBody>;

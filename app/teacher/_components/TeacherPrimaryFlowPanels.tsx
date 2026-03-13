@@ -219,7 +219,7 @@ export function TeacherNextStepCard(props: TeacherPrimaryFlowPanelsProps) {
   const meta = ACTION_TONE_META[primaryAction.tone];
 
   return (
-    <Card title="默认下一步" tag={primaryAction.badgeLabel}>
+    <Card title="现在最值得先做" tag={primaryAction.badgeLabel}>
       <div className="grid" style={{ gap: 12 }}>
         <div className="feature-card" style={{ alignItems: "flex-start" }}>
           <EduIcon name="rocket" />
@@ -303,27 +303,46 @@ export function TeacherExecutionSummaryCard({ classes, assignments, joinRequests
   const totalStudents = insights?.summary.students ?? classes.reduce((sum, item) => sum + item.studentCount, 0);
 
   let focusMessage = "当前没有明显阻塞项，适合把时间投到学情复盘、排座和测验准备。";
+  let budgetHeadline = "今天的教学盘面相对平稳";
+  let budgetMeta = `班级 ${classes.length} 个 · 学生 ${totalStudents} 人`;
   if (!classes.length) {
     focusMessage = "先创建班级，后面的学生加入、作业发布、分析和排座都依赖它。";
+    budgetHeadline = "先搭起班级结构";
+    budgetMeta = "没有班级时，其他教学动作都无法闭环";
   } else if (pendingJoinRequests.length) {
     focusMessage = "今天最该先清掉待审核的入班申请，避免新学生掉出教学闭环。";
+    budgetHeadline = `当前有 ${pendingJoinRequests.length} 条入班阻塞`;
+    budgetMeta = "这组阻塞会直接影响学生能否收到任务与提醒";
   } else if (activeAlerts.length) {
     focusMessage = "预警还在激活中，建议先处理风险学生和薄弱知识点，再回头做常规发布。";
+    budgetHeadline = `先处理 ${activeAlerts.length} 条活跃预警`;
+    budgetMeta = `其中高风险学生 ${highRiskStudents.length} 人`;
   } else if (classesMissingAssignments.length) {
     focusMessage = "已有班级还没形成作业闭环，适合先补齐一版任务，让分析和成绩数据动起来。";
+    budgetHeadline = `有 ${classesMissingAssignments.length} 个班级还没形成作业闭环`;
+    budgetMeta = "先补齐任务，再谈成绩和学情";
   } else if (dueSoonAssignments.length) {
     focusMessage = "临近截止的作业值得先收口，避免明天出现一批逾期和补交。";
+    budgetHeadline = `48 小时内有 ${dueSoonAssignments.length} 份作业临近截止`;
+    budgetMeta = `待跟进作业 ${assignmentsInProgress.length} 份`;
   }
 
   return (
-    <Card title="执行摘要" tag="Today">
+    <Card title="风险与覆盖" tag="Coverage">
       <div className="grid" style={{ gap: 12 }}>
         <div className="feature-card" style={{ alignItems: "flex-start" }}>
           <EduIcon name="chart" />
           <div>
-            <div className="section-title">今天先盯住会打断教学节奏的点</div>
+            <div className="section-title">{budgetHeadline}</div>
             <p style={{ marginTop: 6, lineHeight: 1.7 }}>{focusMessage}</p>
           </div>
+        </div>
+
+        <div className="badge-row" style={{ marginTop: 0 }}>
+          <span className="badge">{budgetMeta}</span>
+          <span className="badge">待审申请 {pendingJoinRequests.length}</span>
+          <span className="badge">活跃预警 {activeAlerts.length}</span>
+          <span className="badge">待跟进作业 {assignmentsInProgress.length}</span>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
@@ -347,6 +366,10 @@ export function TeacherExecutionSummaryCard({ classes, assignments, joinRequests
             <div style={{ fontSize: 24, fontWeight: 700, marginTop: 6 }}>{classes.length}</div>
             <div className="meta-text" style={{ marginTop: 6 }}>学生 {totalStudents} 人 · 未布置作业班级 {classesMissingAssignments.length}</div>
           </div>
+        </div>
+
+        <div className="meta-text" style={{ lineHeight: 1.7 }}>
+          这张卡只负责帮你看清今天的风险密度和班级覆盖面。真正开工时，优先跟着左侧“现在最值得先做”和上面的教学闭环走，不需要在首页重新排一遍顺序。
         </div>
 
         <div className="cta-row" style={{ flexWrap: "wrap" }}>

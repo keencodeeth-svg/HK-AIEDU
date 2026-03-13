@@ -11,6 +11,7 @@ import {
   evaluateAndUpsertQuestionQuality
 } from "@/lib/question-quality";
 import { addAdminLog } from "@/lib/admin-log";
+import { assertAdminStepUp } from "@/lib/admin-step-up";
 import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 import {
@@ -171,6 +172,7 @@ export const POST = createAdminRoute({
     if (!user) {
       unauthorized();
     }
+    assertAdminStepUp(user);
 
     const body = await parseJson(request, bodySchema);
     const textbooks = body.textbooks ?? [];

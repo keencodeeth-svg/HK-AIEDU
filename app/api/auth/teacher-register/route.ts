@@ -8,6 +8,7 @@ import {
   setSessionCookie
 } from "@/lib/auth";
 import { validatePasswordPolicy } from "@/lib/password";
+import { decideSelfRegisterAccess, isInitialSelfRegisterEnabled } from "@/lib/self-register-policy";
 import { resolveSchoolIdByCodeOrDefault } from "@/lib/schools";
 import { apiSuccess, badRequest, conflict, forbidden } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
@@ -45,26 +46,14 @@ export const POST = createAuthRoute({
     const expectedInvite = process.env.TEACHER_INVITE_CODE?.trim();
     const inviteList = process.env.TEACHER_INVITE_CODES?.trim();
     const teacherCount = await getTeacherCount();
-    const allowWithoutInvite = !expectedInvite && teacherCount === 0;
-
-    const normalize = (code?: string) => (code ?? "").replace(/[^a-z0-9]/gi, "").toUpperCase();
-    const normalizedInput = normalize(body.inviteCode);
-    const allowed = new Set(
-      [expectedInvite, ...(inviteList ? inviteList.split(/[,;\s]+/) : [])]
-        .map((item) => normalize(item))
-        .filter(Boolean)
-    );
-    const requireInvite = allowed.size > 0;
-
-    if (requireInvite) {
-      if (!normalizedInput) {
-        forbidden("invite code required");
-      }
-      if (!allowed.has(normalizedInput)) {
-        forbidden("invalid invite code");
-      }
-    } else if (!allowWithoutInvite) {
-      forbidden("invite code required");
+    const decision = decideSelfRegisterAccess({
+      existingCount: teacherCount,
+      inputInviteCode: body.inviteCode,
+      configuredInviteCodes: [expectedInvite, ...(inviteList ? inviteList.split(/[,;\s]+/) : [])],
+      bootstrapEnabled: isInitialSelfRegisterEnabled(process.env.TEACHER_ALLOW_INITIAL_SELF_REGISTER)
+    });
+    if (!decision.accepted) {
+      forbidden(decision.error ?? "invite code required");
     }
 
     const existing = await getUserByEmail(body.email);

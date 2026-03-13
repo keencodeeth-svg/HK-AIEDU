@@ -22,6 +22,7 @@ type Props = {
   form: QuestionForm;
   setForm: Dispatch<SetStateAction<QuestionForm>>;
   knowledgePoints: KnowledgePoint[];
+  createError: string | null;
   onCreate: (event: FormEvent<HTMLFormElement>) => Promise<void>;
 };
 
@@ -41,6 +42,7 @@ export default function QuestionsToolsPanel({
   form,
   setForm,
   knowledgePoints,
+  createError,
   onCreate
 }: Props) {
   const previewOptions = form.options
@@ -356,6 +358,7 @@ export default function QuestionsToolsPanel({
               <button className="button primary" type="submit">
                 保存
               </button>
+              {createError ? <div className="status-note error questions-tools-message">{createError}</div> : null}
             </form>
           </div>
         </details>

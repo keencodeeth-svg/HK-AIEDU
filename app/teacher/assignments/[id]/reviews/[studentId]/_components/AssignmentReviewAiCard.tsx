@@ -5,6 +5,7 @@ type AssignmentReviewAiCardProps = {
   aiLoading: boolean;
   canAiReview: boolean;
   aiReview: TeacherAssignmentAiReviewResult | null;
+  error?: string | null;
   onGenerate: () => void;
 };
 
@@ -12,6 +13,7 @@ export default function AssignmentReviewAiCard({
   aiLoading,
   canAiReview,
   aiReview,
+  error,
   onGenerate
 }: AssignmentReviewAiCardProps) {
   return (
@@ -22,6 +24,7 @@ export default function AssignmentReviewAiCard({
         </button>
       </div>
       {!canAiReview ? <p style={{ marginTop: 8, color: "var(--ink-1)" }}>学生尚未提交作业内容。</p> : null}
+      {error ? <p style={{ marginTop: 8, color: "#b42318" }}>{error}</p> : null}
       {aiReview ? (
         <div className="grid" style={{ gap: 10, marginTop: 12 }}>
           <div className="card">

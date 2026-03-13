@@ -1,88 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
 import StatePanel from "@/components/StatePanel";
-import { formatLoadedTime, requestJson, type RequestError } from "@/lib/client-request";
+import {
+  formatLoadedTime,
+  getRequestErrorMessage,
+  isAuthError,
+  requestJson
+} from "@/lib/client-request";
 import { SUBJECT_LABELS } from "@/lib/constants";
-
-type ClassItem = { id: string; name: string; subject: string; grade: string };
-type RuleItem = {
-  id: string;
-  classId: string;
-  enabled: boolean;
-  dueDays: number;
-  overdueDays: number;
-  includeParents: boolean;
-};
-
-type PreviewAssignment = {
-  assignmentId: string;
-  title: string;
-  dueDate: string;
-  stage: "due_soon" | "overdue";
-  studentTargets: number;
-  parentTargets: number;
-};
-
-type PreviewData = {
-  generatedAt: string;
-  class: ClassItem;
-  rule: RuleItem;
-  summary: {
-    enabled: boolean;
-    assignmentTargets: number;
-    dueSoonAssignments: number;
-    overdueAssignments: number;
-    studentTargets: number;
-    parentTargets: number;
-    uniqueStudents: number;
-  };
-  sampleAssignments: PreviewAssignment[];
-};
-
-type HistoryItem = {
-  id: string;
-  executedAt: string;
-  totals: {
-    classes: number;
-    assignmentTargets: number;
-    dueSoonAssignments: number;
-    overdueAssignments: number;
-    studentTargets: number;
-    parentTargets: number;
-    uniqueStudents: number;
-  };
-  classResults: Array<{
-    classId: string;
-    className: string;
-    subject: string;
-    grade: string;
-    rule: RuleItem;
-    assignmentTargets: number;
-    dueSoonAssignments: number;
-    overdueAssignments: number;
-    studentTargets: number;
-    parentTargets: number;
-    uniqueStudents: number;
-    sampleAssignments: PreviewAssignment[];
-  }>;
-};
-
-type HistoryResponse = {
-  data?: HistoryItem[];
-  summary?: {
-    totalRuns?: number;
-    lastRunAt?: string | null;
-    studentTargets?: number;
-    parentTargets?: number;
-    assignmentTargets?: number;
-  };
-};
-
-type RuleResponse = { classes?: ClassItem[]; rules?: RuleItem[] };
+import NotificationExecutionLoopCard from "./_components/NotificationExecutionLoopCard";
+import type {
+  ClassItem,
+  HistoryItem,
+  HistoryResponse,
+  PreviewAssignment,
+  PreviewData,
+  RuleItem,
+  RuleResponse
+} from "./types";
 
 const DEFAULT_RULE = {
   enabled: true,
@@ -116,16 +55,81 @@ function getStageLabel(stage: PreviewAssignment["stage"]) {
   return stage === "overdue" ? "已逾期" : "即将到期";
 }
 
+function getStageDescription(stage: PreviewAssignment["stage"]) {
+  return stage === "overdue" ? "优先催交，避免继续堆积未完成。"
+    : "适合做截止前提醒，减少下一轮逾期。";
+}
+
+function getRuleWindowLabel(rule: RuleItem) {
+  return `截止前 ${rule.dueDays} 天 · 逾期 ${rule.overdueDays} 天 · 家长抄送 ${rule.includeParents ? "开启" : "关闭"}`;
+}
+
+function getSelectedClassLabel(selectedClass: ClassItem | null) {
+  if (!selectedClass) return "未选择班级";
+  return `${selectedClass.name} · ${SUBJECT_LABELS[selectedClass.subject] ?? selectedClass.subject} · ${selectedClass.grade} 年级`;
+}
+
+function getCommandState(params: {
+  draftRule: RuleItem;
+  preview: PreviewData | null;
+  hasUnsavedChanges: boolean;
+  isPreviewCurrent: boolean;
+}) {
+  if (!params.draftRule.enabled) {
+    return {
+      tone: "info" as const,
+      title: "当前规则关闭",
+      description: "关闭状态下不会发送任何提醒。先确认今天是否真的要开启这条催交流程。"
+    };
+  }
+  if (!params.isPreviewCurrent) {
+    return {
+      tone: "info" as const,
+      title: "草稿已变更，请先刷新预览",
+      description: "发送动作会基于当前草稿执行。先刷新预览，确认最新规则到底会触达谁，再决定是否立即发送。"
+    };
+  }
+  if (!params.preview) {
+    return {
+      tone: "loading" as const,
+      title: "预览准备中",
+      description: "正在同步当前班级的提醒范围。"
+    };
+  }
+  if (!params.preview.summary.assignmentTargets) {
+    return {
+      tone: "empty" as const,
+      title: "当前没有待发提醒",
+      description: "这套规则现在不会触发任何提醒。可以放宽阈值，或把注意力转到提交箱和成绩册。"
+    };
+  }
+  if (params.preview.summary.overdueAssignments > 0) {
+    return {
+      tone: "info" as const,
+      title: "当前更适合先发逾期催交",
+      description: `已逾期 ${params.preview.summary.overdueAssignments} 份作业，建议先看逾期队列，再决定是否立即发送。`
+    };
+  }
+  return {
+    tone: params.hasUnsavedChanges ? ("info" as const) : ("success" as const),
+    title: params.hasUnsavedChanges ? "草稿已准备好，但还未保存为默认规则" : "当前规则已经准备好执行",
+    description: `当前预览会覆盖 ${params.preview.summary.assignmentTargets} 份作业、${params.preview.summary.uniqueStudents} 名学生。`
+  };
+}
+
 export default function TeacherNotificationRulesPage() {
+  const classIdRef = useRef("");
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [savedRules, setSavedRules] = useState<RuleItem[]>([]);
   const [classId, setClassId] = useState("");
   const [draftRule, setDraftRule] = useState<RuleItem>({ id: "", classId: "", ...DEFAULT_RULE });
   const [preview, setPreview] = useState<PreviewData | null>(null);
+  const [previewRuleSnapshot, setPreviewRuleSnapshot] = useState<RuleItem | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [historySummary, setHistorySummary] = useState<HistoryResponse["summary"] | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -138,7 +142,8 @@ export default function TeacherNotificationRulesPage() {
   const loadPreview = useCallback(async (nextRule: RuleItem, silent = false) => {
     if (!nextRule.classId) {
       setPreview(null);
-      return;
+      setPreviewRuleSnapshot(null);
+      return null;
     }
     if (!silent) {
       setPreviewing(true);
@@ -155,7 +160,10 @@ export default function TeacherNotificationRulesPage() {
           includeParents: nextRule.includeParents
         })
       });
-      setPreview(payload.data ?? null);
+      const nextPreview = payload.data ?? null;
+      setPreview(nextPreview);
+      setPreviewRuleSnapshot(nextPreview?.rule ?? nextRule);
+      return nextPreview;
     } finally {
       if (!silent) {
         setPreviewing(false);
@@ -167,15 +175,19 @@ export default function TeacherNotificationRulesPage() {
     if (!nextClassId) {
       setHistory([]);
       setHistorySummary(null);
-      return;
+      return [] as HistoryItem[];
     }
     if (!silent) {
       setHistoryLoading(true);
     }
     try {
-      const payload = await requestJson<HistoryResponse>(`/api/teacher/notifications/history?classId=${encodeURIComponent(nextClassId)}&limit=8`);
-      setHistory(payload.data ?? []);
+      const payload = await requestJson<HistoryResponse>(
+        `/api/teacher/notifications/history?classId=${encodeURIComponent(nextClassId)}&limit=8`
+      );
+      const nextHistory = payload.data ?? [];
+      setHistory(nextHistory);
       setHistorySummary(payload.summary ?? null);
+      return nextHistory;
     } finally {
       if (!silent) {
         setHistoryLoading(false);
@@ -190,43 +202,50 @@ export default function TeacherNotificationRulesPage() {
       } else {
         setLoading(true);
       }
-      setError(null);
+      setLoadError(null);
 
       try {
         const payload = await requestJson<RuleResponse>("/api/teacher/notifications/rules");
         const nextClasses = payload.classes ?? [];
         const nextRules = payload.rules ?? [];
+        const currentClassId = classIdRef.current;
         const nextClassId =
-          classId && nextClasses.some((item) => item.id === classId) ? classId : nextClasses[0]?.id ?? "";
+          currentClassId && nextClasses.some((item) => item.id === currentClassId) ? currentClassId : nextClasses[0]?.id ?? "";
         const nextDraft = buildDraftRule(nextClassId, nextRules);
 
         setAuthRequired(false);
         setClasses(nextClasses);
         setSavedRules(nextRules);
+        classIdRef.current = nextClassId;
         setClassId(nextClassId);
         setDraftRule(nextDraft);
         setLastLoadedAt(new Date().toISOString());
 
         await Promise.all([loadPreview(nextDraft, true), loadHistory(nextClassId, true)]);
       } catch (nextError) {
-        const requestError = nextError as RequestError;
-        if (requestError.status === 401) {
+        if (isAuthError(nextError)) {
           setAuthRequired(true);
+          classIdRef.current = "";
           setClasses([]);
           setSavedRules([]);
           setPreview(null);
+          setPreviewRuleSnapshot(null);
           setHistory([]);
           setHistorySummary(null);
         } else {
-          setError(requestError.message || "加载失败");
+          setLoadError(getRequestErrorMessage(nextError, "加载失败"));
         }
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [classId, loadHistory, loadPreview]
+    [loadHistory, loadPreview]
   );
+
+  useEffect(() => {
+    classIdRef.current = classId;
+  }, [classId]);
 
   useEffect(() => {
     void load();
@@ -235,11 +254,26 @@ export default function TeacherNotificationRulesPage() {
   const selectedClass = classes.find((item) => item.id === classId) ?? null;
   const savedRuleForClass = useMemo(() => buildDraftRule(classId, savedRules), [classId, savedRules]);
   const hasUnsavedChanges = classId ? !isSameRule(draftRule, savedRuleForClass) : false;
+  const isPreviewCurrent = classId ? Boolean(previewRuleSnapshot && isSameRule(previewRuleSnapshot, draftRule)) : false;
   const configuredRuleCount = savedRules.length;
   const enabledRuleCount = savedRules.filter((item) => item.enabled).length;
   const latestHistory = history[0] ?? null;
+  const latestClassResult = latestHistory?.classResults.find((entry) => entry.classId === classId) ?? latestHistory?.classResults[0] ?? null;
+  const overdueAssignments = useMemo(
+    () => preview?.sampleAssignments.filter((item) => item.stage === "overdue") ?? [],
+    [preview?.sampleAssignments]
+  );
+  const dueSoonAssignments = useMemo(
+    () => preview?.sampleAssignments.filter((item) => item.stage === "due_soon") ?? [],
+    [preview?.sampleAssignments]
+  );
+  const commandState = getCommandState({ draftRule, preview, hasUnsavedChanges, isPreviewCurrent });
+  const previewTargetDelta =
+    latestClassResult && preview ? preview.summary.studentTargets - latestClassResult.studentTargets : null;
 
   function updateDraft(patch: Partial<RuleItem>) {
+    setMessage(null);
+    setActionError(null);
     setDraftRule((prev) => ({
       ...prev,
       ...patch,
@@ -248,19 +282,29 @@ export default function TeacherNotificationRulesPage() {
   }
 
   async function handleClassChange(nextClassId: string) {
+    classIdRef.current = nextClassId;
     setClassId(nextClassId);
     setMessage(null);
-    setError(null);
+    setActionError(null);
     const nextDraft = buildDraftRule(nextClassId, savedRules);
     setDraftRule(nextDraft);
-    await Promise.all([loadPreview(nextDraft, true), loadHistory(nextClassId, true)]);
+    setPreview(null);
+    setPreviewRuleSnapshot(null);
+    setHistory([]);
+    setHistorySummary(null);
+
+    try {
+      await Promise.all([loadPreview(nextDraft), loadHistory(nextClassId)]);
+    } catch (nextError) {
+      setActionError(getRequestErrorMessage(nextError, "提醒上下文切换失败"));
+    }
   }
 
   async function handleSave() {
     if (!classId) return;
     setSaving(true);
     setMessage(null);
-    setError(null);
+    setActionError(null);
     try {
       const payload = await requestJson<{ data?: RuleItem }>("/api/teacher/notifications/rules", {
         method: "POST",
@@ -286,11 +330,10 @@ export default function TeacherNotificationRulesPage() {
         });
         setDraftRule(savedRule);
       }
-      setMessage("通知规则已保存，后续运行将默认使用该配置。");
+      setMessage("通知规则已保存，后续运行将默认使用这套配置。");
       await loadPreview(savedRule ?? draftRule, true);
     } catch (nextError) {
-      const requestError = nextError as RequestError;
-      setError(requestError.message || "保存失败");
+      setActionError(getRequestErrorMessage(nextError, "保存失败"));
     } finally {
       setSaving(false);
     }
@@ -299,53 +342,66 @@ export default function TeacherNotificationRulesPage() {
   async function handlePreview() {
     if (!classId) return;
     setMessage(null);
-    setError(null);
+    setActionError(null);
     try {
       await loadPreview(draftRule);
     } catch (nextError) {
-      const requestError = nextError as RequestError;
-      setError(requestError.message || "预览失败");
+      setActionError(getRequestErrorMessage(nextError, "预览失败"));
     }
   }
 
   async function handleRun() {
     if (!classId) return;
+    if (!isPreviewCurrent) {
+      setActionError("请先刷新预览，确认最新草稿会触达谁，再发送提醒。");
+      return;
+    }
     setRunning(true);
     setMessage(null);
-    setError(null);
+    setActionError(null);
     try {
-      const payload = await requestJson<{ data?: { students?: number; parents?: number; assignments?: number } }>(
-        "/api/teacher/notifications/run",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            classId,
-            enabled: draftRule.enabled,
-            dueDays: draftRule.dueDays,
-            overdueDays: draftRule.overdueDays,
-            includeParents: draftRule.includeParents
-          })
-        }
-      );
+      const payload = await requestJson<{
+        data?: {
+          students?: number;
+          parents?: number;
+          assignments?: number;
+          dueSoonAssignments?: number;
+          overdueAssignments?: number;
+        };
+      }>("/api/teacher/notifications/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          classId,
+          enabled: draftRule.enabled,
+          dueDays: draftRule.dueDays,
+          overdueDays: draftRule.overdueDays,
+          includeParents: draftRule.includeParents
+        })
+      });
       setMessage(
-        `已发送提醒：学生 ${payload.data?.students ?? 0} 条，家长 ${payload.data?.parents ?? 0} 条，覆盖作业 ${payload.data?.assignments ?? 0} 份。`
+        `已发送提醒：学生 ${payload.data?.students ?? 0} 条，家长 ${payload.data?.parents ?? 0} 条，覆盖作业 ${
+          payload.data?.assignments ?? 0
+        } 份。`
       );
       await Promise.all([loadPreview(draftRule, true), loadHistory(classId, true)]);
     } catch (nextError) {
-      const requestError = nextError as RequestError;
-      setError(requestError.message || "发送失败");
+      setActionError(getRequestErrorMessage(nextError, "发送失败"));
     } finally {
       setRunning(false);
     }
   }
 
-  function handleReset() {
+  async function handleReset() {
     const nextDraft = buildDraftRule(classId, savedRules);
     setDraftRule(nextDraft);
     setMessage(null);
-    setError(null);
-    void loadPreview(nextDraft, true);
+    setActionError(null);
+    try {
+      await loadPreview(nextDraft);
+    } catch (nextError) {
+      setActionError(getRequestErrorMessage(nextError, "预览同步失败"));
+    }
   }
 
   if (loading && !classes.length && !authRequired) {
@@ -373,12 +429,12 @@ export default function TeacherNotificationRulesPage() {
     );
   }
 
-  if (error && !classes.length) {
+  if (loadError && !classes.length) {
     return (
       <StatePanel
         tone="error"
         title="通知规则暂时不可用"
-        description={error}
+        description={loadError}
         action={
           <button className="button secondary" type="button" onClick={() => void load("refresh")}>
             重新加载
@@ -403,12 +459,16 @@ export default function TeacherNotificationRulesPage() {
       <div className="section-head">
         <div>
           <h2>通知规则</h2>
-          <div className="section-sub">设置截止前/逾期提醒、家长抄送，并通过预览和执行历史形成完整闭环。</div>
+          <div className="section-sub">把提醒阈值、发送预览、历史复盘和后续验收串成一条完整催交链路。</div>
         </div>
         <div className="workflow-toolbar">
           <span className="chip">教师端</span>
+          <span className="chip">{getSelectedClassLabel(selectedClass)}</span>
           <span className="chip">已配置规则 {configuredRuleCount}</span>
           <span className="chip">启用中 {enabledRuleCount}</span>
+          {preview?.summary.assignmentTargets ? (
+            <span className="chip">当前待发 {preview.summary.assignmentTargets} 份作业</span>
+          ) : null}
           {lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(lastLoadedAt)}</span> : null}
           <button
             className="button secondary"
@@ -421,12 +481,20 @@ export default function TeacherNotificationRulesPage() {
         </div>
       </div>
 
-      {error ? (
+      <NotificationExecutionLoopCard
+        selectedClass={selectedClass}
+        draftRule={draftRule}
+        preview={preview}
+        latestHistory={latestHistory}
+        hasUnsavedChanges={hasUnsavedChanges}
+      />
+
+      {loadError ? (
         <StatePanel
           compact
           tone="error"
           title="已展示最近一次成功数据"
-          description={`最新操作失败：${error}`}
+          description={`最新刷新失败：${loadError}`}
           action={
             <button className="button secondary" type="button" onClick={() => void load("refresh")}>
               再试一次
@@ -435,261 +503,366 @@ export default function TeacherNotificationRulesPage() {
         />
       ) : null}
 
-      {hasUnsavedChanges ? (
+      {actionError ? (
+        <StatePanel compact tone="error" title="本次操作失败" description={actionError} />
+      ) : null}
+
+      {message ? <StatePanel compact tone="success" title="执行成功" description={message} /> : null}
+
+      {!isPreviewCurrent && classId ? (
         <StatePanel
           compact
           tone="info"
-          title="当前有未保存修改"
-          description="发送预览和立即发送会基于当前表单配置执行；保存规则后可将该配置作为班级默认策略。"
+          title="当前草稿尚未刷新到预览"
+          description="你已经修改了提醒窗口或家长抄送设置。先刷新预览，确认最新草稿会覆盖哪些作业和学生，再决定是否发送。"
         />
       ) : null}
 
-      <Card title="规则概览" tag="概览">
-        <div className="grid grid-2">
-          <div className="workflow-summary-card">
-            <div className="workflow-summary-label">班级数</div>
-            <div className="workflow-summary-value">{classes.length}</div>
-            <div className="workflow-summary-helper">当前教师可管理的班级范围</div>
+      <div className="teacher-notification-top-grid">
+        <Card title="规则与执行区" tag="Config">
+          <div className="feature-card">
+            <EduIcon name="board" />
+            <p>先选班级和提醒窗口，再刷新预览核对触达范围；保存解决默认策略，立即发送解决今天这一轮催交。</p>
           </div>
-          <div className="workflow-summary-card">
-            <div className="workflow-summary-label">启用规则</div>
-            <div className="workflow-summary-value">{enabledRuleCount}</div>
-            <div className="workflow-summary-helper">已保存且当前开启的班级提醒规则</div>
+
+          <div className="teacher-notification-rule-grid" id="teacher-notification-config">
+            <label>
+              <div className="section-title">选择班级</div>
+              <select value={classId} onChange={(event) => void handleClassChange(event.target.value)} style={{ width: "100%" }}>
+                {classes.map((klass) => (
+                  <option key={klass.id} value={klass.id}>
+                    {klass.name} · {SUBJECT_LABELS[klass.subject] ?? klass.subject} · {klass.grade} 年级
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <div className="section-title">提醒开关</div>
+              <select
+                value={draftRule.enabled ? "on" : "off"}
+                onChange={(event) => updateDraft({ enabled: event.target.value === "on" })}
+                style={{ width: "100%" }}
+              >
+                <option value="on">开启</option>
+                <option value="off">关闭</option>
+              </select>
+            </label>
+
+            <label>
+              <div className="section-title">截止前提醒（天）</div>
+              <input
+                className="workflow-search-input"
+                type="number"
+                min={0}
+                value={draftRule.dueDays}
+                onChange={(event) => updateDraft({ dueDays: Number(event.target.value || 0) })}
+              />
+            </label>
+
+            <label>
+              <div className="section-title">逾期提醒（天）</div>
+              <input
+                className="workflow-search-input"
+                type="number"
+                min={0}
+                value={draftRule.overdueDays}
+                onChange={(event) => updateDraft({ overdueDays: Number(event.target.value || 0) })}
+              />
+            </label>
+
+            <label className="teacher-notification-checkbox">
+              <input
+                type="checkbox"
+                checked={draftRule.includeParents}
+                onChange={(event) => updateDraft({ includeParents: event.target.checked })}
+              />
+              <span>抄送家长</span>
+            </label>
           </div>
-          <div className="workflow-summary-card">
-            <div className="workflow-summary-label">预估学生提醒</div>
-            <div className="workflow-summary-value">{preview?.summary.studentTargets ?? 0}</div>
-            <div className="workflow-summary-helper">当前表单配置预计发送给学生的提醒条数</div>
+
+          <div className="workflow-card-meta">
+            <span className="pill">{getSelectedClassLabel(selectedClass)}</span>
+            <span className="pill">当前草稿 {draftRule.enabled ? "已开启" : "已关闭"}</span>
+            <span className="pill">{getRuleWindowLabel(draftRule)}</span>
           </div>
-          <div className="workflow-summary-card">
-            <div className="workflow-summary-label">最近执行</div>
-            <div className="workflow-summary-value">{historySummary?.totalRuns ?? 0}</div>
-            <div className="workflow-summary-helper">
-              {historySummary?.lastRunAt ? `最近于 ${formatLoadedTime(historySummary.lastRunAt)}` : "当前班级还没有执行历史"}
+
+          <div className="meta-text" style={{ marginTop: 12 }}>
+            当前班级的默认规则是持久配置，但“立即发送提醒”始终会按当前草稿执行。先预览，再决定是只处理今天，还是顺便把默认策略也更新掉。
+          </div>
+
+          <div className="cta-row" id="teacher-notification-actions" style={{ marginTop: 12 }}>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() => void handleReset()}
+              disabled={!hasUnsavedChanges || saving || running || previewing}
+            >
+              重置修改
+            </button>
+            <button className="button secondary" type="button" onClick={() => void handlePreview()} disabled={previewing || saving || running}>
+              {previewing ? "预览中..." : "刷新预览"}
+            </button>
+            <button className="button secondary" type="button" onClick={() => void handleSave()} disabled={saving || running || previewing || !hasUnsavedChanges}>
+              {saving ? "保存中..." : "保存默认规则"}
+            </button>
+            <button
+              className="button primary"
+              type="button"
+              onClick={() => void handleRun()}
+              disabled={running || saving || previewing || !draftRule.enabled || !isPreviewCurrent || !preview?.summary.assignmentTargets}
+            >
+              {running ? "发送中..." : "立即发送提醒"}
+            </button>
+          </div>
+        </Card>
+
+        <Card title="提醒指挥台" tag="Ops">
+          <div className="teacher-notification-command-grid">
+            <div className="workflow-summary-card">
+              <div className="workflow-summary-label">待触达作业</div>
+              <div className="workflow-summary-value">{preview?.summary.assignmentTargets ?? 0}</div>
+              <div className="workflow-summary-helper">当前草稿预估会触发提醒的作业数</div>
+            </div>
+            <div className="workflow-summary-card">
+              <div className="workflow-summary-label">覆盖学生</div>
+              <div className="workflow-summary-value">{preview?.summary.uniqueStudents ?? 0}</div>
+              <div className="workflow-summary-helper">预计会被提醒到的学生人数</div>
+            </div>
+            <div className="workflow-summary-card">
+              <div className="workflow-summary-label">逾期优先</div>
+              <div className="workflow-summary-value">{preview?.summary.overdueAssignments ?? 0}</div>
+              <div className="workflow-summary-helper">需要优先处理的逾期作业数量</div>
+            </div>
+            <div className="workflow-summary-card">
+              <div className="workflow-summary-label">最近一次发送</div>
+              <div className="workflow-summary-value">{historySummary?.totalRuns ?? 0}</div>
+              <div className="workflow-summary-helper">
+                {historySummary?.lastRunAt ? `最近于 ${formatLoadedTime(historySummary.lastRunAt)}` : "当前班级还没有发送历史"}
+              </div>
             </div>
           </div>
-        </div>
-      </Card>
 
-      <Card title="规则配置" tag="规则">
-        <div className="feature-card">
-          <EduIcon name="rocket" />
-          <p>先调整阈值，再点“刷新预览”核对触达范围；确认后可保存为默认规则，或直接按当前表单配置执行一次提醒。</p>
-        </div>
-        <div className="grid grid-2 teacher-notification-rule-form" style={{ alignItems: "end", marginTop: 12 }}>
-          <label>
-            <div className="section-title">选择班级</div>
-            <select className="select-control" value={classId} onChange={(event) => void handleClassChange(event.target.value)} style={{ width: "100%" }}>
-              {classes.map((klass) => (
-                <option key={klass.id} value={klass.id}>
-                  {klass.name} · {SUBJECT_LABELS[klass.subject] ?? klass.subject} · {klass.grade} 年级
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <div className="section-title">提醒开关</div>
-            <select
-              className="select-control"
-              value={draftRule.enabled ? "on" : "off"}
-              onChange={(event) => updateDraft({ enabled: event.target.value === "on" })}
-              style={{ width: "100%" }}
-            >
-              <option value="on">开启</option>
-              <option value="off">关闭</option>
-            </select>
-          </label>
-          <label>
-            <div className="section-title">截止前提醒（天）</div>
-            <input
-              className="workflow-search-input"
-              type="number"
-              min={0}
-              value={draftRule.dueDays}
-              onChange={(event) => updateDraft({ dueDays: Number(event.target.value || 0) })}
-            />
-          </label>
-          <label>
-            <div className="section-title">逾期提醒（天）</div>
-            <input
-              className="workflow-search-input"
-              type="number"
-              min={0}
-              value={draftRule.overdueDays}
-              onChange={(event) => updateDraft({ overdueDays: Number(event.target.value || 0) })}
-            />
-          </label>
-          <label className="teacher-notification-checkbox">
-            <input
-              type="checkbox"
-              checked={draftRule.includeParents}
-              onChange={(event) => updateDraft({ includeParents: event.target.checked })}
-            />
-            抄送家长
-          </label>
-          <div className="workflow-card-meta">
-            {selectedClass ? (
+          <StatePanel compact tone={commandState.tone} title={commandState.title} description={commandState.description} />
+
+          <div className="pill-list" style={{ marginTop: 12 }}>
+            <span className="pill">学生提醒 {preview?.summary.studentTargets ?? 0} 条</span>
+            <span className="pill">家长提醒 {preview?.summary.parentTargets ?? 0} 条</span>
+            <span className="pill">截止前提醒 {preview?.summary.dueSoonAssignments ?? 0} 份</span>
+            {previewTargetDelta !== null ? (
               <span className="pill">
-                当前班级：{selectedClass.name} · {SUBJECT_LABELS[selectedClass.subject] ?? selectedClass.subject} · {selectedClass.grade} 年级
+                较上次学生触达 {previewTargetDelta > 0 ? `+${previewTargetDelta}` : previewTargetDelta}
               </span>
             ) : null}
-            <span className="pill">当前配置 {draftRule.enabled ? "已开启" : "已关闭"}</span>
-            <span className="pill">抄送家长 {draftRule.includeParents ? "开启" : "关闭"}</span>
           </div>
-        </div>
-        {message ? <div className="status-note success">{message}</div> : null}
-        <div className="cta-row" style={{ marginTop: 12 }}>
-          <button className="button ghost" type="button" onClick={handleReset} disabled={!hasUnsavedChanges || saving || running || previewing}>
-            重置修改
-          </button>
-          <button className="button secondary" type="button" onClick={handlePreview} disabled={previewing || saving || running}>
-            {previewing ? "预览中..." : "刷新预览"}
-          </button>
-          <button className="button secondary" type="button" onClick={handleSave} disabled={saving || running || previewing}>
-            {saving ? "保存中..." : "保存规则"}
-          </button>
-          <button className="button primary" type="button" onClick={handleRun} disabled={running || saving || previewing || !draftRule.enabled}>
-            {running ? "发送中..." : "立即发送提醒"}
-          </button>
-        </div>
-      </Card>
 
-      <Card title="发送预览" tag="Preview">
-        {preview ? (
-          <>
-            <div className="grid grid-2">
-              <div className="workflow-summary-card">
-                <div className="workflow-summary-label">匹配作业</div>
-                <div className="workflow-summary-value">{preview.summary.assignmentTargets}</div>
-                <div className="workflow-summary-helper">即将触发提醒的作业数</div>
-              </div>
-              <div className="workflow-summary-card">
-                <div className="workflow-summary-label">覆盖学生</div>
-                <div className="workflow-summary-value">{preview.summary.uniqueStudents}</div>
-                <div className="workflow-summary-helper">预计会收到提醒的学生人数</div>
-              </div>
-              <div className="workflow-summary-card">
-                <div className="workflow-summary-label">截止前提醒</div>
-                <div className="workflow-summary-value">{preview.summary.dueSoonAssignments}</div>
-                <div className="workflow-summary-helper">处于“即将到期”窗口内的作业</div>
-              </div>
-              <div className="workflow-summary-card">
-                <div className="workflow-summary-label">逾期提醒</div>
-                <div className="workflow-summary-value">{preview.summary.overdueAssignments}</div>
-                <div className="workflow-summary-helper">处于逾期提醒窗口内的作业</div>
-              </div>
-            </div>
+          <div className="meta-text" style={{ marginTop: 12 }}>
+            {latestClassResult
+              ? `最近一次发送覆盖学生 ${latestClassResult.studentTargets} 条、家长 ${latestClassResult.parentTargets} 条。真正的效果，还要回提交箱和成绩册看新增提交与完成率。`
+              : "发送历史会告诉你曾经发了多少，但无法替代业务结果验证。第一次发送后，记得回提交箱和成绩册验收。"}
+          </div>
 
-            <div className="workflow-card-meta" style={{ marginTop: 12 }}>
-              <span className="pill">学生提醒 {preview.summary.studentTargets} 条</span>
-              <span className="pill">家长提醒 {preview.summary.parentTargets} 条</span>
-              <span className="pill">预览生成于 {formatLoadedTime(preview.generatedAt)}</span>
-            </div>
+          <div className="cta-row" style={{ marginTop: 12 }}>
+            <Link className="button secondary" href="/teacher/submissions">
+              去提交箱
+            </Link>
+            <Link className="button secondary" href="/teacher/gradebook">
+              去成绩册
+            </Link>
+            <Link className="button ghost" href="/teacher/analysis">
+              去学情分析
+            </Link>
+          </div>
+        </Card>
+      </div>
 
-            {preview.summary.enabled ? null : (
-              <StatePanel
-                compact
-                tone="info"
-                title="当前规则处于关闭状态"
-                description="开启提醒开关后，才会根据阈值匹配到待发送作业。"
-              />
-            )}
-
-            {!preview.summary.enabled || !preview.sampleAssignments.length ? (
-              <StatePanel
-                compact
-                tone="empty"
-                title="当前配置下暂无待发送提醒"
-                description="可以放宽截止前提醒天数、调整逾期窗口，或等待班级出现新的待完成作业。"
-              />
-            ) : (
-              <div className="notification-preview-list">
-                {preview.sampleAssignments.map((item) => (
-                  <div className="notification-preview-card" key={item.assignmentId}>
-                    <div className="notification-preview-header">
-                      <div className="section-title">{item.title}</div>
-                      <span className="card-tag">{getStageLabel(item.stage)}</span>
-                    </div>
-                    <div className="notification-preview-meta">
-                      <span className="pill">截止 {new Date(item.dueDate).toLocaleDateString("zh-CN")}</span>
-                      <span className="pill">学生提醒 {item.studentTargets}</span>
-                      <span className="pill">家长提醒 {item.parentTargets}</span>
-                    </div>
+      <Card title="优先提醒队列" tag="Preview">
+        <div id="teacher-notification-preview">
+          {previewing && !preview ? (
+            <StatePanel compact tone="loading" title="预览生成中" description="正在根据当前草稿计算提醒范围。" />
+          ) : !preview ? (
+            <StatePanel
+              compact
+              tone="empty"
+              title="当前还没有提醒预览"
+              description="调整规则后刷新预览，这里会直接告诉你今天先催哪一批作业。"
+            />
+          ) : !preview.summary.enabled ? (
+            <StatePanel
+              compact
+              tone="info"
+              title="当前规则处于关闭状态"
+              description="开启提醒开关后，系统才会根据阈值筛出待发送作业。"
+            />
+          ) : !preview.summary.assignmentTargets ? (
+            <StatePanel
+              compact
+              tone="empty"
+              title="当前配置下没有待发送提醒"
+              description="可以放宽截止前提醒天数、调整逾期窗口，或等待班级出现新的待完成作业。"
+            />
+          ) : (
+            <div className="teacher-notification-queue-groups">
+              <div className="teacher-notification-queue-group">
+                <div className="task-queue-group-head">
+                  <div>
+                    <div className="section-title">逾期优先队列</div>
+                    <div className="meta-text">先看已经逾期的作业，这批最影响今天的催交效率。</div>
                   </div>
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          <StatePanel
-            compact
-            tone="loading"
-            title="预览准备中"
-            description="选择班级并刷新预览后，这里会显示预计提醒范围。"
-          />
-        )}
-      </Card>
-
-      <Card title="执行历史" tag="History">
-        <div className="workflow-card-meta">
-          <span className="pill">历史记录 {historySummary?.totalRuns ?? 0} 次</span>
-          <span className="pill">累计学生提醒 {historySummary?.studentTargets ?? 0} 条</span>
-          <span className="pill">累计家长提醒 {historySummary?.parentTargets ?? 0} 条</span>
-          <span className="pill">累计作业覆盖 {historySummary?.assignmentTargets ?? 0} 份</span>
-        </div>
-
-        {historyLoading ? (
-          <StatePanel compact tone="loading" title="历史加载中" description="正在同步当前班级的最近执行记录。" />
-        ) : !history.length ? (
-          <StatePanel
-            compact
-            tone="empty"
-            title="当前班级还没有执行历史"
-            description="执行一次“立即发送提醒”后，这里会记录本次触达范围、规则快照和作业样本。"
-          />
-        ) : (
-          <div className="notification-history-list">
-            {history.map((item) => {
-              const classResult = item.classResults.find((entry) => entry.classId === classId) ?? item.classResults[0];
-              if (!classResult) return null;
-              return (
-                <div className="notification-history-card" key={item.id}>
-                  <div className="notification-history-header">
-                    <div>
-                      <div className="section-title">执行于 {formatLoadedTime(item.executedAt)}</div>
-                      <div className="workflow-summary-helper">
-                        {classResult.className} · {SUBJECT_LABELS[classResult.subject] ?? classResult.subject} · {classResult.grade} 年级
-                      </div>
-                    </div>
-                    {latestHistory?.id === item.id ? <span className="card-tag">最近一次</span> : <span className="pill">历史记录</span>}
-                  </div>
-                  <div className="notification-history-metrics">
-                    <span className="pill">学生提醒 {classResult.studentTargets}</span>
-                    <span className="pill">家长提醒 {classResult.parentTargets}</span>
-                    <span className="pill">作业覆盖 {classResult.assignmentTargets}</span>
-                    <span className="pill">即将到期 {classResult.dueSoonAssignments}</span>
-                    <span className="pill">已逾期 {classResult.overdueAssignments}</span>
-                  </div>
-                  <div className="workflow-summary-helper" style={{ marginTop: 8 }}>
-                    规则快照：{classResult.rule.enabled ? "开启" : "关闭"} · 截止前 {classResult.rule.dueDays} 天 · 逾期 {classResult.rule.overdueDays} 天 · 家长抄送 {classResult.rule.includeParents ? "开启" : "关闭"}
-                  </div>
-                  {classResult.sampleAssignments.length ? (
-                    <div className="notification-history-samples">
-                      {classResult.sampleAssignments.map((sample) => (
-                        <div className="notification-history-sample" key={`${item.id}-${sample.assignmentId}`}>
-                          <div className="section-title" style={{ fontSize: 13 }}>{sample.title}</div>
-                          <div className="workflow-summary-helper">
-                            {getStageLabel(sample.stage)} · 截止 {new Date(sample.dueDate).toLocaleDateString("zh-CN")} · 学生 {sample.studentTargets} · 家长 {sample.parentTargets}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
+                  <span className="chip">共 {overdueAssignments.length} 份</span>
                 </div>
-              );
-            })}
+
+                {overdueAssignments.length ? (
+                  <div className="notification-preview-list">
+                    {overdueAssignments.map((item) => (
+                      <div className="notification-preview-card overdue" key={item.assignmentId}>
+                        <div className="notification-preview-header">
+                          <div>
+                            <div className="section-title">{item.title}</div>
+                            <div className="meta-text">截止 {new Date(item.dueDate).toLocaleDateString("zh-CN")}</div>
+                          </div>
+                          <span className="card-tag">{getStageLabel(item.stage)}</span>
+                        </div>
+                        <div className="notification-preview-meta">
+                          <span className="pill">学生提醒 {item.studentTargets}</span>
+                          <span className="pill">家长提醒 {item.parentTargets}</span>
+                        </div>
+                        <div className="notification-preview-note">{getStageDescription(item.stage)}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <StatePanel
+                    compact
+                    tone="empty"
+                    title="当前没有逾期作业"
+                    description="说明这轮提醒更适合用在截止前预防，而不是事后催交。"
+                  />
+                )}
+              </div>
+
+              <div className="teacher-notification-queue-group">
+                <div className="task-queue-group-head">
+                  <div>
+                    <div className="section-title">即将到期队列</div>
+                    <div className="meta-text">这批适合做温和提醒，把今天的临期作业拦在逾期前。</div>
+                  </div>
+                  <span className="chip">共 {dueSoonAssignments.length} 份</span>
+                </div>
+
+                {dueSoonAssignments.length ? (
+                  <div className="notification-preview-list">
+                    {dueSoonAssignments.map((item) => (
+                      <div className="notification-preview-card due-soon" key={item.assignmentId}>
+                        <div className="notification-preview-header">
+                          <div>
+                            <div className="section-title">{item.title}</div>
+                            <div className="meta-text">截止 {new Date(item.dueDate).toLocaleDateString("zh-CN")}</div>
+                          </div>
+                          <span className="card-tag">{getStageLabel(item.stage)}</span>
+                        </div>
+                        <div className="notification-preview-meta">
+                          <span className="pill">学生提醒 {item.studentTargets}</span>
+                          <span className="pill">家长提醒 {item.parentTargets}</span>
+                        </div>
+                        <div className="notification-preview-note">{getStageDescription(item.stage)}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <StatePanel
+                    compact
+                    tone="empty"
+                    title="当前没有即将到期作业"
+                    description="如果当前确实没有临期任务，这一块可以视为今天不需要主动提醒。"
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
+          {preview ? (
+            <div className="workflow-card-meta" style={{ marginTop: 12 }}>
+              <span className="pill">预览生成于 {formatLoadedTime(preview.generatedAt)}</span>
+              <span className="pill">当前规则 {getRuleWindowLabel(preview.rule)}</span>
+            </div>
+          ) : null}
+        </div>
+      </Card>
+
+      <Card title="执行历史与复盘" tag="History">
+        <div id="teacher-notification-history">
+          <div className="workflow-card-meta">
+            <span className="pill">历史记录 {historySummary?.totalRuns ?? 0} 次</span>
+            <span className="pill">累计学生提醒 {historySummary?.studentTargets ?? 0} 条</span>
+            <span className="pill">累计家长提醒 {historySummary?.parentTargets ?? 0} 条</span>
+            <span className="pill">累计作业覆盖 {historySummary?.assignmentTargets ?? 0} 份</span>
           </div>
-        )}
+
+          <div className="meta-text" style={{ marginTop: 12 }}>
+            历史记录负责回答“之前发过多少”，但它不能替代结果页。复盘时要把这里的触达规模，和提交箱、成绩册里的变化放在一起看。
+          </div>
+
+          {historyLoading && !history.length ? (
+            <StatePanel compact tone="loading" title="历史加载中" description="正在同步当前班级的最近执行记录。" />
+          ) : !history.length ? (
+            <StatePanel
+              compact
+              tone="empty"
+              title="当前班级还没有执行历史"
+              description="执行一次“立即发送提醒”后，这里会记录本次触达范围、规则快照和作业样本。"
+            />
+          ) : (
+            <div className="notification-history-list">
+              {history.map((item) => {
+                const classResult = item.classResults.find((entry) => entry.classId === classId) ?? item.classResults[0];
+                if (!classResult) return null;
+
+                return (
+                  <div className="notification-history-card" key={item.id}>
+                    <div className="notification-history-header">
+                      <div>
+                        <div className="section-title">执行于 {formatLoadedTime(item.executedAt)}</div>
+                        <div className="workflow-summary-helper">
+                          {classResult.className} · {SUBJECT_LABELS[classResult.subject] ?? classResult.subject} · {classResult.grade} 年级
+                        </div>
+                      </div>
+                      {latestHistory?.id === item.id ? <span className="card-tag">最近一次</span> : <span className="pill">历史记录</span>}
+                    </div>
+
+                    <div className="notification-history-metrics">
+                      <span className="pill">学生提醒 {classResult.studentTargets}</span>
+                      <span className="pill">家长提醒 {classResult.parentTargets}</span>
+                      <span className="pill">作业覆盖 {classResult.assignmentTargets}</span>
+                      <span className="pill">即将到期 {classResult.dueSoonAssignments}</span>
+                      <span className="pill">已逾期 {classResult.overdueAssignments}</span>
+                    </div>
+
+                    <div className="workflow-summary-helper" style={{ marginTop: 8 }}>
+                      规则快照：{classResult.rule.enabled ? "开启" : "关闭"} · 截止前 {classResult.rule.dueDays} 天 · 逾期 {classResult.rule.overdueDays} 天 · 家长抄送{" "}
+                      {classResult.rule.includeParents ? "开启" : "关闭"}
+                    </div>
+
+                    {classResult.sampleAssignments.length ? (
+                      <div className="notification-history-samples">
+                        {classResult.sampleAssignments.map((sample) => (
+                          <div className="notification-history-sample" key={`${item.id}-${sample.assignmentId}`}>
+                            <div className="section-title" style={{ fontSize: 13 }}>
+                              {sample.title}
+                            </div>
+                            <div className="workflow-summary-helper">
+                              {getStageLabel(sample.stage)} · 截止 {new Date(sample.dueDate).toLocaleDateString("zh-CN")} · 学生 {sample.studentTargets} · 家长 {sample.parentTargets}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </Card>
     </div>
   );

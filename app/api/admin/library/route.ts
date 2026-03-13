@@ -4,6 +4,7 @@ import {
   hydrateLearningLibraryItemContent,
   listLearningLibraryItems
 } from "@/lib/learning-library";
+import { assertAdminStepUp } from "@/lib/admin-step-up";
 import { badRequest, unauthorized } from "@/lib/api/http";
 import { parseJson } from "@/lib/api/validation";
 import { v } from "@/lib/api/validation";
@@ -85,6 +86,7 @@ export const POST = createAdminRoute({
     if (!user) {
       unauthorized();
     }
+    assertAdminStepUp(user);
 
     const body = await parseJson(request, bodySchema);
     const title = body.title?.trim();

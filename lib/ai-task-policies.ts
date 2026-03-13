@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { getEffectiveAiProviderChain, type AiProviderKey } from "./ai-config";
 import { isDbEnabled, query } from "./db";
+import { reportAiCallFailure } from "./error-tracker";
 import { getTraceIdFromContext } from "./request-context";
 import { readJson, writeJson } from "./storage";
 
@@ -519,6 +520,21 @@ export function recordAiCallLog(input: Omit<AiCallLog, "id" | "createdAt">) {
     traceId: input.traceId?.trim() || getTraceIdFromContext(),
     createdAt: new Date().toISOString()
   };
+
+  if (!item.ok && !item.policyHit) {
+    void reportAiCallFailure({
+      taskType: item.taskType,
+      provider: item.provider,
+      capability: item.capability,
+      timeout: item.timeout,
+      fallbackCount: item.fallbackCount,
+      latencyMs: item.latencyMs,
+      requestChars: item.requestChars,
+      responseChars: item.responseChars,
+      errorMessage: item.errorMessage,
+      traceId: item.traceId
+    });
+  }
 
   if (!isDbEnabled()) {
     const list = readJson<AiCallLog[]>(AI_CALL_LOGS_FILE, []);

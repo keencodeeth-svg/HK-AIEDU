@@ -374,9 +374,12 @@ export const questionIsolationBodySchema = v.object<{
   { allowUnknown: false }
 );
 
-export const adminLogsQuerySchema = v.object<{ limit?: string }>(
+export const adminLogsQuerySchema = v.object<{ limit?: string; action?: string; entityType?: string; query?: string }>(
   {
-    limit: v.optional(v.string({ minLength: 1 }))
+    limit: v.optional(v.string({ minLength: 1 })),
+    action: optionalRawString,
+    entityType: optionalRawString,
+    query: optionalRawString
   },
   { allowUnknown: true }
 );

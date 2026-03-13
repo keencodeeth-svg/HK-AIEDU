@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import fs from "fs/promises";
 import path from "path";
+import { assertRuntimeGuardrails } from "./runtime-guardrails";
 
 export type StoredObjectRef = {
   provider: "local";
@@ -36,6 +37,7 @@ export function shouldKeepInlineContent(envName: string, defaultValue: boolean) 
 }
 
 function getObjectStorageRoot() {
+  assertRuntimeGuardrails();
   const configured = process.env.OBJECT_STORAGE_ROOT?.trim();
   if (configured) {
     return configured;

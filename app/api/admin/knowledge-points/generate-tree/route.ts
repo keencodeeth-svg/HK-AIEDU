@@ -2,6 +2,7 @@ import { requireRole } from "@/lib/guard";
 import { createKnowledgePoint, getKnowledgePoints } from "@/lib/content";
 import { generateKnowledgeTreeDraft } from "@/lib/ai";
 import { addAdminLog } from "@/lib/admin-log";
+import { assertAdminStepUp } from "@/lib/admin-step-up";
 import { badRequest, unauthorized } from "@/lib/api/http";
 import {
   generateKnowledgeTreeBodySchema,
@@ -22,6 +23,7 @@ export const POST = createAdminRoute({
     if (!user) {
       unauthorized();
     }
+    assertAdminStepUp(user);
 
     const body = await parseJson(request, generateKnowledgeTreeBodySchema);
     const subject = body.subject?.trim();

@@ -1,9 +1,11 @@
 import { cookies } from "next/headers";
 import { clearSessionCookie, getSessionCookieName, removeSession } from "@/lib/auth";
+import { clearAdminStepUpCookie } from "@/lib/admin-step-up";
 import { apiSuccess } from "@/lib/api/http";
 import { createAuthRoute } from "@/lib/api/domains";
 
 export const POST = createAuthRoute({
+  sameOrigin: "always",
   cache: "private-realtime",
   handler: async ({ meta }) => {
     const cookieStore = cookies();
@@ -19,6 +21,7 @@ export const POST = createAuthRoute({
         message: "已退出登录"
       }
     );
+    clearAdminStepUpCookie(response);
     clearSessionCookie(response);
     return response;
   }

@@ -1,6 +1,7 @@
 import { deleteQuestion, getQuestions, updateQuestion } from "@/lib/content";
 import { requireRole } from "@/lib/guard";
 import { addAdminLog } from "@/lib/admin-log";
+import { assertAdminStepUp } from "@/lib/admin-step-up";
 import type { Question } from "@/lib/types";
 import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import {
@@ -25,6 +26,7 @@ export const PATCH = createAdminRoute({
     if (!user) {
       unauthorized();
     }
+    assertAdminStepUp(user);
     const params = parseParams(rawParams, adminIdParamsSchema);
     const body = await parseJson(request, updateQuestionBodySchema);
 
@@ -131,6 +133,7 @@ export const DELETE = createAdminRoute({
     if (!user) {
       unauthorized();
     }
+    assertAdminStepUp(user);
     const params = parseParams(rawParams, adminIdParamsSchema);
 
     const ok = await deleteQuestion(params.id);

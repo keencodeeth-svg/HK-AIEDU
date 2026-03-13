@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAdminStepUp } from "@/components/useAdminStepUp";
+import { getRequestErrorMessage, requestJson } from "@/lib/client-request";
 import { SUBJECT_LABELS } from "@/lib/constants";
 import LibraryAdminImportPanel from "./_components/LibraryAdminImportPanel";
 import LibraryAiGeneratePanel from "./_components/LibraryAiGeneratePanel";
@@ -37,6 +39,7 @@ import {
 } from "./utils";
 
 export default function LibraryPage() {
+  const { runWithStepUp, stepUpDialog } = useAdminStepUp();
   const [user, setUser] = useState<LibraryUser>(null);
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
@@ -277,20 +280,22 @@ export default function LibraryPage() {
       payload.linkUrl = "";
     }
 
-    const res = await fetch("/api/admin/library", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data?.error ?? "导入失败");
-      return;
-    }
-    setMessage("教材导入成功");
-    setImportForm((prev) => ({ ...prev, title: "", description: "", textContent: "", linkUrl: "" }));
-    setImportFile(null);
-    await loadItems();
+    await runWithStepUp(
+      async () => {
+        await requestJson("/api/admin/library", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        setMessage("教材导入成功");
+        setImportForm((prev) => ({ ...prev, title: "", description: "", textContent: "", linkUrl: "" }));
+        setImportFile(null);
+        await loadItems();
+      },
+      (nextError) => {
+        setError(getRequestErrorMessage(nextError, "导入失败"));
+      }
+    );
   }
 
   function downloadBatchTemplate() {
@@ -348,27 +353,29 @@ export default function LibraryPage() {
       return;
     }
 
-    const res = await fetch("/api/admin/library/batch-import", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    const data = (await res.json()) as LibraryBatchImportResponse;
-    if (!res.ok) {
-      setError(data.error ?? "批量导入失败");
-      return;
-    }
+    await runWithStepUp(
+      async () => {
+        const data = await requestJson<LibraryBatchImportResponse>("/api/admin/library/batch-import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
 
-    const toFailedPreview = (items: LibraryBatchImportFailedItem[], label: string) =>
-      items.map((item) => `${label}#${Number(item.index) + 1}: ${item.reason}`);
+        const toFailedPreview = (items: LibraryBatchImportFailedItem[], label: string) =>
+          items.map((item) => `${label}#${Number(item.index) + 1}: ${item.reason}`);
 
-    const nextSummary = data.data?.summary ?? null;
-    const textbookFailed = toFailedPreview(data.data?.textbooks?.failed ?? [], "教材");
-    const questionFailed = toFailedPreview(data.data?.questions?.failed ?? [], "习题");
-    setBatchSummary(nextSummary);
-    setBatchFailedPreview([...textbookFailed, ...questionFailed].slice(0, 20));
-    setMessage("批量导入完成");
-    await loadItems();
+        const nextSummary = data.data?.summary ?? null;
+        const textbookFailed = toFailedPreview(data.data?.textbooks?.failed ?? [], "教材");
+        const questionFailed = toFailedPreview(data.data?.questions?.failed ?? [], "习题");
+        setBatchSummary(nextSummary);
+        setBatchFailedPreview([...textbookFailed, ...questionFailed].slice(0, 20));
+        setMessage("批量导入完成");
+        await loadItems();
+      },
+      (nextError) => {
+        setError(getRequestErrorMessage(nextError, "批量导入失败"));
+      }
+    );
   }
 
   async function submitAiGenerate(event: React.FormEvent) {
@@ -537,6 +544,7 @@ export default function LibraryPage() {
 
       {error ? <div className="status-note error">{error}</div> : null}
       {message ? <div className="status-note success">{message}</div> : null}
+      {stepUpDialog}
 
       <LibraryFiltersPanel
         subjectList={subjectList}

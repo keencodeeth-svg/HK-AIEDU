@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { CourseModule } from "@/lib/modules";
 import RoleScheduleFocusCard from "@/components/RoleScheduleFocusCard";
 import WorkspacePage, { WorkspaceAuthState, WorkspaceLoadingState, buildSuccessNotice, type WorkspaceNoticeItem } from "@/components/WorkspacePage";
@@ -8,6 +8,7 @@ import { TeacherAssignmentsCard, TeacherClassListCard, TeacherJoinRequestsCard }
 import { TeacherAddStudentCard, TeacherAssignmentComposerCard, TeacherCreateClassCard } from "./_components/TeacherFormPanels";
 import { TeacherExamModuleCard, TeacherInsightsCard, TeacherOverviewCard, TeacherQuickAccessCards } from "./_components/TeacherSummaryPanels";
 import { TeacherExecutionSummaryCard, TeacherNextStepCard } from "./_components/TeacherPrimaryFlowPanels";
+import TeacherTeachingLoopCard from "./_components/TeacherTeachingLoopCard";
 import type {
   AlertImpactData,
   AssignmentFormState,
@@ -64,6 +65,28 @@ export default function TeacherPage() {
     if (!klass) return [];
     return knowledgePoints.filter((kp) => kp.subject === klass.subject && kp.grade === klass.grade);
   }, [assignmentForm.classId, classes, knowledgePoints]);
+  const pendingJoinCount = useMemo(
+    () => joinRequests.filter((item) => item.status === "pending").length,
+    [joinRequests]
+  );
+  const activeAlertCount = useMemo(
+    () => (insights?.alerts ?? []).filter((item) => item.status === "active").length,
+    [insights]
+  );
+  const classesMissingAssignmentsCount = useMemo(
+    () => classes.filter((item) => item.studentCount > 0 && item.assignmentCount === 0).length,
+    [classes]
+  );
+  const dueSoonAssignmentCount = useMemo(
+    () =>
+      assignments.filter(
+        (item) => item.completed < item.total && Math.ceil((new Date(item.dueDate).getTime() - Date.now()) / (60 * 60 * 1000)) <= 48
+      ).length,
+    [assignments]
+  );
+  const handleLoaded = useCallback(() => {
+    setLastLoadedAt(new Date().toISOString());
+  }, []);
 
   const { loadAll } = useTeacherDataLoader({
     setUnauthorized,
@@ -75,7 +98,7 @@ export default function TeacherPage() {
     setInsights,
     setJoinRequests,
     setKnowledgePoints,
-    onLoaded: () => setLastLoadedAt(new Date().toISOString())
+    onLoaded: handleLoaded
   });
 
   useTeacherDefaultSelections({
@@ -108,10 +131,34 @@ export default function TeacherPage() {
       setLoading(false);
       return;
     }
+    const createdClass = data?.data as Partial<ClassItem> | undefined;
+    if (createdClass?.id) {
+      const createdClassId = createdClass.id;
+      const defaultDue = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      setClasses((prev) => [
+        {
+          id: createdClassId,
+          name: createdClass.name ?? classForm.name,
+          subject: createdClass.subject ?? classForm.subject,
+          grade: createdClass.grade ?? classForm.grade,
+          studentCount: 0,
+          assignmentCount: 0,
+          joinCode: createdClass.joinCode,
+          joinMode: createdClass.joinMode ?? "approval"
+        },
+        ...prev.filter((item) => item.id !== createdClass.id)
+      ]);
+      setStudentForm((prev) => ({ ...prev, classId: prev.classId || createdClassId }));
+      setAssignmentForm((prev) => ({
+        ...prev,
+        classId: prev.classId || createdClassId,
+        dueDate: prev.dueDate || defaultDue
+      }));
+    }
     setMessage("班级创建成功。");
     setClassForm({ ...classForm, name: "" });
-    await loadAll();
     setLoading(false);
+    void loadAll({ background: true, preserveFeedback: true });
   }
 
   async function handleAddStudent(event: React.FormEvent) {
@@ -131,10 +178,19 @@ export default function TeacherPage() {
       setLoading(false);
       return;
     }
-    setMessage(data.added ? "已加入班级。" : "学生已在班级中。");
+    if (data?.added) {
+      setClasses((prev) =>
+        prev.map((item) =>
+          item.id === studentForm.classId
+            ? { ...item, studentCount: item.studentCount + 1 }
+            : item
+        )
+      );
+    }
+    setMessage(data?.added ? "已加入班级。" : "学生已在班级中。");
     setStudentForm((prev) => ({ ...prev, email: "" }));
-    await loadAll();
     setLoading(false);
+    void loadAll({ background: true, preserveFeedback: true });
   }
 
   async function handleCreateAssignment(event: React.FormEvent) {
@@ -171,12 +227,43 @@ export default function TeacherPage() {
       setLoading(false);
       return;
     }
+    const createdAssignment = data?.data as Partial<AssignmentItem> | undefined;
+    const targetClass = classes.find((item) => item.id === assignmentForm.classId);
+    const selectedModule = modules.find((item) => item.id === assignmentForm.moduleId);
+    if (createdAssignment?.id && targetClass) {
+      const createdAssignmentId = createdAssignment.id;
+      setAssignments((prev) => [
+        {
+          id: createdAssignmentId,
+          classId: createdAssignment.classId ?? targetClass.id,
+          className: targetClass.name,
+          classSubject: targetClass.subject,
+          classGrade: targetClass.grade,
+          moduleTitle:
+            (createdAssignment as { moduleTitle?: string }).moduleTitle ??
+            (assignmentForm.moduleId ? selectedModule?.title ?? "" : ""),
+          title: createdAssignment.title ?? assignmentForm.title,
+          dueDate: createdAssignment.dueDate ?? assignmentForm.dueDate,
+          total: targetClass.studentCount,
+          completed: 0,
+          submissionType: createdAssignment.submissionType ?? assignmentForm.submissionType
+        },
+        ...prev.filter((item) => item.id !== createdAssignmentId)
+      ]);
+      setClasses((prev) =>
+        prev.map((item) =>
+          item.id === targetClass.id
+            ? { ...item, assignmentCount: item.assignmentCount + 1 }
+            : item
+        )
+      );
+    }
     const nextMessage = data?.message ?? "作业发布成功。";
     setMessage(nextMessage);
     setAssignmentMessage(nextMessage);
     setAssignmentForm((prev) => ({ ...prev, title: "", description: "", gradingFocus: "" }));
-    await loadAll();
     setLoading(false);
+    void loadAll({ background: true, preserveFeedback: true });
   }
 
   async function acknowledgeAlert(alertId: string) {
@@ -272,9 +359,15 @@ export default function TeacherPage() {
   return (
     <WorkspacePage
       title="教师工作台"
-      subtitle="先处理阻塞项，再发作业、看学情和安排本周课堂动作。"
+      subtitle="先稳住风险和阻塞，再推进作业与课堂动作，最后回到学情和成绩确认效果。"
       lastLoadedAt={lastLoadedAt}
-      chips={[<span key="teacher-progress" className="chip">教学进度跟踪</span>]}
+      chips={[
+        <span key="teacher-progress" className="chip">教学进度跟踪</span>,
+        pendingJoinCount ? <span key="teacher-join" className="chip">待审申请 {pendingJoinCount}</span> : null,
+        activeAlertCount ? <span key="teacher-alert" className="chip">活跃预警 {activeAlertCount}</span> : null,
+        classesMissingAssignmentsCount ? <span key="teacher-gap" className="chip">待补作业班级 {classesMissingAssignmentsCount}</span> : null,
+        dueSoonAssignmentCount ? <span key="teacher-due" className="chip">48h 截止作业 {dueSoonAssignmentCount}</span> : null
+      ].filter(Boolean)}
       actions={
         <button className="button secondary" type="button" onClick={() => void loadAll()} disabled={loading}>
           {loading ? "刷新中..." : "刷新"}
@@ -282,6 +375,7 @@ export default function TeacherPage() {
       }
       notices={notices}
     >
+      <TeacherTeachingLoopCard classes={classes} assignments={assignments} joinRequests={joinRequests} insights={insights} />
 
       <RoleScheduleFocusCard variant="teacher" />
 

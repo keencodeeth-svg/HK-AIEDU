@@ -41,6 +41,40 @@ CREATE TABLE IF NOT EXISTS auth_login_attempts (
 CREATE INDEX IF NOT EXISTS auth_login_attempts_lock_idx ON auth_login_attempts (lock_until);
 CREATE INDEX IF NOT EXISTS auth_login_attempts_updated_idx ON auth_login_attempts (updated_at);
 
+CREATE TABLE IF NOT EXISTS auth_login_profiles (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL,
+  last_ip TEXT NOT NULL,
+  known_ips TEXT[] NOT NULL DEFAULT '{}',
+  last_login_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS auth_login_profiles_role_idx ON auth_login_profiles (role);
+CREATE INDEX IF NOT EXISTS auth_login_profiles_updated_idx ON auth_login_profiles (updated_at);
+
+CREATE TABLE IF NOT EXISTS auth_recovery_attempts (
+  id TEXT PRIMARY KEY,
+  role TEXT NOT NULL,
+  email TEXT NOT NULL,
+  issue_type TEXT NOT NULL,
+  requester_ip TEXT,
+  user_agent TEXT,
+  result TEXT NOT NULL,
+  limited_by TEXT,
+  retry_at TIMESTAMPTZ,
+  ticket_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS auth_recovery_attempts_email_created_idx
+  ON auth_recovery_attempts (email, created_at DESC);
+CREATE INDEX IF NOT EXISTS auth_recovery_attempts_ip_created_idx
+  ON auth_recovery_attempts (requester_ip, created_at DESC);
+CREATE INDEX IF NOT EXISTS auth_recovery_attempts_created_idx
+  ON auth_recovery_attempts (created_at DESC);
+
 CREATE TABLE IF NOT EXISTS student_profiles (
   id TEXT PRIMARY KEY,
   user_id TEXT UNIQUE REFERENCES users(id) ON DELETE CASCADE,

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useAdminStepUp } from "@/components/useAdminStepUp";
+import { getRequestErrorMessage, requestJson } from "@/lib/client-request";
 import type {
   AiMetrics,
   CalibrationDraft,
@@ -31,6 +33,7 @@ import ProviderChainPanel from "./_components/ProviderChainPanel";
 import TaskPoliciesPanel from "./_components/TaskPoliciesPanel";
 
 export default function AdminAiModelsPage() {
+  const { runWithStepUp, stepUpDialog } = useAdminStepUp();
   const [config, setConfig] = useState<ConfigData | null>(null);
   const [draftChain, setDraftChain] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -192,25 +195,27 @@ export default function AdminAiModelsPage() {
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch("/api/admin/ai/evals/gate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enabled: evalGateDraft.enabled,
-          datasets: evalGateDraft.datasets,
-          minPassRate: evalGateDraft.minPassRate,
-          minAverageScore: evalGateDraft.minAverageScore,
-          maxHighRiskCount: evalGateDraft.maxHighRiskCount,
-          autoRollbackOnFail: evalGateDraft.autoRollbackOnFail
-        })
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        setError(payload?.error ?? "保存评测门禁失败");
-        return;
-      }
-      syncEvalGatePayload((payload?.data ?? null) as EvalGatePayload | null);
-      setMessage("评测门禁配置已保存");
+      await runWithStepUp(
+        async () => {
+          const payload = await requestJson<{ data?: EvalGatePayload }>("/api/admin/ai/evals/gate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              enabled: evalGateDraft.enabled,
+              datasets: evalGateDraft.datasets,
+              minPassRate: evalGateDraft.minPassRate,
+              minAverageScore: evalGateDraft.minAverageScore,
+              maxHighRiskCount: evalGateDraft.maxHighRiskCount,
+              autoRollbackOnFail: evalGateDraft.autoRollbackOnFail
+            })
+          });
+          syncEvalGatePayload((payload?.data ?? null) as EvalGatePayload | null);
+          setMessage("评测门禁配置已保存");
+        },
+        (error) => {
+          setError(getRequestErrorMessage(error, "保存评测门禁失败"));
+        }
+      );
     } finally {
       setEvalGateSaving(false);
     }
@@ -221,30 +226,32 @@ export default function AdminAiModelsPage() {
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch("/api/admin/ai/evals/gate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "run",
-          force: true,
-          configOverride: {
-            enabled: evalGateDraft.enabled,
-            datasets: evalGateDraft.datasets,
-            minPassRate: evalGateDraft.minPassRate,
-            minAverageScore: evalGateDraft.minAverageScore,
-            maxHighRiskCount: evalGateDraft.maxHighRiskCount,
-            autoRollbackOnFail: evalGateDraft.autoRollbackOnFail
-          }
-        })
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        setError(payload?.error ?? "执行评测门禁失败");
-        return;
-      }
-      syncEvalGatePayload((payload?.data ?? null) as EvalGatePayload | null);
-      const passed = Boolean(payload?.data?.lastRun?.passed);
-      setMessage(passed ? "评测门禁通过" : "评测门禁未通过，请根据失败规则调整");
+      await runWithStepUp(
+        async () => {
+          const payload = await requestJson<{ data?: EvalGatePayload }>("/api/admin/ai/evals/gate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "run",
+              force: true,
+              configOverride: {
+                enabled: evalGateDraft.enabled,
+                datasets: evalGateDraft.datasets,
+                minPassRate: evalGateDraft.minPassRate,
+                minAverageScore: evalGateDraft.minAverageScore,
+                maxHighRiskCount: evalGateDraft.maxHighRiskCount,
+                autoRollbackOnFail: evalGateDraft.autoRollbackOnFail
+              }
+            })
+          });
+          syncEvalGatePayload((payload?.data ?? null) as EvalGatePayload | null);
+          const passed = Boolean(payload?.data?.lastRun?.passed);
+          setMessage(passed ? "评测门禁通过" : "评测门禁未通过，请根据失败规则调整");
+        },
+        (error) => {
+          setError(getRequestErrorMessage(error, "执行评测门禁失败"));
+        }
+      );
     } finally {
       setEvalGateRunning(false);
     }
@@ -280,23 +287,25 @@ export default function AdminAiModelsPage() {
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch("/api/admin/ai/quality-calibration", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          globalBias: suggestion.recommendedGlobalBias,
-          providerAdjustments: suggestion.providerAdjustments,
-          kindAdjustments: suggestion.kindAdjustments,
-          reason: "apply_eval_suggestion"
-        })
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        setError(payload?.error ?? "应用校准建议失败");
-        return;
-      }
-      syncCalibrationPayload((payload?.data ?? null) as QualityCalibrationPayload | null);
-      setMessage("已应用离线评测校准建议");
+      await runWithStepUp(
+        async () => {
+          const payload = await requestJson<{ data?: QualityCalibrationPayload }>("/api/admin/ai/quality-calibration", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              globalBias: suggestion.recommendedGlobalBias,
+              providerAdjustments: suggestion.providerAdjustments,
+              kindAdjustments: suggestion.kindAdjustments,
+              reason: "apply_eval_suggestion"
+            })
+          });
+          syncCalibrationPayload((payload?.data ?? null) as QualityCalibrationPayload | null);
+          setMessage("已应用离线评测校准建议");
+        },
+        (error) => {
+          setError(getRequestErrorMessage(error, "应用校准建议失败"));
+        }
+      );
     } finally {
       setSaving(false);
     }
@@ -307,49 +316,58 @@ export default function AdminAiModelsPage() {
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch("/api/admin/ai/quality-calibration", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enabled: calibrationDraft.enabled,
-          rolloutPercent: calibrationDraft.rolloutPercent,
-          rolloutSalt: calibrationDraft.rolloutSalt,
-          reason: "update_rollout_control"
-        })
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        setError(payload?.error ?? "保存灰度配置失败");
-        return;
-      }
-      syncCalibrationPayload((payload?.data ?? null) as QualityCalibrationPayload | null);
-      setMessage("灰度开关配置已保存");
+      await runWithStepUp(
+        async () => {
+          const payload = await requestJson<{ data?: QualityCalibrationPayload }>("/api/admin/ai/quality-calibration", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              enabled: calibrationDraft.enabled,
+              rolloutPercent: calibrationDraft.rolloutPercent,
+              rolloutSalt: calibrationDraft.rolloutSalt,
+              reason: "update_rollout_control"
+            })
+          });
+          syncCalibrationPayload((payload?.data ?? null) as QualityCalibrationPayload | null);
+          setMessage("灰度开关配置已保存");
+        },
+        (error) => {
+          setError(getRequestErrorMessage(error, "保存灰度配置失败"));
+        }
+      );
     } finally {
       setSaving(false);
     }
   }
 
   async function rollbackCalibration(snapshotId: string) {
+    const confirmed = window.confirm("确认回滚到这个 AI 质量校准快照吗？当前运行配置会被覆盖。");
+    if (!confirmed) {
+      return;
+    }
     setSaving(true);
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch("/api/admin/ai/quality-calibration", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "rollback",
-          snapshotId,
-          reason: "manual_rollback"
-        })
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        setError(payload?.error ?? "回滚失败");
-        return;
-      }
-      syncCalibrationPayload((payload?.data ?? null) as QualityCalibrationPayload | null);
-      setMessage("已完成校准回滚");
+      await runWithStepUp(
+        async () => {
+          const payload = await requestJson<{ data?: QualityCalibrationPayload }>("/api/admin/ai/quality-calibration", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "rollback",
+              snapshotId,
+              reason: "manual_rollback",
+              confirmAction: true
+            })
+          });
+          syncCalibrationPayload((payload?.data ?? null) as QualityCalibrationPayload | null);
+          setMessage("已完成校准回滚");
+        },
+        (error) => {
+          setError(getRequestErrorMessage(error, "回滚失败"));
+        }
+      );
     } finally {
       setSaving(false);
     }
@@ -443,44 +461,52 @@ export default function AdminAiModelsPage() {
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch("/api/admin/ai/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerChain: draftChain })
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        setError(payload?.error ?? "保存失败");
-        return;
-      }
-      const data: ConfigData = payload?.data ?? null;
-      setConfig(data);
-      setDraftChain(data?.runtimeProviderChain ?? []);
-      setMessage("AI 模型链已保存");
+      await runWithStepUp(
+        async () => {
+          const payload = await requestJson<{ data?: ConfigData }>("/api/admin/ai/config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ providerChain: draftChain })
+          });
+          const data = payload?.data ?? null;
+          setConfig(data);
+          setDraftChain(data?.runtimeProviderChain ?? []);
+          setMessage("AI 模型链已保存");
+        },
+        (error) => {
+          setError(getRequestErrorMessage(error, "保存失败"));
+        }
+      );
     } finally {
       setSaving(false);
     }
   }
 
   async function resetToEnv() {
+    const confirmed = window.confirm("确认切回环境变量中的 AI 模型链配置吗？当前运行时链路会被清空。");
+    if (!confirmed) {
+      return;
+    }
     setSaving(true);
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch("/api/admin/ai/config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reset: true })
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        setError(payload?.error ?? "重置失败");
-        return;
-      }
-      const data: ConfigData = payload?.data ?? null;
-      setConfig(data);
-      setDraftChain(data?.runtimeProviderChain ?? []);
-      setMessage("已切回环境变量配置");
+      await runWithStepUp(
+        async () => {
+          const payload = await requestJson<{ data?: ConfigData }>("/api/admin/ai/config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reset: true, confirmAction: true })
+          });
+          const data = payload?.data ?? null;
+          setConfig(data);
+          setDraftChain(data?.runtimeProviderChain ?? []);
+          setMessage("已切回环境变量配置");
+        },
+        (error) => {
+          setError(getRequestErrorMessage(error, "重置失败"));
+        }
+      );
     } finally {
       setSaving(false);
     }
@@ -516,28 +542,30 @@ export default function AdminAiModelsPage() {
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch("/api/admin/ai/policies", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          taskType: selectedTaskType,
-          providerChain: parseChainInput(policyDraft.providerChain),
-          timeoutMs: policyDraft.timeoutMs,
-          maxRetries: policyDraft.maxRetries,
-          budgetLimit: policyDraft.budgetLimit,
-          minQualityScore: policyDraft.minQualityScore
-        })
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        setError(payload?.error ?? "保存任务策略失败");
-        return;
-      }
-      const data: PoliciesPayload = payload?.data ?? { tasks: [], policies: [] };
-      setTaskOptions(data.tasks ?? []);
-      setPolicies(data.policies ?? []);
-      setMessage(`任务策略已保存：${selectedTaskType}`);
-      await loadMetrics();
+      await runWithStepUp(
+        async () => {
+          const payload = await requestJson<{ data?: PoliciesPayload }>("/api/admin/ai/policies", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              taskType: selectedTaskType,
+              providerChain: parseChainInput(policyDraft.providerChain),
+              timeoutMs: policyDraft.timeoutMs,
+              maxRetries: policyDraft.maxRetries,
+              budgetLimit: policyDraft.budgetLimit,
+              minQualityScore: policyDraft.minQualityScore
+            })
+          });
+          const data: PoliciesPayload = payload?.data ?? { tasks: [], policies: [] };
+          setTaskOptions(data.tasks ?? []);
+          setPolicies(data.policies ?? []);
+          setMessage(`任务策略已保存：${selectedTaskType}`);
+          await loadMetrics();
+        },
+        (error) => {
+          setError(getRequestErrorMessage(error, "保存任务策略失败"));
+        }
+      );
     } finally {
       setSaving(false);
     }
@@ -548,24 +576,26 @@ export default function AdminAiModelsPage() {
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch("/api/admin/ai/policies", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          taskType: selectedTaskType,
-          reset: true
-        })
-      });
-      const payload = await res.json();
-      if (!res.ok) {
-        setError(payload?.error ?? "重置任务策略失败");
-        return;
-      }
-      const data: PoliciesPayload = payload?.data ?? { tasks: [], policies: [] };
-      setTaskOptions(data.tasks ?? []);
-      setPolicies(data.policies ?? []);
-      setMessage(`任务策略已重置：${selectedTaskType}`);
-      await loadMetrics();
+      await runWithStepUp(
+        async () => {
+          const payload = await requestJson<{ data?: PoliciesPayload }>("/api/admin/ai/policies", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              taskType: selectedTaskType,
+              reset: true
+            })
+          });
+          const data: PoliciesPayload = payload?.data ?? { tasks: [], policies: [] };
+          setTaskOptions(data.tasks ?? []);
+          setPolicies(data.policies ?? []);
+          setMessage(`任务策略已重置：${selectedTaskType}`);
+          await loadMetrics();
+        },
+        (error) => {
+          setError(getRequestErrorMessage(error, "重置任务策略失败"));
+        }
+      );
     } finally {
       setSaving(false);
     }
@@ -654,6 +684,7 @@ export default function AdminAiModelsPage() {
       />
 
       <MetricsPanel metrics={metrics} metricsLoading={metricsLoading} onLoadMetrics={loadMetrics} />
+      {stepUpDialog}
     </div>
   );
 }

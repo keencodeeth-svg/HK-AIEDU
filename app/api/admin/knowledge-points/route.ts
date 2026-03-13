@@ -1,6 +1,7 @@
 import { createKnowledgePoint, getKnowledgePoints } from "@/lib/content";
 import { requireRole } from "@/lib/guard";
 import { addAdminLog } from "@/lib/admin-log";
+import { assertAdminStepUp } from "@/lib/admin-step-up";
 import { badRequest, unauthorized } from "@/lib/api/http";
 import { createKnowledgePointBodySchema, isAllowedSubject } from "@/lib/api/schemas/admin";
 import { parseJson, parseSearchParams, v } from "@/lib/api/validation";
@@ -208,6 +209,7 @@ export const POST = createAdminRoute({
     if (!user) {
       unauthorized();
     }
+    assertAdminStepUp(user);
 
   const body = await parseJson(request, createKnowledgePointBodySchema);
   const subject = body.subject?.trim();

@@ -33,7 +33,7 @@ export default function GradebookTableCard({
   now
 }: GradebookTableCardProps) {
   return (
-    <Card title="成绩册" tag="作业">
+    <Card title={viewMode === "student" ? "学生收口明细" : "作业收口明细"} tag={viewMode === "student" ? "Students" : "Assignments"}>
       {loading ? (
         <p>加载中...</p>
       ) : viewMode === "student" && students.length ? (

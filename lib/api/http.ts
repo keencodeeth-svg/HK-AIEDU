@@ -1,7 +1,9 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
+import { reportApiServerError } from "../error-tracker";
 import { recordApiRequest } from "../observability";
 import { runWithRequestContext } from "../request-context";
+import { getRuntimeGuardrailIssues, logRuntimeGuardrailIssues } from "../runtime-guardrails";
 
 const RESERVED_KEYS = new Set(["code", "message", "data", "requestId", "traceId", "timestamp", "error"]);
 
@@ -152,7 +154,10 @@ type RouteHandler<TParams extends Record<string, string> = Record<string, string
 ) => Promise<Response | unknown>;
 
 export function withApi<TParams extends Record<string, string> = Record<string, string>>(
-  handler: RouteHandler<TParams>
+  handler: RouteHandler<TParams>,
+  options: {
+    runtimeGuardrails?: "auto" | "off";
+  } = {}
 ) {
   return async (request: Request, context: RouteContext<TParams>) => {
     const requestId = getRequestId(request);
@@ -168,12 +173,32 @@ export function withApi<TParams extends Record<string, string> = Record<string, 
       path = "/";
     }
 
+    const runtimeIssues = options.runtimeGuardrails === "off" ? [] : getRuntimeGuardrailIssues();
+    if (runtimeIssues.length) {
+      logRuntimeGuardrailIssues(runtimeIssues);
+      status = 503;
+      return apiError(503, "service temporarily unavailable", {
+        requestId,
+        traceId
+      });
+    }
+
     try {
       const result = await runWithRequestContext({ requestId, traceId }, () =>
         handler(request, safeContext, { requestId, traceId })
       );
       if (result instanceof Response) {
         status = result.status;
+        if (status >= 500) {
+          void reportApiServerError({
+            error: new Error(`route returned ${status}`),
+            requestId,
+            traceId,
+            method: request.method || "GET",
+            path,
+            status
+          });
+        }
         result.headers.set("x-request-id", requestId);
         result.headers.set("x-trace-id", traceId);
         return result;
@@ -183,6 +208,17 @@ export function withApi<TParams extends Record<string, string> = Record<string, 
     } catch (error) {
       const apiErr = toApiError(error);
       status = apiErr.status;
+      if (status >= 500) {
+        void reportApiServerError({
+          error,
+          requestId,
+          traceId,
+          method: request.method || "GET",
+          path,
+          status,
+          details: apiErr.details
+        });
+      }
       return apiError(apiErr.status, apiErr.message, {
         requestId,
         traceId,
@@ -222,4 +258,8 @@ export function notFound(message = "not found", details?: unknown): never {
 
 export function conflict(message = "conflict", details?: unknown): never {
   throw new ApiError(409, message, details);
+}
+
+export function preconditionRequired(message = "precondition required", details?: unknown): never {
+  throw new ApiError(428, message, details);
 }

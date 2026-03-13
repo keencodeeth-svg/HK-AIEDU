@@ -8,6 +8,9 @@ export type AiQualityMeta = {
   policyViolated?: boolean;
 };
 
+export type AiLearningMode = "direct" | "study";
+export type StudyCoachStage = "diagnose" | "check" | "reveal";
+
 export type AssistAnswerMode = "answer_only" | "step_by_step" | "hints_first";
 
 export type AssistPayload = {
@@ -38,6 +41,27 @@ export type AssistResponse = {
   sources: string[];
   provider: string;
   quality?: AiQualityMeta;
+};
+
+export type StudyCoachResponse = {
+  learningMode: "study";
+  stage: StudyCoachStage;
+  stageLabel: string;
+  coachReply: string;
+  nextPrompt: string;
+  knowledgeChecks: string[];
+  checkpoints: string[];
+  masteryFocus: string;
+  studentTurnRequired: boolean;
+  answerAvailable: boolean;
+  revealAnswerCta: string;
+  answer: string;
+  steps: string[];
+  hints: string[];
+  sources: string[];
+  provider: string;
+  quality?: AiQualityMeta;
+  feedback?: string | null;
 };
 
 export type ImageAssistResponse = {

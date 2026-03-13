@@ -17,10 +17,16 @@ export default function AdminRegisterPage() {
     setLoading(true);
     setError(null);
     try {
+      const payload = {
+        email,
+        name,
+        password,
+        inviteCode: inviteCode.trim() || undefined
+      };
       const res = await fetch("/api/auth/admin-register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, name, password, inviteCode })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (!res.ok) {
@@ -75,12 +81,12 @@ export default function AdminRegisterPage() {
             <PasswordPolicyHint />
           </label>
           <label className="form-field">
-            <div className="section-title">邀请码（可选）</div>
+            <div className="section-title">邀请码</div>
             <input
               className="form-control"
               value={inviteCode}
               onChange={(event) => setInviteCode(event.target.value)}
-              placeholder="如果设置了 ADMIN_INVITE_CODE，请填写"
+              placeholder="如已配置 ADMIN_INVITE_CODE，请填写"
             />
           </label>
           {error ? <div className="status-note error">{error}</div> : null}
@@ -89,7 +95,7 @@ export default function AdminRegisterPage() {
           </button>
         </form>
         <div className="auth-footnote">
-          若已配置 ADMIN_INVITE_CODE，需要输入邀请码；否则仅当系统还没有管理员时允许注册。
+          默认必须填写邀请码。仅当服务端显式开启 `ADMIN_ALLOW_INITIAL_SELF_REGISTER=true` 且系统仍没有管理员时，才允许首个管理员无邀请码注册。
         </div>
         <div className="pill-list" style={{ marginTop: 10 }}>
           <span className="pill">题库治理</span>

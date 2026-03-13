@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAdminStepUp } from "@/components/useAdminStepUp";
+import { getRequestErrorMessage, requestJson } from "@/lib/client-request";
 import { GRADE_OPTIONS, SUBJECT_LABELS, SUBJECT_OPTIONS } from "@/lib/constants";
 import KnowledgePointsListPanel from "./_components/KnowledgePointsListPanel";
 import KnowledgePointsToolsPanel from "./_components/KnowledgePointsToolsPanel";
@@ -46,6 +48,7 @@ function buildBatchCombos(subjects: string[], grades: string[]) {
 }
 
 export default function KnowledgePointsAdminPage() {
+  const { runWithStepUp, stepUpDialog } = useAdminStepUp();
   const [list, setList] = useState<KnowledgePoint[]>([]);
   const [allKnowledgePoints, setAllKnowledgePoints] = useState<KnowledgePoint[]>([]);
   const [workspace, setWorkspace] = useState<"list" | "tools">("list");
@@ -104,6 +107,8 @@ export default function KnowledgePointsAdminPage() {
   const [batchPreview, setBatchPreview] = useState<KnowledgePointBatchPreviewItem[]>([]);
   const [batchConfirming, setBatchConfirming] = useState(false);
   const [batchShowDetail, setBatchShowDetail] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [pageActionError, setPageActionError] = useState<string | null>(null);
 
   const chapterOptions = useMemo(() => {
     const filtered = allKnowledgePoints.filter(
@@ -172,13 +177,22 @@ export default function KnowledgePointsAdminPage() {
 
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await fetch("/api/admin/knowledge-points", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form)
-    });
-    setForm((prev) => ({ ...prev, title: "", chapter: "" }));
-    await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
+    setFormError(null);
+    setPageActionError(null);
+    await runWithStepUp(
+      async () => {
+        await requestJson("/api/admin/knowledge-points", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form)
+        });
+        setForm((prev) => ({ ...prev, title: "", chapter: "" }));
+        await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
+      },
+      (error) => {
+        setFormError(getRequestErrorMessage(error, "保存失败"));
+      }
+    );
   }
 
   async function handleAiGenerate(event: React.FormEvent<HTMLFormElement>) {
@@ -186,32 +200,36 @@ export default function KnowledgePointsAdminPage() {
     setAiLoading(true);
     setAiMessage(null);
     setAiErrors([]);
+    setPageActionError(null);
 
-    const res = await fetch("/api/admin/knowledge-points/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        subject: aiForm.subject,
-        grade: aiForm.grade,
-        chapter: aiForm.chapter || undefined,
-        count: aiForm.count
-      })
-    });
+    try {
+      await runWithStepUp(
+        async () => {
+          const data = await requestJson<KnowledgePointMutationResponse>("/api/admin/knowledge-points/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              subject: aiForm.subject,
+              grade: aiForm.grade,
+              chapter: aiForm.chapter || undefined,
+              count: aiForm.count
+            })
+          });
 
-    const data = (await res.json()) as KnowledgePointMutationResponse;
-    if (!res.ok) {
-      setAiErrors([data.error ?? "生成失败"]);
+          const skipped: KnowledgePointProcessFailedItem[] = data.skipped ?? [];
+          if (skipped.length) {
+            setAiErrors(skipped.map((item) => `第 ${item.index + 1} 条：${item.reason}`));
+          }
+          setAiMessage(`已生成 ${data.created?.length ?? 0} 条知识点。`);
+          await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
+        },
+        (error) => {
+          setAiErrors([getRequestErrorMessage(error, "生成失败")]);
+        }
+      );
+    } finally {
       setAiLoading(false);
-      return;
     }
-
-    const skipped: KnowledgePointProcessFailedItem[] = data.skipped ?? [];
-    if (skipped.length) {
-      setAiErrors(skipped.map((item) => `第 ${item.index + 1} 条：${item.reason}`));
-    }
-    setAiMessage(`已生成 ${data.created?.length ?? 0} 条知识点。`);
-    setAiLoading(false);
-    await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
   }
 
   async function handleTreeGenerate(event: React.FormEvent<HTMLFormElement>) {
@@ -219,33 +237,37 @@ export default function KnowledgePointsAdminPage() {
     setTreeLoading(true);
     setTreeMessage(null);
     setTreeErrors([]);
+    setPageActionError(null);
 
-    const res = await fetch("/api/admin/knowledge-points/generate-tree", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        subject: treeForm.subject,
-        grade: treeForm.grade,
-        edition: treeForm.edition,
-        volume: treeForm.volume,
-        unitCount: treeForm.unitCount
-      })
-    });
+    try {
+      await runWithStepUp(
+        async () => {
+          const data = await requestJson<KnowledgePointMutationResponse>("/api/admin/knowledge-points/generate-tree", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              subject: treeForm.subject,
+              grade: treeForm.grade,
+              edition: treeForm.edition,
+              volume: treeForm.volume,
+              unitCount: treeForm.unitCount
+            })
+          });
 
-    const data = (await res.json()) as KnowledgePointMutationResponse;
-    if (!res.ok) {
-      setTreeErrors([data.error ?? "生成失败"]);
+          const skipped: KnowledgePointProcessFailedItem[] = data.skipped ?? [];
+          if (skipped.length) {
+            setTreeErrors(skipped.slice(0, 5).map((item) => `第 ${item.index + 1} 条：${item.reason}`));
+          }
+          setTreeMessage(`已生成 ${data.created?.length ?? 0} 条知识点。`);
+          await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
+        },
+        (error) => {
+          setTreeErrors([getRequestErrorMessage(error, "生成失败")]);
+        }
+      );
+    } finally {
       setTreeLoading(false);
-      return;
     }
-
-    const skipped: KnowledgePointProcessFailedItem[] = data.skipped ?? [];
-    if (skipped.length) {
-      setTreeErrors(skipped.slice(0, 5).map((item) => `第 ${item.index + 1} 条：${item.reason}`));
-    }
-    setTreeMessage(`已生成 ${data.created?.length ?? 0} 条知识点。`);
-    setTreeLoading(false);
-    await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
   }
 
   async function handleBatchPreview(event: React.FormEvent<HTMLFormElement>) {
@@ -326,38 +348,46 @@ export default function KnowledgePointsAdminPage() {
     const chunks = chunkArray(batchPreview, IMPORT_ITEMS_CHUNK_SIZE);
     let createdTotal = 0;
     let skippedTotal = 0;
-    let failedBatches = 0;
 
-    for (const [index, chunk] of chunks.entries()) {
-      setBatchProgress(`正在入库：第 ${index + 1}/${chunks.length} 批（${chunk.length} 个组合）`);
-      const res = await fetch("/api/admin/knowledge-points/import-tree", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: chunk })
-      });
-      const data = (await res.json()) as KnowledgePointMutationResponse;
-      if (!res.ok) {
-        failedBatches += 1;
-        continue;
-      }
-      createdTotal += data.created?.length ?? 0;
-      skippedTotal += data.skipped?.length ?? 0;
-    }
+    try {
+      await runWithStepUp(
+        async () => {
+          for (const [index, chunk] of chunks.entries()) {
+            setBatchProgress(`正在入库：第 ${index + 1}/${chunks.length} 批（${chunk.length} 个组合）`);
+            const data = await requestJson<KnowledgePointMutationResponse>("/api/admin/knowledge-points/import-tree", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ items: chunk })
+            });
+            createdTotal += data.created?.length ?? 0;
+            skippedTotal += data.skipped?.length ?? 0;
+          }
 
-    if (failedBatches > 0) {
-      setBatchError(`入库完成，但有 ${failedBatches} 个批次失败，请重试。`);
-    } else {
-      setBatchError(null);
+          setBatchError(null);
+          setBatchMessage(`已入库 ${createdTotal} 条，跳过 ${skippedTotal} 条。`);
+          await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
+        },
+        (error) => {
+          setBatchError(getRequestErrorMessage(error, "入库失败"));
+        }
+      );
+    } finally {
+      setBatchConfirming(false);
+      setBatchProgress(null);
     }
-    setBatchMessage(`已入库 ${createdTotal} 条，跳过 ${skippedTotal} 条。`);
-    setBatchConfirming(false);
-    setBatchProgress(null);
-    await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
   }
 
   async function handleDelete(id: string) {
-    await fetch(`/api/admin/knowledge-points/${id}`, { method: "DELETE" });
-    await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
+    setPageActionError(null);
+    await runWithStepUp(
+      async () => {
+        await requestJson(`/api/admin/knowledge-points/${id}`, { method: "DELETE" });
+        await Promise.all([loadAllKnowledgePoints(), loadKnowledgePointList()]);
+      },
+      (error) => {
+        setPageActionError(getRequestErrorMessage(error, "删除失败"));
+      }
+    );
   }
 
   const pageStart = meta.total === 0 ? 0 : (meta.page - 1) * meta.pageSize + 1;
@@ -389,6 +419,8 @@ export default function KnowledgePointsAdminPage() {
           生成与维护
         </button>
       </div>
+
+      {pageActionError ? <div className="status-note error">{pageActionError}</div> : null}
 
       {workspace === "tools" ? (
         <KnowledgePointsToolsPanel
@@ -425,6 +457,7 @@ export default function KnowledgePointsAdminPage() {
           onAiGenerate={handleAiGenerate}
           form={form}
           setForm={setForm}
+          formError={formError}
           onCreate={handleCreate}
         />
       ) : null}
@@ -446,6 +479,7 @@ export default function KnowledgePointsAdminPage() {
           onDelete={handleDelete}
         />
       ) : null}
+      {stepUpDialog}
     </div>
   );
 }

@@ -26,6 +26,13 @@ type DbLog = {
   created_at: string;
 };
 
+export type AdminLogQueryOptions = {
+  limit?: number;
+  action?: string | null;
+  entityType?: string | null;
+  query?: string | null;
+};
+
 function mapLog(row: DbLog): AdminLog {
   return {
     id: row.id,
@@ -70,13 +77,63 @@ export async function addAdminLog(log: Omit<AdminLog, "id" | "createdAt">) {
 }
 
 export async function getAdminLogs(limit = 100) {
+  return listAdminLogs({ limit });
+}
+
+export async function listAdminLogs(options: AdminLogQueryOptions = {}) {
+  const limit = Math.min(Math.max(Number(options.limit ?? 100), 1), 200);
+  const action = options.action?.trim().toLowerCase() || null;
+  const entityType = options.entityType?.trim().toLowerCase() || null;
+  const textQuery = options.query?.trim().toLowerCase() || null;
+
   if (!isDbEnabled()) {
     const list = readJson<AdminLog[]>(LOG_FILE, []);
-    return list.slice(0, limit);
+    return list
+      .filter((item) => {
+        if (action && item.action.toLowerCase() !== action) return false;
+        if (entityType && item.entityType.toLowerCase() !== entityType) return false;
+        if (textQuery) {
+          const haystack = [item.id, item.adminId, item.action, item.entityType, item.entityId, item.detail]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+          if (!haystack.includes(textQuery)) return false;
+        }
+        return true;
+      })
+      .slice(0, limit);
   }
+
+  const where: string[] = [];
+  const params: Array<string | number> = [];
+
+  if (action) {
+    where.push(`lower(action) = $${params.length + 1}`);
+    params.push(action);
+  }
+  if (entityType) {
+    where.push(`lower(entity_type) = $${params.length + 1}`);
+    params.push(entityType);
+  }
+  if (textQuery) {
+    where.push(
+      `(lower(id) LIKE $${params.length + 1} OR lower(coalesce(admin_id, '')) LIKE $${params.length + 1} OR lower(action) LIKE $${
+        params.length + 1
+      } OR lower(entity_type) LIKE $${params.length + 1} OR lower(coalesce(entity_id, '')) LIKE $${params.length + 1} OR lower(coalesce(detail, '')) LIKE $${
+        params.length + 1
+      })`
+    );
+    params.push(`%${textQuery}%`);
+  }
+
+  params.push(limit);
   const rows = await query<DbLog>(
-    "SELECT * FROM admin_logs ORDER BY created_at DESC LIMIT $1",
-    [limit]
+    `SELECT *
+     FROM admin_logs
+     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+     ORDER BY created_at DESC
+     LIMIT $${params.length}`,
+    params
   );
   return rows.map(mapLog);
 }

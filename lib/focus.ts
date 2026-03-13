@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { readJson, writeJson } from "./storage";
+import { mutateJson, readJson } from "./storage";
 import { isDbEnabled, query, queryOne } from "./db";
 
 export type FocusSession = {
@@ -13,6 +13,7 @@ export type FocusSession = {
 };
 
 const FILE = "focus-sessions.json";
+const MAX_FILE_RECORDS = 5000;
 
 type DbFocusSession = {
   id: string;
@@ -61,7 +62,6 @@ export async function addFocusSession(input: {
 }) {
   const createdAt = input.endedAt ?? new Date().toISOString();
   if (!isDbEnabled()) {
-    const list = readJson<FocusSession[]>(FILE, []);
     const record: FocusSession = {
       id: `focus-${crypto.randomBytes(6).toString("hex")}`,
       userId: input.userId,
@@ -71,9 +71,13 @@ export async function addFocusSession(input: {
       endedAt: input.endedAt ?? createdAt,
       createdAt
     };
-    list.unshift(record);
-    writeJson(FILE, list);
-    return record;
+    return mutateJson<FocusSession[], FocusSession>(FILE, [], (list) => {
+      const next = [record, ...list].slice(0, MAX_FILE_RECORDS);
+      return {
+        next,
+        result: record
+      };
+    });
   }
 
   const id = `focus-${crypto.randomBytes(6).toString("hex")}`;

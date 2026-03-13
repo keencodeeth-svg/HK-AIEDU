@@ -40,7 +40,7 @@ export default function GradebookFiltersCard({
   onStatusFilterChange
 }: GradebookFiltersCardProps) {
   return (
-    <Card title="班级筛选" tag="班级">
+    <Card title="班级与视图筛选" tag="Scope">
       <div className="grid grid-2" style={{ alignItems: "end" }}>
         <label>
           <div className="section-title">选择班级</div>
@@ -60,10 +60,10 @@ export default function GradebookFiltersCard({
           <div className="section-title">快速入口</div>
           <div className="cta-row" style={{ marginTop: 10 }}>
             <Link className="button secondary" href="/teacher">
-              返回教师端
+              教师工作台
             </Link>
-            <Link className="button ghost" href="/teacher">
-              作业列表
+            <Link className="button ghost" href="/teacher/analysis">
+              学情分析
             </Link>
           </div>
         </div>
@@ -117,6 +117,9 @@ export default function GradebookFiltersCard({
             <option value="completed">全部完成</option>
           </select>
         </label>
+      </div>
+      <div className="meta-text" style={{ marginTop: 12 }}>
+        先缩小到一个班，再决定按学生收口还是按作业收口。这样最容易快速定位今天真正需要跟进的人和任务。
       </div>
       {error ? <div style={{ marginTop: 10, color: "#b42318", fontSize: 13 }}>{error}</div> : null}
     </Card>

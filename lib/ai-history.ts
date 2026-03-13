@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import type { AssistAnswerMode, AiQualityMeta } from "./ai-types";
+import type { AiLearningMode, AssistAnswerMode, AiQualityMeta } from "./ai-types";
 import { readJson, writeJson } from "./storage";
 import { isDbEnabled, query, queryOne } from "./db";
 
@@ -9,6 +9,7 @@ export type AiHistoryOrigin = (typeof AI_HISTORY_ORIGINS)[number];
 
 export type AiHistoryMeta = {
   origin?: AiHistoryOrigin;
+  learningMode?: AiLearningMode;
   subject?: string;
   grade?: string;
   answerMode?: AssistAnswerMode;
@@ -31,6 +32,7 @@ export type AiHistoryItem = {
 
 const HISTORY_FILE = "ai-history.json";
 const AI_HISTORY_ANSWER_MODES = ["answer_only", "step_by_step", "hints_first"] as const;
+const AI_HISTORY_LEARNING_MODES = ["direct", "study"] as const;
 const AI_HISTORY_RISK_LEVELS = ["low", "medium", "high"] as const;
 
 type DbHistory = {
@@ -64,6 +66,11 @@ function normalizeHistoryMeta(input: unknown): AiHistoryMeta | undefined {
   const origin =
     typeof value.origin === "string" && AI_HISTORY_ORIGINS.includes(value.origin as AiHistoryOrigin)
       ? (value.origin as AiHistoryOrigin)
+      : undefined;
+  const learningMode =
+    typeof value.learningMode === "string" &&
+    AI_HISTORY_LEARNING_MODES.includes(value.learningMode as (typeof AI_HISTORY_LEARNING_MODES)[number])
+      ? (value.learningMode as AiLearningMode)
       : undefined;
   const answerMode =
     typeof value.answerMode === "string" &&
@@ -102,6 +109,7 @@ function normalizeHistoryMeta(input: unknown): AiHistoryMeta | undefined {
 
   const next: AiHistoryMeta = {
     origin,
+    learningMode,
     subject: isNonEmptyString(value.subject) ? String(value.subject).trim() : undefined,
     grade: isNonEmptyString(value.grade) ? String(value.grade).trim() : undefined,
     answerMode,

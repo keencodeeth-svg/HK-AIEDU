@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Card from "@/components/Card";
+import { useAdminStepUp } from "@/components/useAdminStepUp";
+import { getRequestErrorMessage, requestJson } from "@/lib/client-request";
 
 type ExperimentFlag = {
   id: string;
@@ -51,6 +53,7 @@ type ABReport = {
 };
 
 export default function AdminExperimentsPage() {
+  const { runWithStepUp, stepUpDialog } = useAdminStepUp();
   const [flags, setFlags] = useState<ExperimentFlag[]>([]);
   const [report, setReport] = useState<ABReport | null>(null);
   const [loading, setLoading] = useState(false);
@@ -93,18 +96,20 @@ export default function AdminExperimentsPage() {
       enabled: patch.enabled ?? flag.enabled,
       rollout: patch.rollout ?? flag.rollout
     };
-    const res = await fetch("/api/admin/experiments/flags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data?.error ?? "保存失败");
-      return;
-    }
-    setMessage("灰度开关已更新");
-    await load();
+    await runWithStepUp(
+      async () => {
+        await requestJson("/api/admin/experiments/flags", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        setMessage("灰度开关已更新");
+        await load();
+      },
+      (error) => {
+        setError(getRequestErrorMessage(error, "保存失败"));
+      }
+    );
   }
 
   return (
@@ -205,6 +210,7 @@ export default function AdminExperimentsPage() {
           </div>
         ) : null}
       </Card>
+      {stepUpDialog}
     </div>
   );
 }

@@ -1,73 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
+import StatePanel from "@/components/StatePanel";
 import { ASSIGNMENT_TYPE_LABELS, SUBJECT_LABELS } from "@/lib/constants";
+import AssignmentExecutionLoopCard from "./_components/AssignmentExecutionLoopCard";
+import type {
+  AssignmentNotifyTarget,
+  AssignmentStudentFilter,
+  RubricItem,
+  RubricLevel,
+  RubricPayloadItem,
+  TeacherAssignmentDetailData,
+  TeacherAssignmentStudent
+} from "./types";
 
-type AssignmentDetail = {
-  assignment: {
-    id: string;
-    title: string;
-    description?: string;
-    dueDate: string;
-    createdAt: string;
-    submissionType?: "quiz" | "upload" | "essay";
-    gradingFocus?: string;
-    moduleId?: string;
-  };
-  module?: { id: string; title: string } | null;
-  class: {
-    id: string;
-    name: string;
-    subject: string;
-    grade: string;
-  };
-  lessonLink?: {
-    taskKind: "prestudy";
-    lessonDate: string;
-    note?: string;
-    scheduleSessionId: string;
-    slotLabel?: string;
-    startTime?: string;
-    endTime?: string;
-    room?: string;
-    focusSummary?: string;
-  } | null;
-  students: Array<{
-    id: string;
-    name: string;
-    email: string;
-    grade?: string;
-    status: string;
-    score: number | null;
-    total: number | null;
-    completedAt: string | null;
-  }>;
-};
-
-type RubricLevel = { label: string; score: number; description: string };
-type RubricItem = {
-  title: string;
-  description?: string;
-  maxScore: number;
-  weight: number;
-  levels: RubricLevel[];
-};
-
-type RubricPayloadLevel = {
-  label?: string;
-  score?: number;
-  description?: string;
-};
-
-type RubricPayloadItem = {
-  title?: string;
-  description?: string;
-  maxScore?: number;
-  weight?: number;
-  levels?: RubricPayloadLevel[] | null;
+const STUDENT_FILTER_LABELS: Record<AssignmentStudentFilter, string> = {
+  all: "全部学生",
+  pending: "未完成",
+  review: "待批改",
+  low_score: "低于 60%",
+  completed: "已完成"
 };
 
 function normalizeRubricItems(items: RubricPayloadItem[] = []): RubricItem[] {
@@ -86,10 +41,72 @@ function normalizeRubricItems(items: RubricPayloadItem[] = []): RubricItem[] {
   }));
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function formatDateOnly(value?: string | null) {
+  if (!value) return "-";
+  return new Date(value).toLocaleDateString("zh-CN");
+}
+
+function getDueRelativeLabel(dueDate: string, now: number) {
+  const diffMs = new Date(dueDate).getTime() - now;
+  const diffDays = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
+  if (diffDays < 0) return `已逾期 ${Math.abs(diffDays)} 天`;
+  if (diffDays === 0) return "今天截止";
+  if (diffDays === 1) return "明天截止";
+  return `${diffDays} 天后截止`;
+}
+
+function getStudentStatusLabel(status: string, assignmentOverdue: boolean) {
+  if (status === "completed") return "已完成";
+  return assignmentOverdue ? "已逾期未交" : "待提交";
+}
+
+function getStudentStatusPillClassName(status: string, assignmentOverdue: boolean) {
+  if (status === "completed") return "gradebook-pill done";
+  return assignmentOverdue ? "gradebook-pill overdue" : "gradebook-pill pending";
+}
+
+function getStudentPriority(student: TeacherAssignmentStudent, assignmentOverdue: boolean) {
+  if (student.status !== "completed") {
+    return {
+      label: assignmentOverdue ? "优先催交" : "待提交",
+      detail: assignmentOverdue ? "截止已过，应该先发提醒或线下跟进" : "截止前仍未提交，需要尽快确认"
+    };
+  }
+
+  if (student.score === null || student.total === null) {
+    return {
+      label: "待批改",
+      detail: "学生已提交，但当前还没有可回看的评分结果"
+    };
+  }
+
+  if (student.total > 0 && student.score / student.total < 0.6) {
+    return {
+      label: "需要复盘",
+      detail: `当前得分 ${Math.round((student.score / student.total) * 100)}%，建议先回看错因`
+    };
+  }
+
+  return {
+    label: "已稳定",
+    detail: "当前已完成且没有明显风险，可以放到后续抽查"
+  };
+}
+
 export default function TeacherAssignmentDetailPage({ params }: { params: { id: string } }) {
-  const [data, setData] = useState<AssignmentDetail | null>(null);
+  const [data, setData] = useState<TeacherAssignmentDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notifyTarget, setNotifyTarget] = useState<"missing" | "low_score" | "all">("missing");
+  const [notifyTarget, setNotifyTarget] = useState<AssignmentNotifyTarget>("missing");
   const [threshold, setThreshold] = useState(60);
   const [notifyMessage, setNotifyMessage] = useState("");
   const [notifyLoading, setNotifyLoading] = useState(false);
@@ -98,6 +115,9 @@ export default function TeacherAssignmentDetailPage({ params }: { params: { id: 
   const [rubricMessage, setRubricMessage] = useState<string | null>(null);
   const [rubricError, setRubricError] = useState<string | null>(null);
   const [rubricSaving, setRubricSaving] = useState(false);
+  const [studentFilter, setStudentFilter] = useState<AssignmentStudentFilter>("all");
+  const [studentKeyword, setStudentKeyword] = useState("");
+  const now = Date.now();
 
   const load = useCallback(async () => {
     setError(null);
@@ -119,29 +139,117 @@ export default function TeacherAssignmentDetailPage({ params }: { params: { id: 
   }, [params.id]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   useEffect(() => {
-    loadRubrics();
+    void loadRubrics();
   }, [loadRubrics]);
 
-  if (error) {
-    return (
-      <Card title="作业详情">
-        <p>{error}</p>
-        <Link className="button secondary" href="/teacher" style={{ marginTop: 12 }}>
-          返回教师端
-        </Link>
-      </Card>
-    );
-  }
+  const assignmentOverdue = useMemo(
+    () => (data ? new Date(data.assignment.dueDate).getTime() < now : false),
+    [data, now]
+  );
+  const completedStudents = useMemo(
+    () => data?.students.filter((student) => student.status === "completed") ?? [],
+    [data]
+  );
+  const pendingStudents = useMemo(
+    () => data?.students.filter((student) => student.status !== "completed") ?? [],
+    [data]
+  );
+  const reviewReadyStudents = useMemo(
+    () =>
+      completedStudents.filter((student) => student.score === null || student.total === null),
+    [completedStudents]
+  );
+  const scoredStudents = useMemo(
+    () =>
+      completedStudents.filter(
+        (student) => student.score !== null && student.total !== null && student.total > 0
+      ),
+    [completedStudents]
+  );
+  const lowScoreStudents = useMemo(
+    () => scoredStudents.filter((student) => student.score! / student.total! < 0.6),
+    [scoredStudents]
+  );
+  const latestCompletedStudent = useMemo(
+    () =>
+      [...completedStudents].sort((left, right) => {
+        const leftTs = new Date(left.completedAt ?? "").getTime();
+        const rightTs = new Date(right.completedAt ?? "").getTime();
+        return rightTs - leftTs;
+      })[0] ?? null,
+    [completedStudents]
+  );
+  const completionRate = data?.students.length
+    ? Math.round((completedStudents.length / data.students.length) * 100)
+    : 0;
+  const averagePercent = scoredStudents.length
+    ? Math.round(
+        scoredStudents.reduce((sum, student) => sum + (student.score! / student.total!) * 100, 0) /
+          scoredStudents.length
+      )
+    : null;
+  const notifyPreviewStudents = useMemo(() => {
+    if (!data) return [];
+    if (notifyTarget === "missing") return pendingStudents;
+    if (notifyTarget === "low_score") {
+      return scoredStudents.filter((student) => (student.score! / student.total!) * 100 < threshold);
+    }
+    return data.students;
+  }, [data, notifyTarget, pendingStudents, scoredStudents, threshold]);
+  const hasStudentFilters = Boolean(studentFilter !== "all" || studentKeyword.trim());
 
-  if (!data) {
-    return <Card title="作业详情">加载中...</Card>;
-  }
+  const filteredStudents = useMemo(() => {
+    if (!data) return [];
+    const keywordLower = studentKeyword.trim().toLowerCase();
+    let list = data.students;
 
-  const completedCount = data.students.filter((item) => item.status === "completed").length;
+    if (studentFilter === "pending") {
+      list = list.filter((student) => student.status !== "completed");
+    } else if (studentFilter === "review") {
+      list = list.filter(
+        (student) => student.status === "completed" && (student.score === null || student.total === null)
+      );
+    } else if (studentFilter === "low_score") {
+      list = list.filter(
+        (student) =>
+          student.status === "completed" &&
+          student.score !== null &&
+          student.total !== null &&
+          student.total > 0 &&
+          student.score / student.total < 0.6
+      );
+    } else if (studentFilter === "completed") {
+      list = list.filter((student) => student.status === "completed");
+    }
+
+    if (keywordLower) {
+      list = list.filter((student) =>
+        [student.name, student.email, student.grade ?? ""].join(" ").toLowerCase().includes(keywordLower)
+      );
+    }
+
+    const getRank = (student: TeacherAssignmentStudent) => {
+      if (student.status !== "completed") return assignmentOverdue ? 0 : 1;
+      if (student.score === null || student.total === null) return 2;
+      if (student.total > 0 && student.score / student.total < 0.6) return 3;
+      return 4;
+    };
+
+    return [...list].sort((left, right) => {
+      const rankDiff = getRank(left) - getRank(right);
+      if (rankDiff !== 0) return rankDiff;
+      if (left.status === "completed" && right.status === "completed") {
+        const leftTs = new Date(left.completedAt ?? "").getTime();
+        const rightTs = new Date(right.completedAt ?? "").getTime();
+        return rightTs - leftTs;
+      }
+      return left.name.localeCompare(right.name, "zh-CN");
+    });
+  }, [assignmentOverdue, data, studentFilter, studentKeyword]);
 
   function updateRubric(index: number, patch: Partial<RubricItem>) {
     setRubrics((prev) => prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)));
@@ -201,76 +309,383 @@ export default function TeacherAssignmentDetailPage({ params }: { params: { id: 
     );
   }
 
+  function handleClearStudentFilters() {
+    setStudentFilter("all");
+    setStudentKeyword("");
+  }
+
+  if (error) {
+    return (
+      <Card title="作业详情">
+        <StatePanel
+          compact
+          tone="error"
+          title="作业详情加载失败"
+          description={error}
+          action={
+            <Link className="button secondary" href="/teacher/submissions">
+              回提交箱
+            </Link>
+          }
+        />
+      </Card>
+    );
+  }
+
+  if (!data) {
+    return (
+      <Card title="作业详情">
+        <StatePanel
+          compact
+          tone="loading"
+          title="作业详情加载中"
+          description="正在同步作业、学生提交与评分细则。"
+        />
+      </Card>
+    );
+  }
+
+  const dueRelativeLabel = getDueRelativeLabel(data.assignment.dueDate, now);
+  const lessonContext = data.lessonLink
+    ? [
+        data.lessonLink.lessonDate,
+        data.lessonLink.startTime && data.lessonLink.endTime
+          ? `${data.lessonLink.startTime}-${data.lessonLink.endTime}`
+          : null,
+        data.lessonLink.slotLabel ?? null,
+        data.lessonLink.room ?? null
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
+  const rubricLevelCount = rubrics.reduce((sum, item) => sum + item.levels.length, 0);
+
   return (
     <div className="grid" style={{ gap: 18 }}>
       <div className="section-head">
         <div>
-          <h2>作业详情</h2>
+          <h2>{data.assignment.title}</h2>
           <div className="section-sub">
             {data.class.name} · {SUBJECT_LABELS[data.class.subject] ?? data.class.subject} · {data.class.grade} 年级
           </div>
         </div>
-        <div className="pill-list">
-          <span className="chip">已完成 {completedCount}/{data.students.length}</span>
+        <div className="workflow-toolbar">
+          <span className="chip">{ASSIGNMENT_TYPE_LABELS[data.assignment.submissionType ?? "quiz"]}</span>
+          <span className="chip">{dueRelativeLabel}</span>
+          <span className="chip">完成 {completedStudents.length}/{data.students.length}</span>
+          {reviewReadyStudents.length ? <span className="chip">待批改 {reviewReadyStudents.length}</span> : null}
+          {lowScoreStudents.length ? <span className="chip">低于60% {lowScoreStudents.length}</span> : null}
           {data.lessonLink ? <span className="chip">课前预习</span> : null}
         </div>
       </div>
 
-      <Card title="作业概览" tag="概览">
-        <div className="grid grid-2">
-          <div className="card feature-card">
+      <AssignmentExecutionLoopCard
+        assignmentId={data.assignment.id}
+        assignmentTitle={data.assignment.title}
+        dueDate={data.assignment.dueDate}
+        submissionType={data.assignment.submissionType ?? "quiz"}
+        students={data.students}
+        now={now}
+      />
+
+      <div className="assignment-detail-top-grid">
+        <Card title="作业概览" tag="Overview">
+          <div className="feature-card">
             <EduIcon name="board" />
-            <div className="section-title">{data.assignment.title}</div>
-            <p>{data.assignment.description || "暂无作业说明。"}</p>
-            {data.assignment.gradingFocus ? (
-              <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-1)" }}>
-                批改重点：{data.assignment.gradingFocus}
-              </div>
-            ) : null}
-            {data.module ? (
-              <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-1)" }}>
-                关联模块：{data.module.title}
-              </div>
-            ) : null}
-            {data.lessonLink ? (
-              <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-1)", lineHeight: 1.6 }}>
-                关联课次：{data.lessonLink.lessonDate}
-                {data.lessonLink.startTime && data.lessonLink.endTime ? ` · ${data.lessonLink.startTime}-${data.lessonLink.endTime}` : ""}
-                {data.lessonLink.slotLabel ? ` · ${data.lessonLink.slotLabel}` : ""}
-                {data.lessonLink.room ? ` · ${data.lessonLink.room}` : ""}
-                {data.lessonLink.focusSummary ? ` · 课堂焦点：${data.lessonLink.focusSummary}` : ""}
-                {data.lessonLink.note ? ` · 老师提醒：${data.lessonLink.note}` : ""}
-              </div>
-            ) : null}
-          </div>
-          <div className="card feature-card">
-            <EduIcon name="chart" />
-            <div className="section-title">截止日期</div>
-            <p>{new Date(data.assignment.dueDate).toLocaleDateString("zh-CN")}</p>
-            <div className="pill-list">
-              <span className="pill">已完成 {completedCount}</span>
-              <span className="pill">待完成 {data.students.length - completedCount}</span>
-              <span className="pill">
-                {ASSIGNMENT_TYPE_LABELS[data.assignment.submissionType ?? "quiz"]}
-              </span>
+            <div>
+              <div className="section-title">{data.assignment.title}</div>
+              <p>{data.assignment.description || "暂无作业说明。"}</p>
             </div>
           </div>
+
+          <div className="workflow-card-meta">
+            <span className="pill">创建于 {formatDateOnly(data.assignment.createdAt)}</span>
+            <span className="pill">截止 {formatDateOnly(data.assignment.dueDate)}</span>
+            {data.assignment.gradingFocus ? <span className="pill">批改重点：{data.assignment.gradingFocus}</span> : null}
+            {data.module ? <span className="pill">关联模块：{data.module.title}</span> : null}
+          </div>
+
+          {lessonContext ? (
+            <div className="meta-text" style={{ marginTop: 12 }}>
+              关联课次：{lessonContext}
+              {data.lessonLink?.focusSummary ? ` · 课堂焦点：${data.lessonLink.focusSummary}` : ""}
+              {data.lessonLink?.note ? ` · 老师提醒：${data.lessonLink.note}` : ""}
+            </div>
+          ) : null}
+
+          <div className="cta-row" style={{ marginTop: 12 }}>
+            <Link className="button ghost" href="/teacher/submissions">
+              回提交箱
+            </Link>
+            <Link className="button secondary" href={`/teacher/assignments/${data.assignment.id}/stats`}>
+              去统计页
+            </Link>
+            <Link className="button secondary" href="/teacher">
+              返回教师端
+            </Link>
+          </div>
+        </Card>
+
+        <Card title="当前执行面板" tag="Ops">
+          <div className="grid grid-2">
+            <div className="workflow-summary-card">
+              <div className="workflow-summary-label">完成率</div>
+              <div className="workflow-summary-value">{completionRate}%</div>
+              <div className="workflow-summary-helper">已提交 {completedStudents.length} / {data.students.length}</div>
+            </div>
+            <div className="workflow-summary-card">
+              <div className="workflow-summary-label">待收口</div>
+              <div className="workflow-summary-value">{pendingStudents.length}</div>
+              <div className="workflow-summary-helper">优先清掉未提交学生</div>
+            </div>
+            <div className="workflow-summary-card">
+              <div className="workflow-summary-label">待批改</div>
+              <div className="workflow-summary-value">{reviewReadyStudents.length}</div>
+              <div className="workflow-summary-helper">已交但暂无评分结果</div>
+            </div>
+            <div className="workflow-summary-card">
+              <div className="workflow-summary-label">平均得分</div>
+              <div className="workflow-summary-value">{averagePercent === null ? "-" : `${averagePercent}%`}</div>
+              <div className="workflow-summary-helper">
+                {lowScoreStudents.length ? `低于 60% 的学生 ${lowScoreStudents.length} 人` : "当前没有明显低分风险"}
+              </div>
+            </div>
+          </div>
+
+          <div className="pill-list" style={{ marginTop: 12 }}>
+            <span className="pill">已评分 {scoredStudents.length} 人</span>
+            <span className="pill">待提醒 {pendingStudents.length} 人</span>
+            <span className="pill">Rubric 维度 {rubrics.length} 个</span>
+            <span className="pill">Rubric 分档 {rubricLevelCount} 条</span>
+          </div>
+
+          <div className="meta-text" style={{ marginTop: 12 }}>
+            当前名单已经按执行优先级处理：未提交学生会排在最前，其次是待批改和低分学生，最后才是稳定完成的学生。
+          </div>
+        </Card>
+      </div>
+
+      <Card title="学生跟进明细" tag="Roster">
+        <div className="grid grid-2" style={{ alignItems: "end" }}>
+          <label>
+            <div className="section-title">名单筛选</div>
+            <select
+              value={studentFilter}
+              onChange={(event) => setStudentFilter(event.target.value as AssignmentStudentFilter)}
+              style={{ width: "100%" }}
+            >
+              <option value="all">全部学生</option>
+              <option value="pending">未完成</option>
+              <option value="review">待批改</option>
+              <option value="low_score">低于 60%</option>
+              <option value="completed">已完成</option>
+            </select>
+          </label>
+          <label>
+            <div className="section-title">关键字</div>
+            <input
+              value={studentKeyword}
+              onChange={(event) => setStudentKeyword(event.target.value)}
+              placeholder="学生姓名 / 邮箱 / 年级"
+              style={{ width: "100%" }}
+            />
+          </label>
         </div>
-        <div className="cta-row" style={{ marginTop: 12 }}>
-          <Link className="button ghost" href="/teacher">
-            返回教师端
-          </Link>
-          <Link className="button secondary" href={`/teacher/assignments/${data.assignment.id}/stats`}>
-            查看统计
-          </Link>
+
+        <div className="cta-row cta-row-tight" style={{ marginTop: 12 }}>
+          <button className="button ghost" type="button" onClick={handleClearStudentFilters} disabled={!hasStudentFilters}>
+            清空筛选
+          </button>
+          <a className="button secondary" href="#assignment-notify">
+            去提醒面板
+          </a>
+        </div>
+
+        <div className="workflow-card-meta">
+          <span className="pill">当前筛选：{STUDENT_FILTER_LABELS[studentFilter]}</span>
+          <span className="pill">结果 {filteredStudents.length} 人</span>
+          {latestCompletedStudent ? <span className="pill">最新完成：{latestCompletedStudent.name}</span> : null}
+        </div>
+
+        <div className="meta-text" style={{ marginTop: 12 }}>
+          列表默认按优先级排序：未完成 {"->"} 待批改 {"->"} 低分复盘 {"->"} 其余已完成。这样你从提交箱点进来后，不需要再自己重排。
+        </div>
+
+        {!filteredStudents.length ? (
+          <StatePanel
+            compact
+            tone="empty"
+            title="没有匹配的学生"
+            description="试试放宽筛选条件，或者切回全部学生。"
+            action={
+              <button className="button secondary" type="button" onClick={handleClearStudentFilters}>
+                清空筛选
+              </button>
+            }
+          />
+        ) : (
+          <div id="assignment-students" style={{ overflowX: "auto", marginTop: 12 }}>
+            <table className="gradebook-table">
+              <thead>
+                <tr>
+                  <th>学生</th>
+                  <th>状态</th>
+                  <th>当前判断</th>
+                  <th>得分/批改</th>
+                  <th>完成时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredStudents.map((student) => {
+                  const priority = getStudentPriority(student, assignmentOverdue);
+                  const hasScore = student.score !== null && student.total !== null && student.total > 0;
+                  const needsReview = student.status === "completed" && !hasScore;
+                  return (
+                    <tr key={student.id}>
+                      <td>
+                        <div>{student.name}</div>
+                        <div className="workflow-summary-helper">
+                          {student.email}
+                          {student.grade ? ` · ${student.grade}` : ""}
+                        </div>
+                      </td>
+                      <td>
+                        <span className={getStudentStatusPillClassName(student.status, assignmentOverdue)}>
+                          {getStudentStatusLabel(student.status, assignmentOverdue)}
+                        </span>
+                      </td>
+                      <td>
+                        <div>{priority.label}</div>
+                        <div className="workflow-summary-helper">{priority.detail}</div>
+                      </td>
+                      <td>
+                        {student.status !== "completed"
+                          ? "未提交"
+                          : hasScore
+                            ? `${student.score ?? 0}/${student.total ?? 0}`
+                            : "已提交待评分"}
+                      </td>
+                      <td>{student.status === "completed" ? formatDateTime(student.completedAt) : "-"}</td>
+                      <td>
+                        {student.status === "completed" ? (
+                          <Link className="button ghost" href={`/teacher/assignments/${data.assignment.id}/reviews/${student.id}`}>
+                            {needsReview ? "开始批改" : "进入复盘"}
+                          </Link>
+                        ) : (
+                          <a className="button ghost" href="#assignment-notify">
+                            去发提醒
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Card title="提醒学生" tag="Message">
+        <div id="assignment-notify">
+          <div className="feature-card">
+            <EduIcon name="rocket" />
+            <div>
+              <div className="section-title">把提醒当成收口动作，而不是群发通知</div>
+              <p>先选目标，再预览人数，最后发送。这样老师在催交或拉回低分学生时，心里有清晰的覆盖范围。</p>
+            </div>
+          </div>
+
+          <div className="workflow-card-meta">
+            <span className="pill">未完成 {pendingStudents.length} 人</span>
+            <span className="pill">低于 60% {lowScoreStudents.length} 人</span>
+            <span className="pill">当前预计触达 {notifyPreviewStudents.length} 人</span>
+            {notifyTarget === "low_score" ? <span className="pill">阈值 {threshold}%</span> : null}
+          </div>
+
+          <div className="grid" style={{ gap: 12, marginTop: 12 }}>
+            <label>
+              <div className="section-title">提醒对象</div>
+              <select
+                value={notifyTarget}
+                onChange={(event) => setNotifyTarget(event.target.value as AssignmentNotifyTarget)}
+                style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+              >
+                <option value="missing">未提交作业</option>
+                <option value="low_score">得分低于阈值</option>
+                <option value="all">全部学生</option>
+              </select>
+            </label>
+            {notifyTarget === "low_score" ? (
+              <label>
+                <div className="section-title">分数阈值（百分比）</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={threshold}
+                  onChange={(event) => setThreshold(Number(event.target.value))}
+                  style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+                />
+              </label>
+            ) : null}
+            <label>
+              <div className="section-title">提醒文案（可选）</div>
+              <textarea
+                value={notifyMessage}
+                onChange={(event) => setNotifyMessage(event.target.value)}
+                rows={3}
+                style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
+                placeholder="例如：今晚 8 点前完成提交，明天课上会直接接这份作业。"
+              />
+            </label>
+          </div>
+
+          {notifyResult ? <div style={{ marginTop: 8, fontSize: 12 }}>{notifyResult}</div> : null}
+
+          <div className="cta-row" style={{ marginTop: 12 }}>
+            <button
+              className="button primary"
+              type="button"
+              disabled={notifyLoading}
+              onClick={async () => {
+                setNotifyLoading(true);
+                setNotifyResult(null);
+                const res = await fetch(`/api/teacher/assignments/${data.assignment.id}/notify`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ target: notifyTarget, threshold, message: notifyMessage })
+                });
+                const payload = await res.json();
+                if (!res.ok) {
+                  setNotifyResult(payload?.error ?? "提醒失败");
+                } else {
+                  setNotifyResult(`已通知学生 ${payload.data?.students ?? 0} 人，家长 ${payload.data?.parents ?? 0} 人。`);
+                }
+                setNotifyLoading(false);
+              }}
+            >
+              {notifyLoading ? "发送中..." : "发送提醒"}
+            </button>
+          </div>
         </div>
       </Card>
 
-      <Card title="评分细则（Rubric）" tag="评分">
+      <Card title="评分细则（Rubric）" tag="Rubric">
         <div className="feature-card">
           <EduIcon name="chart" />
-          <p>设置评分维度、权重与分档描述，学生端可查看评分细则。</p>
+          <div>
+            <div className="section-title">评分细则放在执行动作之后处理</div>
+            <p>当催交、批改和提醒都已经明确后，再维护评分维度和分档，会更符合教师实际工作节奏。</p>
+          </div>
         </div>
+
+        <div className="pill-list" style={{ marginTop: 12 }}>
+          <span className="pill">维度 {rubrics.length} 个</span>
+          <span className="pill">分档 {rubricLevelCount} 条</span>
+        </div>
+
         <div className="grid" style={{ gap: 12, marginTop: 12 }}>
           {rubrics.map((rubric, index) => (
             <div className="card" key={`rubric-${index}`}>
@@ -329,9 +744,7 @@ export default function TeacherAssignmentDetailPage({ params }: { params: { id: 
                             <div className="section-title">档位名称</div>
                             <input
                               value={level.label}
-                              onChange={(event) =>
-                                updateLevel(index, levelIndex, { label: event.target.value })
-                              }
+                              onChange={(event) => updateLevel(index, levelIndex, { label: event.target.value })}
                               style={{ width: "100%", padding: 8, borderRadius: 10, border: "1px solid var(--stroke)" }}
                             />
                           </label>
@@ -341,9 +754,7 @@ export default function TeacherAssignmentDetailPage({ params }: { params: { id: 
                               type="number"
                               min={0}
                               value={level.score}
-                              onChange={(event) =>
-                                updateLevel(index, levelIndex, { score: Number(event.target.value) })
-                              }
+                              onChange={(event) => updateLevel(index, levelIndex, { score: Number(event.target.value) })}
                               style={{ width: "100%", padding: 8, borderRadius: 10, border: "1px solid var(--stroke)" }}
                             />
                           </label>
@@ -352,9 +763,7 @@ export default function TeacherAssignmentDetailPage({ params }: { params: { id: 
                           <div className="section-title">描述</div>
                           <input
                             value={level.description}
-                            onChange={(event) =>
-                              updateLevel(index, levelIndex, { description: event.target.value })
-                            }
+                            onChange={(event) => updateLevel(index, levelIndex, { description: event.target.value })}
                             style={{ width: "100%", padding: 8, borderRadius: 10, border: "1px solid var(--stroke)" }}
                           />
                         </label>
@@ -404,119 +813,6 @@ export default function TeacherAssignmentDetailPage({ params }: { params: { id: 
             {rubricSaving ? "保存中..." : "保存评分细则"}
           </button>
         </div>
-      </Card>
-
-      <Card title="提醒学生" tag="消息">
-        <div className="feature-card">
-          <EduIcon name="rocket" />
-          <p>快速发送提醒给未完成或成绩偏低的学生与家长。</p>
-        </div>
-        <div className="grid" style={{ gap: 12 }}>
-          <label>
-            <div className="section-title">提醒对象</div>
-            <select
-              value={notifyTarget}
-              onChange={(event) => setNotifyTarget(event.target.value as "missing" | "low_score" | "all")}
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
-            >
-              <option value="missing">未提交作业</option>
-              <option value="low_score">得分低于阈值</option>
-              <option value="all">全部学生</option>
-            </select>
-          </label>
-          {notifyTarget === "low_score" ? (
-            <label>
-              <div className="section-title">分数阈值（百分比）</div>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={threshold}
-                onChange={(event) => setThreshold(Number(event.target.value))}
-                style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
-              />
-            </label>
-          ) : null}
-          <label>
-            <div className="section-title">提醒文案（可选）</div>
-            <textarea
-              value={notifyMessage}
-              onChange={(event) => setNotifyMessage(event.target.value)}
-              rows={3}
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
-              placeholder="例如：作业即将到期，请尽快完成。"
-            />
-          </label>
-        </div>
-        {notifyResult ? <div style={{ marginTop: 8, fontSize: 12 }}>{notifyResult}</div> : null}
-        <div className="cta-row" style={{ marginTop: 12 }}>
-          <button
-            className="button primary"
-            type="button"
-            disabled={notifyLoading}
-            onClick={async () => {
-              setNotifyLoading(true);
-              setNotifyResult(null);
-              const res = await fetch(`/api/teacher/assignments/${data.assignment.id}/notify`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ target: notifyTarget, threshold, message: notifyMessage })
-              });
-              const payload = await res.json();
-              if (!res.ok) {
-                setNotifyResult(payload?.error ?? "提醒失败");
-              } else {
-                setNotifyResult(`已通知学生 ${payload.data?.students ?? 0} 人，家长 ${payload.data?.parents ?? 0} 人。`);
-              }
-              setNotifyLoading(false);
-            }}
-          >
-            {notifyLoading ? "发送中..." : "发送提醒"}
-          </button>
-        </div>
-      </Card>
-
-      <Card title="学生完成情况" tag="班级">
-        {data.students.length === 0 ? (
-          <p>暂无学生。</p>
-        ) : (
-          <div className="grid" style={{ gap: 12 }}>
-            {data.students.map((student) => (
-              <div className="card" key={student.id}>
-                <div className="card-header">
-                  <div className="section-title">{student.name}</div>
-                  <span className="card-tag">{student.status === "completed" ? "已完成" : "待完成"}</span>
-                </div>
-                <div className="section-sub">{student.email}</div>
-                {student.status === "completed" ? (
-                  <div className="pill-list" style={{ marginTop: 10 }}>
-                    {data.assignment.submissionType === "quiz" ? (
-                      <span className="pill">
-                        得分 {student.score ?? 0}/{student.total ?? 0}
-                      </span>
-                    ) : (
-                      <span className="pill">已提交待评分</span>
-                    )}
-                    <span className="pill">
-                      完成时间 {student.completedAt ? new Date(student.completedAt).toLocaleDateString("zh-CN") : "-"}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="pill-list" style={{ marginTop: 10 }}>
-                    <span className="pill">未提交</span>
-                  </div>
-                )}
-                <Link
-                  className="button secondary"
-                  href={`/teacher/assignments/${data.assignment.id}/reviews/${student.id}`}
-                  style={{ marginTop: 8 }}
-                >
-                  批改/复盘
-                </Link>
-              </div>
-            ))}
-          </div>
-        )}
       </Card>
     </div>
   );

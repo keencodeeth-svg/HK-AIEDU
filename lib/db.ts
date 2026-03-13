@@ -1,6 +1,7 @@
 import { Pool } from "pg";
 import crypto from "crypto";
 import { normalizeBootstrapPassword } from "./password";
+import { assertRuntimeGuardrails } from "./runtime-guardrails";
 
 type QueryParam = string | number | boolean | null | string[] | number[] | Record<string, any>;
 type QueryParams = QueryParam[];
@@ -25,12 +26,14 @@ export function isDatabaseRequired() {
 }
 
 export function assertDatabaseEnabled(context = "runtime") {
+  assertRuntimeGuardrails();
   if (!isDatabaseRequired()) return;
   if (isDbEnabled()) return;
   throw new Error(`DATABASE_URL is required for ${context}. Set REQUIRE_DATABASE=false to allow JSON fallback.`);
 }
 
 function getPool() {
+  assertRuntimeGuardrails();
   if (!pool) {
     const sslEnabled = process.env.DB_SSL === "true";
     pool = new Pool({

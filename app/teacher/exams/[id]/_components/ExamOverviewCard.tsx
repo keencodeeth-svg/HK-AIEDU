@@ -7,6 +7,7 @@ type ExamOverviewCardProps = {
   data: ExamDetail;
   updatingStatus: boolean;
   publishingReviewPack: boolean;
+  statusError: string | null;
   publishMessage: string | null;
   publishError: string | null;
   onStatusAction: (action: "close" | "reopen") => void | Promise<void>;
@@ -17,6 +18,7 @@ export default function ExamOverviewCard({
   data,
   updatingStatus,
   publishingReviewPack,
+  statusError,
   publishMessage,
   publishError,
   onStatusAction,
@@ -94,8 +96,11 @@ export default function ExamOverviewCard({
           再发布一场考试
         </Link>
       </div>
-      {publishMessage ? <div className="status-note success">{publishMessage}</div> : null}
-      {publishError ? <div className="status-note error">{publishError}</div> : null}
+      <div id="exam-review-pack">
+        {statusError ? <div className="status-note error">{statusError}</div> : null}
+        {publishMessage ? <div className="status-note success">{publishMessage}</div> : null}
+        {publishError ? <div className="status-note error">{publishError}</div> : null}
+      </div>
     </Card>
   );
 }

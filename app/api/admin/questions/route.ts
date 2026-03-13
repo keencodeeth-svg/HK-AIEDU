@@ -1,6 +1,7 @@
 import { createQuestion, getKnowledgePoints, getQuestions } from "@/lib/content";
 import { requireRole } from "@/lib/guard";
 import { addAdminLog } from "@/lib/admin-log";
+import { assertAdminStepUp } from "@/lib/admin-step-up";
 import { badRequest, unauthorized } from "@/lib/api/http";
 import { isDbEnabled, query as runDbQuery } from "@/lib/db";
 import type { Question } from "@/lib/types";
@@ -730,6 +731,7 @@ export const POST = createAdminRoute({
     if (!user) {
       unauthorized();
     }
+    assertAdminStepUp(user);
 
     const body = await parseJson(request, createQuestionBodySchema);
     const subject = body.subject?.trim();

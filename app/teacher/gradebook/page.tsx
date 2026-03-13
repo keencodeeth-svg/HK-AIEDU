@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@/components/Card";
 import GradebookDistributionCard from "./_components/GradebookDistributionCard";
+import GradebookExecutionLoopCard from "./_components/GradebookExecutionLoopCard";
 import GradebookFiltersCard from "./_components/GradebookFiltersCard";
 import GradebookSummaryCard from "./_components/GradebookSummaryCard";
 import GradebookTableCard from "./_components/GradebookTableCard";
@@ -45,7 +46,7 @@ export default function TeacherGradebookPage() {
     load();
   }, [load]);
 
-  const assignments = data?.assignments ?? [];
+  const assignments = useMemo(() => data?.assignments ?? [], [data?.assignments]);
   const assignmentStatMap = useMemo(
     () => new Map((data?.assignmentStats ?? []).map((item) => [item.assignmentId, item])),
     [data?.assignmentStats]
@@ -90,6 +91,28 @@ export default function TeacherGradebookPage() {
     () => new Map((data?.trend ?? []).map((item) => [item.assignmentId, item])),
     [data?.trend]
   );
+  const selectedClass = useMemo(
+    () => (data?.classes ?? []).find((item) => item.id === classId) ?? data?.class ?? null,
+    [classId, data?.class, data?.classes]
+  );
+  const overdueStudentCount = useMemo(
+    () => (data?.students ?? []).filter((student) => student.stats.overdue > 0).length,
+    [data?.students]
+  );
+  const followUpStudentCount = useMemo(
+    () => (data?.students ?? []).filter((student) => student.stats.overdue > 0 || student.stats.pending > 0).length,
+    [data?.students]
+  );
+  const urgentAssignmentCount = useMemo(
+    () =>
+      assignments.filter((assignment) => {
+        const stat = assignmentStatMap.get(assignment.id);
+        if ((stat?.completed ?? 0) >= (stat?.total ?? 0)) return false;
+        const dueTs = new Date(assignment.dueDate).getTime();
+        return dueTs < now || dueTs - now <= 48 * 60 * 60 * 1000;
+      }).length,
+    [assignmentStatMap, assignments, now]
+  );
 
   function exportCSV() {
     if (!data) return;
@@ -133,51 +156,84 @@ export default function TeacherGradebookPage() {
       <div className="section-head">
         <div>
           <h2>成绩册</h2>
-          <div className="section-sub">按班级查看作业完成情况、缺交与迟交。</div>
+          <div className="section-sub">先收口作业与学生跟进，再回看完成率和成绩走势。</div>
         </div>
-        <span className="chip">Gradebook</span>
+        <div className="workflow-toolbar">
+          <span className="chip">Gradebook</span>
+          {selectedClass ? <span className="chip">{selectedClass.name}</span> : null}
+          {followUpStudentCount ? <span className="chip">待跟进学生 {followUpStudentCount}</span> : null}
+          {overdueStudentCount ? <span className="chip">逾期学生 {overdueStudentCount}</span> : null}
+          {urgentAssignmentCount ? <span className="chip">48h 内需收口作业 {urgentAssignmentCount}</span> : null}
+        </div>
       </div>
 
-      <GradebookFiltersCard
-        classes={data?.classes ?? []}
-        assignments={assignments}
-        classId={classId}
-        viewMode={viewMode}
-        assignmentFilter={assignmentFilter}
-        studentKeyword={studentKeyword}
-        statusFilter={statusFilter}
-        error={error}
-        onClassChange={(nextClassId) => {
-          setClassId(nextClassId);
-          load(nextClassId);
-        }}
-        onViewModeChange={setViewMode}
-        onAssignmentFilterChange={setAssignmentFilter}
-        onStudentKeywordChange={setStudentKeyword}
-        onStatusFilterChange={setStatusFilter}
-      />
-
-      <GradebookSummaryCard
+      <GradebookExecutionLoopCard
+        selectedClass={selectedClass}
         summary={data?.summary ?? null}
-        assignmentFilter={assignmentFilter}
-        visibleAssignmentsCount={visibleAssignments.length}
-        onExportCsv={exportCSV}
-        onExportExcel={exportExcel}
-      />
-
-      <GradebookDistributionCard distribution={data?.distribution ?? []} />
-      <GradebookTrendCard trend={data?.trend ?? []} />
-      <GradebookTableCard
-        loading={loading}
-        viewMode={viewMode}
-        students={filteredStudents}
-        filteredAssignments={filteredAssignments}
-        visibleAssignments={visibleAssignments}
+        assignments={assignments}
         assignmentStatMap={assignmentStatMap}
-        ranked={ranked}
+        students={data?.students ?? []}
         trendMap={trendMap}
         now={now}
       />
+
+      <div className="gradebook-top-grid">
+        <div id="gradebook-filters">
+          <GradebookFiltersCard
+            classes={data?.classes ?? []}
+            assignments={assignments}
+            classId={classId}
+            viewMode={viewMode}
+            assignmentFilter={assignmentFilter}
+            studentKeyword={studentKeyword}
+            statusFilter={statusFilter}
+            error={error}
+            onClassChange={(nextClassId) => {
+              setClassId(nextClassId);
+              load(nextClassId);
+            }}
+            onViewModeChange={setViewMode}
+            onAssignmentFilterChange={setAssignmentFilter}
+            onStudentKeywordChange={setStudentKeyword}
+            onStatusFilterChange={setStatusFilter}
+          />
+        </div>
+        <div id="gradebook-summary">
+          <GradebookSummaryCard
+            summary={data?.summary ?? null}
+            assignmentFilter={assignmentFilter}
+            visibleAssignmentsCount={visibleAssignments.length}
+            overdueStudentCount={overdueStudentCount}
+            followUpStudentCount={followUpStudentCount}
+            urgentAssignmentCount={urgentAssignmentCount}
+            onExportCsv={exportCSV}
+            onExportExcel={exportExcel}
+          />
+        </div>
+      </div>
+
+      <div className="gradebook-insight-grid">
+        <div id="gradebook-trend">
+          <GradebookTrendCard trend={data?.trend ?? []} />
+        </div>
+        <div id="gradebook-distribution">
+          <GradebookDistributionCard distribution={data?.distribution ?? []} />
+        </div>
+      </div>
+
+      <div id="gradebook-table">
+        <GradebookTableCard
+          loading={loading}
+          viewMode={viewMode}
+          students={filteredStudents}
+          filteredAssignments={filteredAssignments}
+          visibleAssignments={visibleAssignments}
+          assignmentStatMap={assignmentStatMap}
+          ranked={ranked}
+          trendMap={trendMap}
+          now={now}
+        />
+      </div>
     </div>
   );
 }

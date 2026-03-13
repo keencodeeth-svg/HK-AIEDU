@@ -13,6 +13,63 @@ export async function runAdminContentSuite(context) {
   assert.equal(adminLogin.status, 200, `Admin login failed: ${adminLogin.raw}`);
   assert.ok(context.cookieJar.has("mvp_session"), "Admin login should set mvp_session cookie");
 
+  const suspiciousLoginFailure = await apiFetch("/api/auth/login", {
+    method: "POST",
+    useCookies: false,
+    headers: {
+      "x-forwarded-for": "203.0.113.77"
+    },
+    json: { email: adminEmail, password: `${adminPassword}-wrong`, role: "admin" }
+  });
+  assert.equal(
+    suspiciousLoginFailure.status,
+    401,
+    `Admin suspicious login warmup should stay unauthorized: ${suspiciousLoginFailure.raw}`
+  );
+
+  const suspiciousAdminLogin = await apiFetch("/api/auth/login", {
+    method: "POST",
+    useCookies: false,
+    headers: {
+      "x-forwarded-for": "203.0.113.77"
+    },
+    json: { email: adminEmail, password: adminPassword, role: "admin" }
+  });
+  assert.equal(
+    suspiciousAdminLogin.status,
+    200,
+    `Admin login after failed attempts should still succeed: ${suspiciousAdminLogin.raw}`
+  );
+  assert.ok(context.cookieJar.has("mvp_session"), "Suspicious admin login should refresh mvp_session cookie");
+
+  const adminNotifications = await apiFetch("/api/notifications");
+  assert.equal(adminNotifications.status, 200, `GET /api/notifications failed: ${adminNotifications.raw}`);
+  const suspiciousLoginNotice = (adminNotifications.body?.data ?? []).find(
+    (item) =>
+      item.type === "security_alert" &&
+      typeof item.content === "string" &&
+      item.content.includes("失败尝试")
+  );
+  assert.ok(
+    suspiciousLoginNotice,
+    "Privileged suspicious login should create a security notification for the admin"
+  );
+
+  const authSecurityLogs = await apiFetch(
+    `/api/admin/logs?limit=20&action=auth_security_alert&query=${encodeURIComponent(adminEmail)}`
+  );
+  assert.equal(authSecurityLogs.status, 200, `GET /api/admin/logs for suspicious login failed: ${authSecurityLogs.raw}`);
+  const suspiciousLoginLog = (authSecurityLogs.body?.data ?? []).find(
+    (item) =>
+      typeof item.detail === "string" &&
+      item.detail.includes(adminEmail) &&
+      item.detail.includes("success_after_failures")
+  );
+  assert.ok(
+    suspiciousLoginLog,
+    "Privileged suspicious login should write an auth_security_alert admin log"
+  );
+
 
   const schoolSchedulesBefore = await apiFetch("/api/school/schedules?schoolId=school-default");
   assert.equal(schoolSchedulesBefore.status, 200, `GET /api/school/schedules failed: ${schoolSchedulesBefore.raw}`);
@@ -392,6 +449,23 @@ export async function runAdminContentSuite(context) {
   assert.equal(seededRecoveryItem.slaState, "healthy", "Fresh recovery ticket should start within SLA");
   assert.equal(typeof seededRecoveryItem.nextActionLabel, "string", "Recovery workbench should expose nextActionLabel");
 
+  const blockedKnowledgePointCreate = await apiFetch("/api/admin/knowledge-points", {
+    method: "POST",
+    json: {
+      subject: "math",
+      grade: "4",
+      unit: "StepUp 单元",
+      chapter: "StepUp 章节",
+      title: `STEP_UP_REQUIRED_${Date.now().toString(36)}`
+    }
+  });
+  assert.equal(
+    blockedKnowledgePointCreate.status,
+    428,
+    `Knowledge point mutation should require step-up first: ${blockedKnowledgePointCreate.raw}`
+  );
+  assert.equal(blockedKnowledgePointCreate.body?.error, "admin step-up required");
+
   const startRecovery = await apiFetch(`/api/admin/recovery-requests/${recoveryTicketId}`, {
     method: "POST",
     json: {
@@ -399,22 +473,56 @@ export async function runAdminContentSuite(context) {
       adminNote: "已开始人工核验注册信息"
     }
   });
-  assert.equal(startRecovery.status, 200, `POST /api/admin/recovery-requests/:id failed: ${startRecovery.raw}`);
-  assert.equal(startRecovery.body?.data?.status, "in_progress", "Recovery ticket should move into in_progress");
-  assert.equal(startRecovery.body?.data?.adminNote, "已开始人工核验注册信息");
+  assert.equal(startRecovery.status, 428, "High-risk recovery actions should require admin step-up first");
+  assert.equal(startRecovery.body?.error, "admin step-up required");
+
+  const adminStepUp = await apiFetch("/api/admin/step-up", {
+    method: "POST",
+    json: {
+      password: adminPassword
+    }
+  });
+  assert.equal(adminStepUp.status, 200, `POST /api/admin/step-up failed: ${adminStepUp.raw}`);
+  assert.equal(adminStepUp.body?.message, "管理员二次验证已通过");
+
+  const startRecoveryAfterStepUp = await apiFetch(`/api/admin/recovery-requests/${recoveryTicketId}`, {
+    method: "POST",
+    json: {
+      status: "in_progress",
+      adminNote: "已开始人工核验注册信息"
+    }
+  });
+  assert.equal(
+    startRecoveryAfterStepUp.status,
+    200,
+    `POST /api/admin/recovery-requests/:id failed: ${startRecoveryAfterStepUp.raw}`
+  );
+  assert.equal(startRecoveryAfterStepUp.body?.data?.status, "in_progress", "Recovery ticket should move into in_progress");
+  assert.equal(startRecoveryAfterStepUp.body?.data?.adminNote, "已开始人工核验注册信息");
 
   const rejectWithoutNote = await apiFetch(`/api/admin/recovery-requests/${recoveryTicketId}`, {
     method: "POST",
     json: { status: "rejected" }
   });
-  assert.equal(rejectWithoutNote.status, 400, "Rejecting a recovery ticket should require adminNote");
-  assert.equal(rejectWithoutNote.body?.error, "adminNote required");
+  assert.equal(rejectWithoutNote.status, 400, "Rejecting a recovery ticket should require explicit confirmation first");
+  assert.equal(rejectWithoutNote.body?.error, "confirmAction required");
+
+  const rejectWithoutNoteAfterConfirm = await apiFetch(`/api/admin/recovery-requests/${recoveryTicketId}`, {
+    method: "POST",
+    json: {
+      status: "rejected",
+      confirmAction: true
+    }
+  });
+  assert.equal(rejectWithoutNoteAfterConfirm.status, 400, "Rejecting a recovery ticket should still require adminNote");
+  assert.equal(rejectWithoutNoteAfterConfirm.body?.error, "adminNote required");
 
   const resolveRecovery = await apiFetch(`/api/admin/recovery-requests/${recoveryTicketId}`, {
     method: "POST",
     json: {
       status: "resolved",
-      adminNote: "已完成账号核验并通知用户重置密码"
+      adminNote: "已完成账号核验并通知用户重置密码",
+      confirmAction: true
     }
   });
   assert.equal(resolveRecovery.status, 200, `Resolving recovery ticket failed: ${resolveRecovery.raw}`);
@@ -428,6 +536,32 @@ export async function runAdminContentSuite(context) {
   assert.ok(resolvedRecoveryItem, "Resolved recovery list should include the updated ticket");
   assert.equal(resolvedRecoveryItem.status, "resolved");
 
+  const adminLogsAfterRecovery = await apiFetch("/api/admin/logs?limit=30");
+  assert.equal(adminLogsAfterRecovery.status, 200, `GET /api/admin/logs after recovery failed: ${adminLogsAfterRecovery.raw}`);
+  const recoveryUpdateLog = (adminLogsAfterRecovery.body?.data ?? []).find(
+    (item) => item.action === "auth_recovery_update" && item.entityId === recoveryTicketId
+  );
+  assert.ok(recoveryUpdateLog, "Admin logs should include structured recovery update entry");
+  const recoveryUpdateDetail = recoveryUpdateLog?.detail ? JSON.parse(recoveryUpdateLog.detail) : null;
+  assert.equal(recoveryUpdateDetail?.summary, "关闭恢复工单并标记为已解决");
+  assert.ok(Array.isArray(recoveryUpdateDetail?.changedFields), "Structured recovery update log should expose changedFields");
+  assert.equal(recoveryUpdateDetail?.after?.status, "resolved", "Structured recovery update log should expose after.status");
+
+  const filteredAdminLogs = await apiFetch(
+    `/api/admin/logs?limit=10&action=auth_recovery_update&entityType=auth_recovery&query=${encodeURIComponent(recoveryTicketId)}`
+  );
+  assert.equal(filteredAdminLogs.status, 200, `Filtered admin logs failed: ${filteredAdminLogs.raw}`);
+  const filteredLogs = filteredAdminLogs.body?.data ?? [];
+  assert.ok(filteredLogs.length >= 1, "Filtered admin logs should include the recovery update entry");
+  assert.ok(
+    filteredLogs.every((item) => item.action === "auth_recovery_update" && item.entityType === "auth_recovery"),
+    "Filtered admin logs should respect action/entityType filters"
+  );
+  assert.ok(
+    filteredLogs.some((item) => item.entityId === recoveryTicketId),
+    "Filtered admin logs should match the query term"
+  );
+
   const observabilityMetrics = await apiFetch("/api/admin/observability/metrics?limit=5");
   assert.equal(
     observabilityMetrics.status,
@@ -440,6 +574,25 @@ export async function runAdminContentSuite(context) {
     "Observability metrics should include totalRequests"
   );
   assert.ok(Array.isArray(observabilityMetrics.body?.data?.routes), "Observability metrics should include routes");
+  assert.equal(
+    typeof observabilityMetrics.body?.data?.errorTracking?.enabled,
+    "boolean",
+    "Observability metrics should expose errorTracking.enabled"
+  );
+
+  const observabilityAlerts = await apiFetch("/api/admin/observability/alerts");
+  assert.equal(
+    observabilityAlerts.status,
+    200,
+    `GET /api/admin/observability/alerts failed: ${observabilityAlerts.raw}`
+  );
+  assert.equal(
+    typeof observabilityAlerts.body?.data?.summary?.openAlerts,
+    "number",
+    "Observability alerts should include summary.openAlerts"
+  );
+  assert.ok(Array.isArray(observabilityAlerts.body?.data?.alerts), "Observability alerts should include alerts list");
+  assert.ok(Array.isArray(observabilityAlerts.body?.data?.checks), "Observability alerts should include checks list");
 
   const aiConfig = await apiFetch("/api/admin/ai/config");
   assert.equal(aiConfig.status, 200, `GET /api/admin/ai/config failed: ${aiConfig.raw}`);
@@ -521,12 +674,28 @@ export async function runAdminContentSuite(context) {
   );
   const rollbackSnapshotId = calibrationAfterApply.body?.data?.snapshots?.[0]?.id;
   if (rollbackSnapshotId) {
-    const rollbackCalibration = await apiFetch("/api/admin/ai/quality-calibration", {
+    const rollbackWithoutConfirm = await apiFetch("/api/admin/ai/quality-calibration", {
       method: "POST",
       json: {
         action: "rollback",
         snapshotId: rollbackSnapshotId,
         reason: "api_test_rollback"
+      }
+    });
+    assert.equal(
+      rollbackWithoutConfirm.status,
+      400,
+      "AI quality calibration rollback should require explicit confirmation"
+    );
+    assert.equal(rollbackWithoutConfirm.body?.error, "confirmAction required");
+
+    const rollbackCalibration = await apiFetch("/api/admin/ai/quality-calibration", {
+      method: "POST",
+      json: {
+        action: "rollback",
+        snapshotId: rollbackSnapshotId,
+        reason: "api_test_rollback",
+        confirmAction: true
       }
     });
     assert.equal(

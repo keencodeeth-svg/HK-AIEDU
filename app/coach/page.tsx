@@ -6,10 +6,19 @@ import EduIcon from "@/components/EduIcon";
 import { GRADE_OPTIONS, SUBJECT_OPTIONS } from "@/lib/constants";
 
 type CoachResponse = {
+  learningMode?: "study";
+  stage?: "diagnose" | "check" | "reveal";
+  stageLabel?: string;
+  coachReply?: string;
+  nextPrompt?: string;
+  knowledgeChecks?: string[];
   answer: string;
   steps: string[];
   hints: string[];
   checkpoints: string[];
+  answerAvailable?: boolean;
+  revealAnswerCta?: string;
+  masteryFocus?: string;
   feedback?: string | null;
   memory?: {
     recentSessionCount: number;
@@ -25,52 +34,54 @@ export default function CoachPage() {
   const [grade, setGrade] = useState("4");
   const [studentAnswer, setStudentAnswer] = useState("");
   const [data, setData] = useState<CoachResponse | null>(null);
-  const [stepIndex, setStepIndex] = useState(0);
   const [hintIndex, setHintIndex] = useState(0);
-  const [checkpointIndex, setCheckpointIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function startCoach() {
-    if (!question.trim()) return;
+  async function requestCoach(options?: { revealAnswer?: boolean }) {
+    if (!question.trim()) {
+      return;
+    }
+
     setLoading(true);
     setError(null);
+
     const res = await fetch("/api/ai/coach", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, subject, grade })
+      body: JSON.stringify({
+        question,
+        subject,
+        grade,
+        studentAnswer: studentAnswer.trim() || undefined,
+        revealAnswer: options?.revealAnswer
+      })
     });
     const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
       setData(null);
-      setError(payload?.error ?? payload?.message ?? "陪练生成失败，请稍后重试");
+      setError(payload?.error ?? payload?.message ?? "学习模式暂不可用，请稍后重试");
       setLoading(false);
       return;
     }
     setData(payload?.data ?? null);
-    setStepIndex(1);
-    setHintIndex(0);
-    setCheckpointIndex(0);
+    const nextHints = payload?.data?.hints ?? [];
+    const nextHintCount = options?.revealAnswer ? nextHints.length : Math.min(studentAnswer.trim() ? 2 : 1, nextHints.length);
+    setHintIndex(nextHintCount);
     setLoading(false);
   }
 
+  async function startCoach() {
+    await requestCoach();
+  }
+
   async function submitThinking() {
-    if (!question.trim() || !studentAnswer.trim()) return;
-    setLoading(true);
-    setError(null);
-    const res = await fetch("/api/ai/coach", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, subject, grade, studentAnswer })
-    });
-    const payload = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setError(payload?.error ?? payload?.message ?? "思路反馈失败，请稍后重试");
-      setLoading(false);
-      return;
-    }
-    setData(payload?.data ?? null);
-    setLoading(false);
+    if (!studentAnswer.trim()) return;
+    await requestCoach();
+  }
+
+  async function revealAnswer() {
+    await requestCoach({ revealAnswer: true });
   }
 
   return (
@@ -78,15 +89,15 @@ export default function CoachPage() {
       <div className="section-head">
         <div>
           <h2>学习陪练</h2>
-          <div className="section-sub">分步提示、卡点追问与思路反馈。</div>
+          <div className="section-sub">提示、追问、知识检查与按需揭晓讲解。</div>
         </div>
-        <span className="chip">AI 陪练</span>
+        <span className="chip">Study Mode</span>
       </div>
 
       <Card title="学习陪练模式" tag="输入">
         <div className="feature-card">
           <EduIcon name="brain" />
-          <p>输入题目与思路，获得逐步引导。</p>
+          <p>先说思路，再完成知识检查，需要时再揭晓完整讲解。</p>
         </div>
         <div className="grid grid-3">
           <label>
@@ -119,10 +130,11 @@ export default function CoachPage() {
           </label>
           <label>
             <div className="section-title">我的思路</div>
-            <input
+            <textarea
               value={studentAnswer}
               onChange={(event) => setStudentAnswer(event.target.value)}
-              placeholder="写下你的解题思路"
+              rows={3}
+              placeholder="先写下你会怎么下手，系统会按你的思路继续追问。"
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             />
           </label>
@@ -138,11 +150,14 @@ export default function CoachPage() {
           />
         </label>
         <div className="cta-row" style={{ marginTop: 12 }}>
-          <button className="button primary" onClick={startCoach}>
-            {loading ? "生成中..." : "开始陪练"}
+          <button className="button primary" onClick={startCoach} disabled={loading || !question.trim()}>
+            {loading ? "生成中..." : "开始学习模式"}
           </button>
-          <button className="button secondary" onClick={submitThinking} disabled={!studentAnswer.trim()}>
+          <button className="button secondary" onClick={submitThinking} disabled={loading || !question.trim() || !studentAnswer.trim()}>
             提交我的思路
+          </button>
+          <button className="button ghost" onClick={revealAnswer} disabled={loading || !question.trim()}>
+            查看完整讲解
           </button>
         </div>
         {error ? <div className="status-note error" style={{ marginTop: 8 }}>{error}</div> : null}
@@ -152,34 +167,21 @@ export default function CoachPage() {
         <Card title="陪练指引" tag="反馈">
           <div className="feature-card">
             <EduIcon name="board" />
-            <p>分步提示、追问与思路校准。</p>
+            <p>先追问和知识检查，再按需揭晓完整讲解。</p>
           </div>
-          <p>{data.answer}</p>
+          <div className="cta-row" style={{ marginBottom: 8 }}>
+            {data.stageLabel ? <span className="badge">{data.stageLabel}</span> : null}
+            {data.masteryFocus ? <span className="pill">本轮重点：{data.masteryFocus}</span> : null}
+            {data.answerAvailable && !data.answer.trim() ? <span className="pill">答案已锁定</span> : null}
+          </div>
+          {data.coachReply ? <div>{data.coachReply}</div> : null}
           {data.feedback ? <div style={{ marginTop: 10 }}>{data.feedback}</div> : null}
+          {data.nextPrompt ? <div className="status-note info" style={{ marginTop: 10 }}>{data.nextPrompt}</div> : null}
           <div className="grid" style={{ gap: 8, marginTop: 12 }}>
-            <div className="badge">分步提示</div>
-            {data.steps.slice(0, stepIndex).map((step) => (
+            <div className="badge">知识检查</div>
+            {(data.knowledgeChecks ?? data.checkpoints ?? []).map((step) => (
               <div key={step}>{step}</div>
             ))}
-            <button
-              className="button secondary"
-              onClick={() => setStepIndex((prev) => Math.min(prev + 1, data.steps.length))}
-              disabled={stepIndex >= data.steps.length}
-            >
-              下一步提示
-            </button>
-          </div>
-          <div className="grid" style={{ gap: 8, marginTop: 12 }}>
-            <div className="badge">卡点追问</div>
-            <div>{data.checkpoints[checkpointIndex] ?? "继续完善你的思路。"}</div>
-            <button
-              className="button secondary"
-              onClick={() =>
-                setCheckpointIndex((prev) => (prev + 1 >= data.checkpoints.length ? 0 : prev + 1))
-              }
-            >
-              换一个追问
-            </button>
           </div>
           <div className="grid" style={{ gap: 8, marginTop: 12 }}>
             <div className="badge">再给我一点提示</div>
@@ -194,6 +196,19 @@ export default function CoachPage() {
               我卡住了
             </button>
           </div>
+          {data.answer.trim() ? (
+            <div className="grid" style={{ gap: 8, marginTop: 12 }}>
+              <div className="badge">完整讲解</div>
+              <div>{data.answer}</div>
+              {data.steps.map((step) => (
+                <div key={step}>{step}</div>
+              ))}
+            </div>
+          ) : (
+            <div className="status-note info" style={{ marginTop: 12 }}>
+              当前仍在学习模式中。先完成追问和提示，需要时再点击“查看完整讲解”。
+            </div>
+          )}
           {data.memory ? (
             <div className="grid" style={{ gap: 8, marginTop: 12 }}>
               <div className="badge">长期记忆</div>

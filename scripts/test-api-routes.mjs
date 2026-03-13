@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { assertApiTestBuildFreshness } from "./api-test/build-freshness.mjs";
 import { createRuntime } from "./api-test/runtime.mjs";
 import { runAdminContentSuite } from "./api-test/suites/admin-content.mjs";
 import { runCoreAuthSuite } from "./api-test/suites/core-auth.mjs";
 import { runLearningSuite } from "./api-test/suites/learning.mjs";
+import { runSmokeSuite } from "./api-test/suites/smoke.mjs";
 import { runTeacherExamSuite } from "./api-test/suites/teacher-exam.mjs";
 
 const port = Number(process.env.API_TEST_PORT || 3210);
@@ -36,9 +38,32 @@ function createMutableStateSnapshot() {
 }
 
 async function run() {
-  const restoreMutableState = createMutableStateSnapshot();
-  const { server, getServerLog } = runtime.startServer();
+  const remoteSelfTest = process.env.API_TEST_REMOTE_SELF_TEST === "true";
   const scope = (process.env.API_TEST_SCOPE ?? "full").toLowerCase();
+  const requestedMode = process.env.API_TEST_SERVER_MODE;
+  const isStartMode = requestedMode === "start";
+  const restoreMutableState = runtime.isRemote ? () => {} : createMutableStateSnapshot();
+
+  if (
+    !runtime.isRemote &&
+    isStartMode &&
+    process.env.API_TEST_SKIP_BUILD_FRESHNESS_CHECK !== "true"
+  ) {
+    assertApiTestBuildFreshness(process.cwd());
+  }
+
+  const { server, getServerLog } = runtime.startServer();
+  let activeRuntime = runtime;
+
+  if (runtime.isRemote && scope !== "smoke" && scope !== "health" && process.env.API_TEST_ALLOW_REMOTE_FULL !== "true") {
+    throw new Error(
+      `Remote API test mode only allows smoke/health by default. Received API_TEST_SCOPE=${scope}. Set API_TEST_ALLOW_REMOTE_FULL=true to override intentionally.`
+    );
+  }
+
+  if (remoteSelfTest && scope !== "smoke" && scope !== "health") {
+    throw new Error(`API_TEST_REMOTE_SELF_TEST only supports smoke/health scope. Received API_TEST_SCOPE=${scope}.`);
+  }
 
   const state = {
     email: "",
@@ -52,28 +77,39 @@ async function run() {
     createdQuestionIds: new Set()
   };
 
-  const context = {
-    ...runtime,
-    state
-  };
-
   try {
     await runtime.waitForServerReady();
 
+    if (remoteSelfTest) {
+      process.env.API_TEST_BASE_URL = runtime.baseUrl;
+      activeRuntime = createRuntime(port);
+      await activeRuntime.waitForServerReady();
+    }
+
+    const context = {
+      ...activeRuntime,
+      state
+    };
+
     if (scope === "health") {
-      const health = await runtime.apiFetch("/api/health", { useCookies: false });
+      const health = await activeRuntime.apiFetch("/api/health", { useCookies: false });
       if (health.status !== 200) {
-        throw new Error(`Health check failed: ${health.status} ${health.raw}`);
+        throw new Error(`Health liveness failed: ${health.status} ${health.raw}`);
+      }
+      const readiness = await activeRuntime.apiFetch("/api/health/readiness", { useCookies: false });
+      if (readiness.status !== 200) {
+        throw new Error(`Health readiness failed: ${readiness.status} ${readiness.raw}`);
       }
       console.log("API health tests passed.");
       return;
     }
 
-    await runCoreAuthSuite(context);
     if (scope === "smoke") {
+      await runSmokeSuite(context);
       console.log("API smoke tests passed.");
       return;
     }
+    await runCoreAuthSuite(context);
     await runLearningSuite(context);
     await runTeacherExamSuite(context);
     await runAdminContentSuite(context);
@@ -91,7 +127,7 @@ async function run() {
   } finally {
     for (const questionId of state.createdQuestionIds) {
       try {
-        await runtime.apiFetch(`/api/admin/questions/${questionId}`, { method: "DELETE" });
+        await activeRuntime.apiFetch(`/api/admin/questions/${questionId}`, { method: "DELETE" });
       } catch {
         // cleanup best effort
       }
@@ -99,13 +135,16 @@ async function run() {
 
     try {
       if (state.createdKnowledgePointId) {
-        await runtime.apiFetch(`/api/admin/knowledge-points/${state.createdKnowledgePointId}`, { method: "DELETE" });
+        await activeRuntime.apiFetch(`/api/admin/knowledge-points/${state.createdKnowledgePointId}`, { method: "DELETE" });
       }
     } catch {
       // cleanup best effort
     }
 
     await runtime.stopServer(server);
+    if (remoteSelfTest) {
+      delete process.env.API_TEST_BASE_URL;
+    }
     restoreMutableState();
   }
 }

@@ -1,12 +1,37 @@
 import fs from "fs";
 import path from "path";
-import { assertDatabaseEnabled } from "./db";
+import { assertDatabaseEnabled, isDbEnabled } from "./db";
+import {
+  assertRuntimeGuardrails,
+  requiresDatabaseBackedState,
+  shouldEnforceRuntimeGuardrails,
+  warnOnJsonFallbackUsage
+} from "./runtime-guardrails";
 
 const runtimeDir = path.resolve(process.cwd(), process.env.DATA_DIR ?? ".runtime-data");
 const seedDir = path.resolve(process.cwd(), process.env.DATA_SEED_DIR ?? "data");
 const fileQueues = new Map<string, Promise<void>>();
 
 function assertJsonStorageAllowed(fileName: string) {
+  assertRuntimeGuardrails();
+  if (requiresDatabaseBackedState(fileName)) {
+    if (shouldEnforceRuntimeGuardrails()) {
+      throw new Error(
+        `[runtime-guardrails] ${fileName} cannot use JSON storage when runtime guardrails are enforced. Use the database-backed store for this state before serving traffic.`
+      );
+    }
+    if (!isDbEnabled()) {
+      throw new Error(
+        `[runtime-guardrails] ${fileName} must use database-backed storage when runtime guardrails are enforced. Configure DATABASE_URL and run db:migrate before serving traffic.`
+      );
+    }
+  }
+  if (!requiresDatabaseBackedState(fileName) && !isDbEnabled() && shouldEnforceRuntimeGuardrails()) {
+    throw new Error(
+      `[runtime-guardrails] ${fileName} must use database-backed storage when runtime guardrails are enforced. Configure DATABASE_URL and run db:migrate before serving traffic.`
+    );
+  }
+  warnOnJsonFallbackUsage(fileName);
   assertDatabaseEnabled(`json storage fallback (${fileName})`);
 }
 

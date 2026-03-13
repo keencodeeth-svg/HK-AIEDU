@@ -1,5 +1,7 @@
 import { createAdminRoute } from "@/lib/api/domains";
+import { assertAdminStepUp } from "@/lib/admin-step-up";
 import { addAdminLog } from "@/lib/admin-log";
+import { buildAdminAuditDetail, diffAuditFields } from "@/lib/admin-audit";
 import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import {
   getAiQualityCalibration,
@@ -35,6 +37,17 @@ function buildPayload(historyLimit = 20) {
   };
 }
 
+function toAuditSnapshot(config: ReturnType<typeof getAiQualityCalibration>) {
+  return {
+    globalBias: config.globalBias,
+    providerAdjustments: config.providerAdjustments,
+    kindAdjustments: config.kindAdjustments,
+    enabled: config.enabled,
+    rolloutPercent: config.rolloutPercent,
+    rolloutSalt: config.rolloutSalt
+  };
+}
+
 export const GET = createAdminRoute({
   role: "admin",
   query: querySchema,
@@ -55,6 +68,7 @@ export const POST = createAdminRoute({
     if (!user || user.role !== "admin") {
       unauthorized();
     }
+    assertAdminStepUp(user);
 
     let payload: unknown;
     try {
@@ -70,11 +84,17 @@ export const POST = createAdminRoute({
     const input = payload as Record<string, unknown>;
     const action = typeof input.action === "string" ? input.action.trim().toLowerCase() : "";
     const reason = typeof input.reason === "string" ? input.reason.trim() : undefined;
+    const confirmAction = input.confirmAction === true;
+    const currentConfig = getAiQualityCalibration();
+    const beforeSnapshot = toAuditSnapshot(currentConfig);
 
     if (action === "rollback") {
       const snapshotId = typeof input.snapshotId === "string" ? input.snapshotId.trim() : "";
       if (!snapshotId) {
         badRequest("snapshotId required");
+      }
+      if (!confirmAction) {
+        badRequest("confirmAction required");
       }
       const next = rollbackAiQualityCalibration(snapshotId, {
         updatedBy: user.id,
@@ -89,7 +109,17 @@ export const POST = createAdminRoute({
         action: "rollback_ai_quality_calibration",
         entityType: "ai_quality_calibration",
         entityId: snapshotId,
-        detail: reason ?? null
+        detail: buildAdminAuditDetail({
+          summary: "回滚 AI 质量校准快照",
+          reason,
+          changedFields: diffAuditFields(beforeSnapshot, toAuditSnapshot(next)),
+          before: beforeSnapshot,
+          after: toAuditSnapshot(next),
+          meta: {
+            snapshotId,
+            confirmAction: true
+          }
+        })
       });
       return { data: buildPayload(20) };
     }
@@ -130,10 +160,15 @@ export const POST = createAdminRoute({
       action: "update_ai_quality_calibration",
       entityType: "ai_quality_calibration",
       entityId: "runtime",
-      detail: JSON.stringify({
-        globalBias: next.globalBias,
-        enabled: next.enabled,
-        rolloutPercent: next.rolloutPercent
+      detail: buildAdminAuditDetail({
+        summary: "更新 AI 质量校准配置",
+        reason,
+        changedFields: diffAuditFields(beforeSnapshot, toAuditSnapshot(next)),
+        before: beforeSnapshot,
+        after: toAuditSnapshot(next),
+        meta: {
+          patchKeys: Object.keys(patch).sort()
+        }
       })
     });
 

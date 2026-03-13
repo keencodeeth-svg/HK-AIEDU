@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAdminStepUp } from "@/components/useAdminStepUp";
 import Card from "@/components/Card";
 import StatePanel from "@/components/StatePanel";
 import { formatLoadedTime, getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
@@ -134,6 +135,7 @@ function formatTargetBy(value: string | null) {
 }
 
 export default function AdminRecoveryRequestsPage() {
+  const { runWithStepUp, stepUpDialog } = useAdminStepUp();
   const [items, setItems] = useState<RecoveryItem[]>([]);
   const [summary, setSummary] = useState<RecoverySummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -206,23 +208,37 @@ export default function AdminRecoveryRequestsPage() {
 
   async function performAction(nextStatus: RecoveryStatus) {
     if (!selectedItem) return;
+    const requiresConfirmation = nextStatus === "resolved" || nextStatus === "rejected";
+    if (requiresConfirmation) {
+      const label = nextStatus === "resolved" ? "标记为已解决" : "标记为无法核验";
+      const confirmed = window.confirm(`确认要将该恢复工单${label}吗？此操作会写入管理员处理记录。`);
+      if (!confirmed) {
+        return;
+      }
+    }
     setActingStatus(nextStatus);
     setActionMessage(null);
     setActionError(null);
 
     try {
-      const payload = await requestJson<RecoveryActionResponse>(`/api/admin/recovery-requests/${selectedItem.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status: nextStatus,
-          adminNote: actionNote
-        })
-      });
-      setActionMessage(payload.message ?? "恢复工单已更新");
-      await load("refresh");
-    } catch (error) {
-      setActionError(getRequestErrorMessage(error, "更新恢复工单失败"));
+      await runWithStepUp(
+        async () => {
+          const payload = await requestJson<RecoveryActionResponse>(`/api/admin/recovery-requests/${selectedItem.id}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              status: nextStatus,
+              adminNote: actionNote,
+              confirmAction: requiresConfirmation || undefined
+            })
+          });
+          setActionMessage(payload.message ?? "恢复工单已更新");
+          await load("refresh");
+        },
+        (error) => {
+          setActionError(getRequestErrorMessage(error, "更新恢复工单失败"));
+        }
+      );
     } finally {
       setActingStatus(null);
     }
@@ -469,6 +485,7 @@ export default function AdminRecoveryRequestsPage() {
           </Card>
         </div>
       ) : null}
+      {stepUpDialog}
     </div>
   );
 }

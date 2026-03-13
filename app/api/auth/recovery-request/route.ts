@@ -1,5 +1,5 @@
 import { createAuthRoute } from "@/lib/api/domains";
-import { apiSuccess, badRequest } from "@/lib/api/http";
+import { ApiError, apiSuccess, badRequest } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 import { createAccountRecoveryRequest } from "@/lib/account-recovery";
 
@@ -39,8 +39,19 @@ export const POST = createAuthRoute({
       issueType: body.issueType,
       note: body.note,
       studentEmail: body.studentEmail,
-      schoolName: body.schoolName
+      schoolName: body.schoolName,
+      requesterIp: request.headers.get("x-forwarded-for"),
+      userAgent: request.headers.get("user-agent")
     });
+
+    if (result.rateLimited) {
+      throw new ApiError(429, "恢复请求提交过于频繁，请稍后再试", {
+        limitedBy: result.limitedBy,
+        retryAt: result.retryAt,
+        maxAttempts: result.maxAttempts,
+        windowMinutes: result.windowMinutes
+      });
+    }
 
     return apiSuccess(
       {

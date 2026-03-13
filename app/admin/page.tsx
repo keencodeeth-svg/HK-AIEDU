@@ -2,6 +2,7 @@ import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
 import AnalyticsFunnelCard from "@/components/AnalyticsFunnelCard";
+import ObservabilityAlertsCard from "@/components/ObservabilityAlertsCard";
 import ObservabilityMetricsCard from "@/components/ObservabilityMetricsCard";
 
 export default function AdminPage() {
@@ -100,6 +101,15 @@ export default function AdminPage() {
           </div>
           <div style={{ marginTop: 12 }}>
             <ObservabilityMetricsCard />
+          </div>
+        </Card>
+        <Card title="观测告警" tag="P0">
+          <div className="feature-card">
+            <EduIcon name="rocket" />
+            <p>按阈值汇总 API 与 AI 异常，方便管理员快速判断是否需要介入。</p>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <ObservabilityAlertsCard />
           </div>
         </Card>
       </div>

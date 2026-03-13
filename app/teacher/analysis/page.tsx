@@ -6,6 +6,7 @@ import WorkspacePage, { WorkspaceAuthState, WorkspaceEmptyState, WorkspaceErrorS
 import { getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
 import AnalysisAlertsCard from "./_components/AnalysisAlertsCard";
 import AnalysisCausalityCard from "./_components/AnalysisCausalityCard";
+import AnalysisDecisionLoopCard from "./_components/AnalysisDecisionLoopCard";
 import AnalysisFavoritesCard from "./_components/AnalysisFavoritesCard";
 import AnalysisFiltersCard from "./_components/AnalysisFiltersCard";
 import AnalysisHeatmapCard from "./_components/AnalysisHeatmapCard";
@@ -356,6 +357,22 @@ export default function TeacherAnalysisPage() {
   const sortedHeatmap = useMemo(() => heatmap.slice(0, 40), [heatmap]);
   const showHeatmapSkeleton = heatmapLoading && sortedHeatmap.length === 0;
   const showReportSkeleton = reportLoading && !report;
+  const selectedClass = useMemo(
+    () => classes.find((item) => item.id === classId) ?? null,
+    [classId, classes]
+  );
+  const activeAlertCount = useMemo(
+    () => alerts.filter((item) => item.status === "active").length,
+    [alerts]
+  );
+  const weakestKnowledgePoint = useMemo(
+    () =>
+      [...sortedHeatmap].sort((left, right) => {
+        if (left.ratio !== right.ratio) return left.ratio - right.ratio;
+        return right.total - left.total;
+      })[0] ?? null,
+    [sortedHeatmap]
+  );
 
   if (loading && !classes.length && !authRequired) {
     return <WorkspaceLoadingState title="教师分析看板加载中" description="正在汇总班级、预警、热力图和家长协同数据。" />;
@@ -386,9 +403,15 @@ export default function TeacherAnalysisPage() {
   return (
     <WorkspacePage
       title="班级学情分析"
-      subtitle="掌握热力图、预警闭环、家长协同与学情报告统一收敛。"
+      subtitle="先判断这个班最该先处理哪类风险，再锁定课堂讲评点，最后回看干预证据和班级报告。"
       lastLoadedAt={lastLoadedAt}
-      chips={[<span key="analysis-data" className="chip">数据面板</span>]}
+      chips={[
+        <span key="analysis-data" className="chip">数据面板</span>,
+        selectedClass ? <span key="analysis-class" className="chip">{selectedClass.name}</span> : null,
+        activeAlertCount ? <span key="analysis-alerts" className="chip">活跃预警 {activeAlertCount}</span> : null,
+        weakestKnowledgePoint ? <span key="analysis-weak" className="chip">最弱点已定位</span> : null,
+        causalitySummary ? <span key="analysis-evidence" className="chip">证据覆盖 {causalitySummary.evidenceReadyRate}%</span> : null
+      ].filter(Boolean)}
       actions={
         <button className="button secondary" type="button" onClick={() => void loadBootstrap("refresh")} disabled={loading || refreshing}>
           {refreshing ? "刷新中..." : "刷新"}
@@ -407,43 +430,70 @@ export default function TeacherAnalysisPage() {
           : undefined
       }
     >
+      <div className="analysis-top-grid">
+        <AnalysisFiltersCard classes={classes} classId={classId} onClassChange={setClassId} />
+        <AnalysisDecisionLoopCard
+          selectedClass={selectedClass}
+          alerts={alerts}
+          heatmap={sortedHeatmap}
+          causalitySummary={causalitySummary}
+          parentCollaboration={parentCollaboration}
+          report={report}
+        />
+      </div>
 
-      <AnalysisFiltersCard classes={classes} classId={classId} onClassChange={setClassId} />
-      <AnalysisAlertsCard
-        alerts={alerts}
-        alertActionMessage={alertActionMessage}
-        alertSummary={alertSummary}
-        parentCollaboration={parentCollaboration}
-        actingAlertKey={actingAlertKey}
-        acknowledgingAlertId={acknowledgingAlertId}
-        loadingImpactId={loadingImpactId}
-        impactByAlertId={impactByAlertId}
-        onRunAlertAction={runAlertAction}
-        onAcknowledgeAlert={acknowledgeAlert}
-        onLoadAlertImpact={loadAlertImpact}
-      />
-      <AnalysisCausalityCard
-        causalityDays={causalityDays}
-        causalitySummary={causalitySummary}
-        causalityItems={causalityItems}
-        causalityLoading={causalityLoading}
-        onCausalityDaysChange={setCausalityDays}
-      />
-      <AnalysisHeatmapCard items={sortedHeatmap} showHeatmapSkeleton={showHeatmapSkeleton} />
-      <AnalysisReportCard
-        classId={classId}
-        report={report}
-        reportLoading={reportLoading}
-        reportError={reportError}
-        showReportSkeleton={showReportSkeleton}
-        onGenerateReport={generateReport}
-      />
-      <AnalysisFavoritesCard
-        studentId={studentId}
-        students={students}
-        favorites={favorites}
-        onStudentChange={setStudentId}
-      />
+      <div className="analysis-main-grid">
+        <div id="analysis-alerts">
+          <AnalysisAlertsCard
+            alerts={alerts}
+            alertActionMessage={alertActionMessage}
+            alertSummary={alertSummary}
+            parentCollaboration={parentCollaboration}
+            actingAlertKey={actingAlertKey}
+            acknowledgingAlertId={acknowledgingAlertId}
+            loadingImpactId={loadingImpactId}
+            impactByAlertId={impactByAlertId}
+            onRunAlertAction={runAlertAction}
+            onAcknowledgeAlert={acknowledgeAlert}
+            onLoadAlertImpact={loadAlertImpact}
+          />
+        </div>
+        <div id="analysis-causality">
+          <AnalysisCausalityCard
+            causalityDays={causalityDays}
+            causalitySummary={causalitySummary}
+            causalityItems={causalityItems}
+            causalityLoading={causalityLoading}
+            onCausalityDaysChange={setCausalityDays}
+          />
+        </div>
+      </div>
+
+      <div className="analysis-bottom-grid">
+        <div id="analysis-heatmap">
+          <AnalysisHeatmapCard items={sortedHeatmap} showHeatmapSkeleton={showHeatmapSkeleton} />
+        </div>
+        <div className="analysis-side-stack">
+          <div id="analysis-report">
+            <AnalysisReportCard
+              classId={classId}
+              report={report}
+              reportLoading={reportLoading}
+              reportError={reportError}
+              showReportSkeleton={showReportSkeleton}
+              onGenerateReport={generateReport}
+            />
+          </div>
+          <div id="analysis-favorites">
+            <AnalysisFavoritesCard
+              studentId={studentId}
+              students={students}
+              favorites={favorites}
+              onStudentChange={setStudentId}
+            />
+          </div>
+        </div>
+      </div>
     </WorkspacePage>
   );
 }

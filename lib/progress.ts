@@ -165,19 +165,25 @@ export async function saveAttempts(list: QuestionAttempt[]) {
   }
 }
 
-export async function addAttempt(attempt: QuestionAttempt, options?: { reviewOrigin?: WrongReviewOriginMeta }) {
+export async function addAttempt(
+  attempt: QuestionAttempt,
+  options?: { reviewOrigin?: WrongReviewOriginMeta; skipReviewScheduling?: boolean }
+) {
   if (!isDbEnabled()) {
     assertDatabaseEnabled("question_attempts");
     const list = await getAttempts();
     list.push(attempt);
     await saveAttempts(list);
+    if (options?.skipReviewScheduling) {
+      return;
+    }
     await scheduleReviewTasksAfterAttempt({
       userId: attempt.userId,
       questionId: attempt.questionId,
       subject: attempt.subject,
       knowledgePointId: attempt.knowledgePointId,
       correct: attempt.correct,
-      reviewOrigin: options?.reviewOrigin
+     reviewOrigin: options?.reviewOrigin
     });
     return;
   }
@@ -197,6 +203,9 @@ export async function addAttempt(attempt: QuestionAttempt, options?: { reviewOri
       attempt.createdAt
     ]
   );
+  if (options?.skipReviewScheduling) {
+    return;
+  }
   await scheduleReviewTasksAfterAttempt({
     userId: attempt.userId,
     questionId: attempt.questionId,

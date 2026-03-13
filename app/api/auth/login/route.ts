@@ -7,6 +7,7 @@ import {
   verifyPassword
 } from "@/lib/auth";
 import { addAdminLog } from "@/lib/admin-log";
+import { clearAdminStepUpCookie } from "@/lib/admin-step-up";
 import { ApiError, apiSuccess, forbidden, unauthorized } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 import { allowLegacyPlainPasswords } from "@/lib/password";
@@ -17,6 +18,10 @@ import {
   registerFailedLoginAttempt,
   type LoginAttemptStatus
 } from "@/lib/auth-security";
+import {
+  handleLoginLockoutSecurity,
+  handleSuccessfulLoginSecurity
+} from "@/lib/auth-login-alerts";
 import { createAuthRoute } from "@/lib/api/domains";
 
 const loginBodySchema = v.object<{
@@ -52,6 +57,19 @@ export const POST = createAuthRoute({
     });
     const attemptStatus = await getLoginAttemptStatus(attemptIdentity);
     if (attemptStatus.locked) {
+      try {
+        await handleLoginLockoutSecurity({
+          user: await getUserByEmail(body.email),
+          ip: attemptIdentity.ip,
+          requestedRole: body.role ?? null,
+          failedCount: attemptStatus.failedCount,
+          maxFailedAttempts: attemptStatus.maxFailedAttempts,
+          lockUntil: attemptStatus.lockUntil,
+          trigger: "locked_before_password_check"
+        });
+      } catch {
+        // login alert side effects should not block auth responses
+      }
       throw new ApiError(429, "登录失败次数过多，请稍后再试", toAttemptDetails(attemptStatus));
     }
 
@@ -63,6 +81,19 @@ export const POST = createAuthRoute({
     if (!user || legacyPasswordDisabled || !verifyPassword(body.password, user.password)) {
       const failed = await registerFailedLoginAttempt(attemptIdentity);
       if (failed.locked) {
+        try {
+          await handleLoginLockoutSecurity({
+            user,
+            ip: attemptIdentity.ip,
+            requestedRole: body.role ?? null,
+            failedCount: failed.failedCount,
+            maxFailedAttempts: failed.maxFailedAttempts,
+            lockUntil: failed.lockUntil,
+            trigger: "lockout_threshold_reached"
+          });
+        } catch {
+          // login alert side effects should not block auth responses
+        }
         throw new ApiError(429, "登录失败次数过多，请稍后再试", toAttemptDetails(failed));
       }
       if (legacyPasswordDisabled) {
@@ -80,6 +111,8 @@ export const POST = createAuthRoute({
         // keep login available even if background migration fails
       }
     }
+
+    const failedCountBeforeSuccess = attemptStatus.failedCount;
 
     try {
       await clearLoginAttempt(attemptIdentity);
@@ -104,6 +137,7 @@ export const POST = createAuthRoute({
       }
     );
 
+    clearAdminStepUpCookie(response);
     setSessionCookie(response, session.id);
 
     if (user.role === "admin") {
@@ -114,6 +148,16 @@ export const POST = createAuthRoute({
         entityId: user.id,
         detail: user.email
       });
+    }
+
+    try {
+      await handleSuccessfulLoginSecurity({
+        user,
+        ip: attemptIdentity.ip,
+        failedCountBeforeSuccess
+      });
+    } catch {
+      // login alert side effects should not block successful auth
     }
 
     return response;

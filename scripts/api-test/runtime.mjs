@@ -4,7 +4,13 @@ import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 
 export function createRuntime(port) {
-  const baseUrl = `http://127.0.0.1:${port}`;
+  const configuredBaseUrl = process.env.API_TEST_BASE_URL?.trim();
+  const baseUrl = configuredBaseUrl
+    ? configuredBaseUrl.replace(/\/+$/, "")
+    : `http://127.0.0.1:${port}`;
+  const baseOrigin = new URL(baseUrl).origin;
+  const isRemote = Boolean(configuredBaseUrl);
+  const readinessToken = process.env.API_TEST_READINESS_TOKEN?.trim() || process.env.READINESS_PROBE_TOKEN?.trim() || "";
   const cookieJar = new Map();
   let activeServer = null;
   let activeMode = null;
@@ -42,11 +48,16 @@ export function createRuntime(port) {
   }
 
   async function apiFetch(path, options = {}) {
-    const { json, useCookies = true, timeoutMs = 20000, ...rest } = options;
+    const { json, useCookies = true, timeoutMs = 20000, referrer, ...rest } = options;
     const headers = new Headers(rest.headers ?? {});
+    const method = String(rest.method ?? "GET").toUpperCase();
+    const safeMethod = method === "GET" || method === "HEAD" || method === "OPTIONS";
 
     if (json !== undefined) {
       headers.set("content-type", "application/json");
+    }
+    if (path === "/api/health/readiness" && readinessToken && !headers.has("x-readiness-token")) {
+      headers.set("x-readiness-token", readinessToken);
     }
     if (useCookies) {
       const cookie = buildCookieHeader();
@@ -54,6 +65,23 @@ export function createRuntime(port) {
         headers.set("cookie", cookie);
       }
     }
+    if (!headers.has("x-test-origin")) {
+      headers.set("x-test-origin", baseUrl);
+    }
+    if (isRemote && !safeMethod) {
+      if (!headers.has("origin")) {
+        headers.set("origin", baseOrigin);
+      }
+      if (!headers.has("referer")) {
+        headers.set("referer", typeof referrer === "string" && referrer.trim() ? referrer.trim() : `${baseUrl}/api-test`);
+      }
+    }
+    const requestReferrer =
+      typeof referrer === "string" && referrer.trim()
+        ? referrer.trim()
+        : !headers.has("x-test-origin") && !safeMethod
+          ? `${baseUrl}/api-test`
+          : undefined;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -63,6 +91,7 @@ export function createRuntime(port) {
         ...rest,
         headers,
         body: json !== undefined ? JSON.stringify(json) : rest.body,
+        referrer: requestReferrer,
         signal: controller.signal
       });
     } catch (error) {
@@ -84,6 +113,16 @@ export function createRuntime(port) {
     const start = Date.now();
     let fallbackAttempted = false;
     while (Date.now() - start < timeoutMs) {
+      if (isRemote) {
+        try {
+          const response = await fetch(`${baseUrl}/api/health`);
+          if (response.ok) return;
+        } catch {
+          // retry
+        }
+        await delay(500);
+        continue;
+      }
       if (activeServer && activeServer.exitCode !== null) {
         if (
           !fallbackAttempted &&
@@ -109,6 +148,7 @@ export function createRuntime(port) {
   }
 
   async function stopServer(server) {
+    if (isRemote) return;
     const target = activeServer ?? server;
     if (!target || target.exitCode !== null) return;
     target.kill("SIGTERM");
@@ -127,6 +167,7 @@ export function createRuntime(port) {
     const runtimeEnv = {
       ...process.env,
       NEXT_TELEMETRY_DISABLED: "1",
+      API_TEST_ALLOW_CUSTOM_ORIGIN_HEADER: "true",
       REQUIRE_DATABASE: process.env.REQUIRE_DATABASE ?? "false",
       ALLOW_JSON_FALLBACK: process.env.ALLOW_JSON_FALLBACK ?? "true"
     };
@@ -145,6 +186,12 @@ export function createRuntime(port) {
   }
 
   function startServer() {
+    if (isRemote) {
+      return {
+        server: null,
+        getServerLog: () => ""
+      };
+    }
     const requestedMode = process.env.API_TEST_SERVER_MODE;
     activeMode = requestedMode === "start" ? "start" : "dev";
     activeServer = spawnServer(activeMode);
@@ -157,6 +204,7 @@ export function createRuntime(port) {
 
   return {
     baseUrl,
+    isRemote,
     cookieJar,
     apiFetch,
     waitForServerReady,

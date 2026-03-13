@@ -1,4 +1,5 @@
 import { createAdminRoute } from "@/lib/api/domains";
+import { assertAdminStepUp } from "@/lib/admin-step-up";
 import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { updateAccountRecoveryRequest, type AccountRecoveryRequestStatus } from "@/lib/account-recovery";
 import { v } from "@/lib/api/validation";
@@ -15,10 +16,12 @@ const paramsSchema = v.object<{ id: string }>(
 const actionBodySchema = v.object<{
   status: AccountRecoveryRequestStatus;
   adminNote?: string;
+  confirmAction?: boolean;
 }>(
   {
     status: v.enum(["pending", "in_progress", "resolved", "rejected"] as const),
-    adminNote: v.optional(v.string({ allowEmpty: true }))
+    adminNote: v.optional(v.string({ allowEmpty: true })),
+    confirmAction: v.optional(v.boolean())
   },
   { allowUnknown: false }
 );
@@ -39,7 +42,11 @@ export const POST = createAdminRoute({
     if (!user) {
       unauthorized();
     }
-    if (body.status === "rejected" && !body.adminNote?.trim()) {
+    assertAdminStepUp(user);
+    if ((body.status === "resolved" || body.status === "rejected") && !body.confirmAction) {
+      badRequest("confirmAction required");
+    }
+    if ((body.status === "resolved" || body.status === "rejected") && !body.adminNote?.trim()) {
       badRequest("adminNote required");
     }
 

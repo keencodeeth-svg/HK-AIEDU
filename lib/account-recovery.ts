@@ -1,5 +1,9 @@
-import { addAdminLog, getAdminLogById, getAdminLogs, updateAdminLog, type AdminLog } from "./admin-log";
+import crypto from "crypto";
+import { addAdminLog, getAdminLogById, listAdminLogs, updateAdminLog, type AdminLog } from "./admin-log";
+import { buildAdminAuditDetail, diffAuditFields } from "./admin-audit";
 import { getUserByEmail } from "./auth";
+import { isDbEnabled, query } from "./db";
+import { mutateJson, readJson } from "./storage";
 
 export type AccountRecoveryRole = "student" | "teacher" | "parent" | "admin" | "school_admin";
 export type AccountRecoveryIssueType = "forgot_password" | "forgot_account" | "account_locked";
@@ -15,6 +19,8 @@ export type AccountRecoveryRequestInput = {
   note?: string;
   studentEmail?: string;
   schoolName?: string;
+  requesterIp?: string | null;
+  userAgent?: string | null;
 };
 
 type AccountRecoveryLogDetail = {
@@ -33,6 +39,59 @@ type AccountRecoveryLogDetail = {
   handledAt?: string | null;
   updatedAt?: string | null;
   lastAction?: string | null;
+  requesterIp?: string | null;
+  userAgent?: string | null;
+};
+
+type AccountRecoveryAttemptDetail = {
+  role: AccountRecoveryRole;
+  email: string;
+  issueType: AccountRecoveryIssueType;
+  requesterIp?: string | null;
+  userAgent?: string | null;
+  result: "accepted" | "duplicate" | "rate_limited";
+  limitedBy?: "email" | "ip";
+  retryAt?: string | null;
+};
+
+type AccountRecoveryRateLimitResult =
+  | {
+      limited: false;
+    }
+  | {
+      limited: true;
+      limitedBy: "email" | "ip";
+      retryAt: string;
+      maxAttempts: number;
+      windowMinutes: number;
+    };
+
+type AccountRecoveryAttemptRecord = {
+  id: string;
+  role: AccountRecoveryRole;
+  email: string;
+  issueType: AccountRecoveryIssueType;
+  requesterIp: string | null;
+  userAgent: string | null;
+  result: "accepted" | "duplicate" | "rate_limited";
+  limitedBy?: "email" | "ip";
+  retryAt?: string | null;
+  ticketId?: string | null;
+  createdAt: string;
+};
+
+type DbAccountRecoveryAttempt = {
+  id: string;
+  role: string;
+  email: string;
+  issue_type: string;
+  requester_ip: string | null;
+  user_agent: string | null;
+  result: string;
+  limited_by: string | null;
+  retry_at: string | null;
+  ticket_id: string | null;
+  created_at: string;
 };
 
 export type AccountRecoveryRecord = {
@@ -81,9 +140,50 @@ export type AccountRecoveryListResult = {
 
 const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
 const RECOVERY_SLA_MS = 24 * 60 * 60 * 1000;
+const RECOVERY_ATTEMPTS_FILE = "auth-recovery-attempts.json";
+const MAX_ATTEMPT_FILE_RECORDS = 20000;
+
+function toIntEnv(value: string | undefined, fallback: number, min: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(parsed)));
+}
+
+function getRecoveryRateLimitPolicy() {
+  const emailWindowMinutes = toIntEnv(process.env.AUTH_RECOVERY_EMAIL_WINDOW_MINUTES, 30, 5, 240);
+  const emailMaxAttempts = toIntEnv(process.env.AUTH_RECOVERY_EMAIL_MAX_ATTEMPTS, 4, 2, 20);
+  const ipWindowMinutes = toIntEnv(process.env.AUTH_RECOVERY_IP_WINDOW_MINUTES, 30, 5, 240);
+  const ipMaxAttempts = toIntEnv(process.env.AUTH_RECOVERY_IP_MAX_ATTEMPTS, 12, 3, 100);
+
+  return {
+    emailWindowMinutes,
+    emailMaxAttempts,
+    emailWindowMs: emailWindowMinutes * 60 * 1000,
+    ipWindowMinutes,
+    ipMaxAttempts,
+    ipWindowMs: ipWindowMinutes * 60 * 1000
+  };
+}
 
 function normalizeEmail(value?: string | null) {
   return (value ?? "").trim().toLowerCase();
+}
+
+function normalizeOptionalString(value?: string | null, maxLength = 512) {
+  const trimmed = (value ?? "").trim();
+  return trimmed ? trimmed.slice(0, maxLength) : null;
+}
+
+function shouldTrustProxyHeaders() {
+  return process.env.AUTH_TRUST_PROXY_HEADERS === "true";
+}
+
+function normalizeRequesterIp(value?: string | null) {
+  if (!shouldTrustProxyHeaders()) return null;
+  const first = String(value ?? "")
+    .split(",")[0]
+    ?.trim();
+  return first ? first.slice(0, 128) : null;
 }
 
 function normalizeStatus(value?: string | null): AccountRecoveryRequestStatus {
@@ -91,6 +191,20 @@ function normalizeStatus(value?: string | null): AccountRecoveryRequestStatus {
     return value;
   }
   return "pending";
+}
+
+function normalizeIssueType(value?: string | null): AccountRecoveryIssueType {
+  if (value === "forgot_password" || value === "forgot_account" || value === "account_locked") {
+    return value;
+  }
+  return "forgot_password";
+}
+
+function normalizeRole(value?: string | null): AccountRecoveryRole {
+  if (value === "student" || value === "teacher" || value === "parent" || value === "admin" || value === "school_admin") {
+    return value;
+  }
+  return "student";
 }
 
 function parseRecoveryDetail(detail?: string | null): AccountRecoveryLogDetail | null {
@@ -102,6 +216,40 @@ function parseRecoveryDetail(detail?: string | null): AccountRecoveryLogDetail |
   } catch {
     return null;
   }
+}
+
+function parseRecoveryAttemptDetail(detail?: string | null): AccountRecoveryAttemptDetail | null {
+  if (!detail) return null;
+  try {
+    const payload = JSON.parse(detail) as AccountRecoveryAttemptDetail;
+    if (!payload || typeof payload !== "object") return null;
+    if (!payload.email || !payload.issueType || !payload.role) return null;
+    if (payload.result !== "accepted" && payload.result !== "duplicate" && payload.result !== "rate_limited") {
+      return null;
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function mapRecoveryAttempt(row: DbAccountRecoveryAttempt): AccountRecoveryAttemptRecord {
+  return {
+    id: row.id,
+    role: normalizeRole(row.role),
+    email: normalizeEmail(row.email),
+    issueType: normalizeIssueType(row.issue_type),
+    requesterIp: normalizeRequesterIp(row.requester_ip),
+    userAgent: normalizeOptionalString(row.user_agent, 512),
+    result:
+      row.result === "duplicate" || row.result === "rate_limited" || row.result === "accepted"
+        ? row.result
+        : "accepted",
+    limitedBy: row.limited_by === "email" || row.limited_by === "ip" ? row.limited_by : undefined,
+    retryAt: row.retry_at ?? null,
+    ticketId: row.ticket_id ?? null,
+    createdAt: row.created_at
+  };
 }
 
 function getWaitingHours(createdAt: string) {
@@ -275,15 +423,266 @@ function buildSummary(items: AccountRecoveryRecord[]): AccountRecoverySummary {
   );
 }
 
+function getRecoveryUpdateSummary(status: AccountRecoveryRequestStatus) {
+  if (status === "pending") return "重新打开恢复工单";
+  if (status === "in_progress") return "接单处理恢复工单";
+  if (status === "resolved") return "关闭恢复工单并标记为已解决";
+  return "关闭恢复工单并标记为无法核验";
+}
+
+async function listRecentRecoveryAttempts(input: {
+  email: string;
+  requesterIp: string | null;
+  lookbackMs: number;
+}) {
+  const cutoffIso = new Date(Date.now() - input.lookbackMs).toISOString();
+
+  if (!isDbEnabled()) {
+    return readJson<AccountRecoveryAttemptRecord[]>(RECOVERY_ATTEMPTS_FILE, []).filter((item) => {
+      const createdAt = new Date(item.createdAt).getTime();
+      if (!Number.isFinite(createdAt) || createdAt < Date.now() - input.lookbackMs) {
+        return false;
+      }
+      if (item.email === input.email) return true;
+      return Boolean(input.requesterIp && item.requesterIp === input.requesterIp);
+    });
+  }
+
+  const params: Array<string | null> = [cutoffIso, input.email];
+  let sql =
+    `SELECT id, role, email, issue_type, requester_ip, user_agent, result, limited_by, retry_at, ticket_id, created_at
+     FROM auth_recovery_attempts
+     WHERE created_at >= $1
+       AND email = $2`;
+
+  if (input.requesterIp) {
+    params.push(input.requesterIp);
+    sql += ` OR (created_at >= $1 AND requester_ip = $3)`;
+  }
+
+  sql += " ORDER BY created_at DESC LIMIT 5000";
+
+  const rows = await query<DbAccountRecoveryAttempt>(sql, params);
+  return rows.map(mapRecoveryAttempt);
+}
+
+async function recordRecoveryAttempt(input: {
+  role: AccountRecoveryRole;
+  email: string;
+  issueType: AccountRecoveryIssueType;
+  requesterIp: string | null;
+  userAgent: string | null;
+  result: "accepted" | "duplicate" | "rate_limited";
+  ticketId?: string | null;
+  limitedBy?: "email" | "ip";
+  retryAt?: string | null;
+}) {
+  const record: AccountRecoveryAttemptRecord = {
+    id: `recovery-attempt-${crypto.randomBytes(8).toString("hex")}`,
+    role: input.role,
+    email: normalizeEmail(input.email),
+    issueType: input.issueType,
+    requesterIp: normalizeRequesterIp(input.requesterIp),
+    userAgent: normalizeOptionalString(input.userAgent, 512),
+    result: input.result,
+    limitedBy: input.limitedBy,
+    retryAt: input.retryAt ?? null,
+    ticketId: input.ticketId ?? null,
+    createdAt: new Date().toISOString()
+  };
+
+  if (!isDbEnabled()) {
+    return mutateJson<AccountRecoveryAttemptRecord[], AccountRecoveryAttemptRecord>(
+      RECOVERY_ATTEMPTS_FILE,
+      [],
+      (list) => {
+        const next = [...list, record];
+        return {
+          next: next.length > MAX_ATTEMPT_FILE_RECORDS ? next.slice(next.length - MAX_ATTEMPT_FILE_RECORDS) : next,
+          result: record
+        };
+      }
+    );
+  }
+
+  await query(
+    `INSERT INTO auth_recovery_attempts
+      (id, role, email, issue_type, requester_ip, user_agent, result, limited_by, retry_at, ticket_id, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [
+      record.id,
+      record.role,
+      record.email,
+      record.issueType,
+      record.requesterIp,
+      record.userAgent,
+      record.result,
+      record.limitedBy ?? null,
+      record.retryAt ?? null,
+      record.ticketId ?? null,
+      record.createdAt
+    ]
+  );
+
+  return record;
+}
+
+function getRetryAt(attempts: Array<{ createdAt: string }>, windowMs: number, maxAttempts: number) {
+  const sorted = attempts
+    .map((item) => new Date(item.createdAt).getTime())
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => b - a);
+  const boundaryTs = sorted[Math.max(0, maxAttempts - 1)];
+  if (!Number.isFinite(boundaryTs)) {
+    return new Date(Date.now() + windowMs).toISOString();
+  }
+  return new Date(boundaryTs + windowMs).toISOString();
+}
+
+function getRecoveryRateLimitStatus(input: {
+  attempts: AccountRecoveryAttemptRecord[];
+  email: string;
+  requesterIp: string | null;
+}): AccountRecoveryRateLimitResult {
+  const policy = getRecoveryRateLimitPolicy();
+  const now = Date.now();
+
+  const recentEmailAttempts = input.attempts.filter((item) => {
+    const createdAt = new Date(item.createdAt).getTime();
+    return Number.isFinite(createdAt) && now - createdAt <= policy.emailWindowMs && item.email === input.email;
+  });
+
+  if (recentEmailAttempts.length >= policy.emailMaxAttempts) {
+    return {
+      limited: true,
+      limitedBy: "email",
+      retryAt: getRetryAt(recentEmailAttempts, policy.emailWindowMs, policy.emailMaxAttempts),
+      maxAttempts: policy.emailMaxAttempts,
+      windowMinutes: policy.emailWindowMinutes
+    };
+  }
+
+  if (input.requesterIp) {
+    const recentIpAttempts = input.attempts.filter((item) => {
+      const createdAt = new Date(item.createdAt).getTime();
+      return Number.isFinite(createdAt) && now - createdAt <= policy.ipWindowMs && item.requesterIp === input.requesterIp;
+    });
+
+    if (recentIpAttempts.length >= policy.ipMaxAttempts) {
+      return {
+        limited: true,
+        limitedBy: "ip",
+        retryAt: getRetryAt(recentIpAttempts, policy.ipWindowMs, policy.ipMaxAttempts),
+        maxAttempts: policy.ipMaxAttempts,
+        windowMinutes: policy.ipWindowMinutes
+      };
+    }
+  }
+
+  return { limited: false };
+}
+
+async function addRecoveryAttemptAuditLog(input: {
+  role: AccountRecoveryRole;
+  email: string;
+  issueType: AccountRecoveryIssueType;
+  requesterIp: string | null;
+  userAgent: string | null;
+  result: "accepted" | "duplicate" | "rate_limited";
+  entityId?: string | null;
+  limitedBy?: "email" | "ip";
+  retryAt?: string | null;
+}) {
+  await addAdminLog({
+    adminId: null,
+    action: "auth_recovery_attempt",
+    entityType: "auth_recovery",
+    entityId: input.entityId ?? null,
+    detail: JSON.stringify({
+      role: input.role,
+      email: input.email,
+      issueType: input.issueType,
+      requesterIp: input.requesterIp,
+      userAgent: input.userAgent,
+      result: input.result,
+      limitedBy: input.limitedBy,
+      retryAt: input.retryAt ?? null
+    } satisfies AccountRecoveryAttemptDetail)
+  });
+}
+
+async function trackRecoveryAttempt(input: {
+  role: AccountRecoveryRole;
+  email: string;
+  issueType: AccountRecoveryIssueType;
+  requesterIp: string | null;
+  userAgent: string | null;
+  result: "accepted" | "duplicate" | "rate_limited";
+  entityId?: string | null;
+  limitedBy?: "email" | "ip";
+  retryAt?: string | null;
+}) {
+  await recordRecoveryAttempt({
+    role: input.role,
+    email: input.email,
+    issueType: input.issueType,
+    requesterIp: input.requesterIp,
+    userAgent: input.userAgent,
+    result: input.result,
+    ticketId: input.entityId ?? null,
+    limitedBy: input.limitedBy,
+    retryAt: input.retryAt ?? null
+  });
+
+  await addRecoveryAttemptAuditLog(input);
+}
+
 export async function createAccountRecoveryRequest(input: AccountRecoveryRequestInput) {
   const email = normalizeEmail(input.email);
   const studentEmail = normalizeEmail(input.studentEmail);
+  const requesterIp = normalizeRequesterIp(input.requesterIp);
+  const userAgent = normalizeOptionalString(input.userAgent, 512);
   const matchedUser = email ? await getUserByEmail(email) : null;
-  const logs = await getAdminLogs(200);
+  const policy = getRecoveryRateLimitPolicy();
+  const recentAttempts = await listRecentRecoveryAttempts({
+    email,
+    requesterIp,
+    lookbackMs: Math.max(policy.emailWindowMs, requesterIp ? policy.ipWindowMs : 0)
+  });
+  const rateLimit = getRecoveryRateLimitStatus({
+    attempts: recentAttempts,
+    email,
+    requesterIp
+  });
+
+  if (rateLimit.limited) {
+    await trackRecoveryAttempt({
+      role: input.role,
+      email,
+      issueType: input.issueType,
+      requesterIp,
+      userAgent,
+      result: "rate_limited",
+      limitedBy: rateLimit.limitedBy,
+      retryAt: rateLimit.retryAt
+    });
+    return {
+      rateLimited: true as const,
+      limitedBy: rateLimit.limitedBy,
+      retryAt: rateLimit.retryAt,
+      maxAttempts: rateLimit.maxAttempts,
+      windowMinutes: rateLimit.windowMinutes
+    };
+  }
+
   const now = Date.now();
+  const logs = await listAdminLogs({
+    limit: 200,
+    action: "auth_recovery_request",
+    entityType: "auth_recovery"
+  });
 
   const duplicate = logs.find((item) => {
-    if (item.action !== "auth_recovery_request") return false;
     const detail = parseRecoveryDetail(item.detail);
     if (!detail) return false;
     const sameUser = normalizeEmail(detail.email) === email && detail.role === input.role && detail.issueType === input.issueType;
@@ -293,7 +692,17 @@ export async function createAccountRecoveryRequest(input: AccountRecoveryRequest
   });
 
   if (duplicate) {
+    await trackRecoveryAttempt({
+      role: input.role,
+      email,
+      issueType: input.issueType,
+      requesterIp,
+      userAgent,
+      result: "duplicate",
+      entityId: duplicate.id
+    });
     return {
+      rateLimited: false as const,
       ticketId: duplicate.id,
       submittedAt: duplicate.createdAt,
       duplicate: true,
@@ -316,7 +725,9 @@ export async function createAccountRecoveryRequest(input: AccountRecoveryRequest
     handledByAdminId: null,
     handledAt: null,
     updatedAt: createdAt,
-    lastAction: "submitted"
+    lastAction: "submitted",
+    requesterIp,
+    userAgent
   };
 
   const entry = await addAdminLog({
@@ -327,7 +738,18 @@ export async function createAccountRecoveryRequest(input: AccountRecoveryRequest
     detail: JSON.stringify(detail)
   });
 
+  await trackRecoveryAttempt({
+    role: input.role,
+    email,
+    issueType: input.issueType,
+    requesterIp,
+    userAgent,
+    result: "accepted",
+    entityId: entry.id
+  });
+
   return {
+    rateLimited: false as const,
     ticketId: entry.id,
     submittedAt: entry.createdAt,
     duplicate: false,
@@ -341,9 +763,12 @@ export async function listAccountRecoveryRequests(options: {
   query?: string | null;
 } = {}): Promise<AccountRecoveryListResult> {
   const limit = Math.min(Math.max(Number(options.limit ?? 50), 1), 100);
-  const logs = await getAdminLogs(Math.max(200, limit * 6));
+  const logs = await listAdminLogs({
+    limit: Math.max(200, limit * 6),
+    action: "auth_recovery_request",
+    entityType: "auth_recovery"
+  });
   const allItems = logs
-    .filter((item) => item.action === "auth_recovery_request" && item.entityType === "auth_recovery")
     .map((item) => buildRecoveryRecord(item))
     .filter(Boolean)
     .sort((a, b) =>
@@ -390,6 +815,7 @@ export async function updateAccountRecoveryRequest(input: {
 
   const now = new Date().toISOString();
   const trimmedAdminNote = input.adminNote?.trim() || undefined;
+  const previousStatus = normalizeStatus(currentDetail.status);
   const nextDetail: AccountRecoveryLogDetail = {
     ...currentDetail,
     status: input.status,
@@ -417,10 +843,39 @@ export async function updateAccountRecoveryRequest(input: {
     action: "auth_recovery_update",
     entityType: "auth_recovery",
     entityId: input.id,
-    detail: JSON.stringify({
-      status: input.status,
-      adminNote: trimmedAdminNote ?? null,
-      updatedAt: now
+    detail: buildAdminAuditDetail({
+      summary: getRecoveryUpdateSummary(input.status),
+      reason: input.status === "resolved" || input.status === "rejected" ? trimmedAdminNote : undefined,
+      changedFields: diffAuditFields(
+        {
+          status: previousStatus,
+          adminNote: currentDetail.adminNote ?? null,
+          handledByAdminId: currentDetail.handledByAdminId ?? null,
+          handledAt: currentDetail.handledAt ?? null
+        },
+        {
+          status: nextDetail.status ?? null,
+          adminNote: nextDetail.adminNote ?? null,
+          handledByAdminId: nextDetail.handledByAdminId ?? null,
+          handledAt: nextDetail.handledAt ?? null
+        }
+      ),
+      before: {
+        status: previousStatus,
+        adminNote: currentDetail.adminNote ?? null,
+        handledByAdminId: currentDetail.handledByAdminId ?? null,
+        handledAt: currentDetail.handledAt ?? null
+      },
+      after: {
+        status: nextDetail.status ?? null,
+        adminNote: nextDetail.adminNote ?? null,
+        handledByAdminId: nextDetail.handledByAdminId ?? null,
+        handledAt: nextDetail.handledAt ?? null
+      },
+      meta: {
+        ticketId: input.id,
+        updatedAt: now
+      }
     })
   });
 

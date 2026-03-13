@@ -1,6 +1,7 @@
 import { requireRole } from "@/lib/guard";
 import { createKnowledgePoint, getKnowledgePoints } from "@/lib/content";
 import { addAdminLog } from "@/lib/admin-log";
+import { assertAdminStepUp } from "@/lib/admin-step-up";
 import { badRequest, unauthorized } from "@/lib/api/http";
 import {
   importTreeBodySchema,
@@ -31,6 +32,7 @@ export const POST = createAdminRoute({
     if (!user) {
       unauthorized();
     }
+    assertAdminStepUp(user);
 
   const body = await parseJson(request, importTreeBodySchema);
 

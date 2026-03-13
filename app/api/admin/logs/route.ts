@@ -1,5 +1,5 @@
 import { requireRole } from "@/lib/guard";
-import { getAdminLogs } from "@/lib/admin-log";
+import { listAdminLogs } from "@/lib/admin-log";
 import { unauthorized } from "@/lib/api/http";
 import { adminLogsQuerySchema } from "@/lib/api/schemas/admin";
 import { parseSearchParams } from "@/lib/api/validation";
@@ -16,7 +16,12 @@ export const GET = createAdminRoute({
 
     const query = parseSearchParams(request, adminLogsQuerySchema);
     const limit = Math.min(Math.max(Number(query.limit || 100), 1), 200);
-    const logs = await getAdminLogs(limit);
+    const logs = await listAdminLogs({
+      limit,
+      action: query.action,
+      entityType: query.entityType,
+      query: query.query
+    });
     return { data: logs };
   }
 });

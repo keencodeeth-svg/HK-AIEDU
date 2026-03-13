@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { CourseModule } from "@/lib/modules";
 import type {
@@ -12,6 +12,69 @@ import type {
   TeacherInsightsData,
   TeacherJoinRequest
 } from "./types";
+
+const DASHBOARD_FETCH_TIMEOUT_MS = 8_000;
+
+type LoadAllOptions = {
+  background?: boolean;
+  preserveFeedback?: boolean;
+};
+
+function mergeClasses(nextClasses: ClassItem[], previousClasses: ClassItem[]) {
+  const previousById = new Map(previousClasses.map((item) => [item.id, item]));
+  const merged = nextClasses.map((item) => {
+    const previous = previousById.get(item.id);
+    if (!previous) return item;
+    previousById.delete(item.id);
+    return {
+      ...item,
+      studentCount: Math.max(item.studentCount, previous.studentCount),
+      assignmentCount: Math.max(item.assignmentCount, previous.assignmentCount),
+      joinCode: item.joinCode ?? previous.joinCode,
+      joinMode: item.joinMode ?? previous.joinMode
+    };
+  });
+  return [...merged, ...previousById.values()];
+}
+
+function mergeAssignments(nextAssignments: AssignmentItem[], previousAssignments: AssignmentItem[]) {
+  const previousById = new Map(previousAssignments.map((item) => [item.id, item]));
+  const merged = nextAssignments.map((item) => {
+    const previous = previousById.get(item.id);
+    if (!previous) return item;
+    previousById.delete(item.id);
+    return {
+      ...item,
+      total: Math.max(item.total, previous.total),
+      completed: Math.max(item.completed, previous.completed),
+      moduleTitle: item.moduleTitle || previous.moduleTitle
+    };
+  });
+  return [...merged, ...previousById.values()];
+}
+
+async function fetchJsonWithTimeout<T>(url: string) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), DASHBOARD_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    const data = (await response.json().catch(() => null)) as T | null;
+    return {
+      ok: response.ok,
+      status: response.status,
+      data
+    };
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+function getFetchErrorMessage(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return "教师工作台刷新超时";
+  }
+  return error instanceof Error ? error.message : "加载教师工作台失败";
+}
 
 export function useTeacherDataLoader({
   setUnauthorized,
@@ -36,42 +99,94 @@ export function useTeacherDataLoader({
   setKnowledgePoints: Dispatch<SetStateAction<KnowledgePoint[]>>;
   onLoaded?: () => void;
 }) {
-  const loadAll = useCallback(async () => {
+  const latestRequestIdRef = useRef(0);
+
+  const loadAll = useCallback(async (options: LoadAllOptions = {}) => {
+    const requestId = latestRequestIdRef.current + 1;
+    latestRequestIdRef.current = requestId;
+    const background = options.background === true;
     setUnauthorized(false);
-    setLoading(true);
+    if (!background) {
+      setLoading(true);
+    }
     setError(null);
-    setMessage(null);
+    if (!options.preserveFeedback) {
+      setMessage(null);
+    }
 
     try {
-      const classRes = await fetch("/api/teacher/classes");
-      if (classRes.status === 401) {
+      const [classResult, assignmentResult, insightResult, joinResult] = await Promise.allSettled([
+        fetchJsonWithTimeout<{ data?: ClassItem[] }>("/api/teacher/classes"),
+        fetchJsonWithTimeout<{ data?: AssignmentItem[] }>("/api/teacher/assignments"),
+        fetchJsonWithTimeout<TeacherInsightsData>("/api/teacher/insights"),
+        fetchJsonWithTimeout<{ data?: TeacherJoinRequest[] }>("/api/teacher/join-requests")
+      ]);
+
+      if (requestId !== latestRequestIdRef.current) {
+        return;
+      }
+
+      if (classResult.status === "fulfilled" && classResult.value.status === 401) {
         setUnauthorized(true);
         return;
       }
-      const classData = (await classRes.json()) as { data?: ClassItem[] };
-      setClasses(classData.data ?? []);
 
-      const assignmentRes = await fetch("/api/teacher/assignments");
-      const assignmentData = (await assignmentRes.json()) as { data?: AssignmentItem[] };
-      setAssignments(assignmentData.data ?? []);
+      const nextErrors: string[] = [];
 
-      const insightRes = await fetch("/api/teacher/insights");
-      const insightData = (await insightRes.json()) as TeacherInsightsData;
-      if (insightRes.ok) {
-        setInsights(insightData);
+      if (classResult.status === "fulfilled") {
+        if (classResult.value.ok) {
+          setClasses((previous) => mergeClasses(classResult.value.data?.data ?? [], previous));
+        } else {
+          nextErrors.push("班级数据加载失败");
+        }
+      } else {
+        nextErrors.push(getFetchErrorMessage(classResult.reason));
       }
 
-      const joinRes = await fetch("/api/teacher/join-requests");
-      const joinData = (await joinRes.json()) as { data?: TeacherJoinRequest[] };
-      if (joinRes.ok) {
-        setJoinRequests(joinData.data ?? []);
+      if (assignmentResult.status === "fulfilled") {
+        if (assignmentResult.value.ok) {
+          setAssignments((previous) => mergeAssignments(assignmentResult.value.data?.data ?? [], previous));
+        } else {
+          nextErrors.push("作业数据加载失败");
+        }
+      } else {
+        nextErrors.push(getFetchErrorMessage(assignmentResult.reason));
+      }
+
+      if (insightResult.status === "fulfilled") {
+        if (insightResult.value.ok && insightResult.value.data) {
+          setInsights(insightResult.value.data);
+        } else {
+          nextErrors.push("学情分析加载失败");
+        }
+      } else {
+        nextErrors.push(getFetchErrorMessage(insightResult.reason));
+      }
+
+      if (joinResult.status === "fulfilled") {
+        if (joinResult.value.ok) {
+          setJoinRequests(joinResult.value.data?.data ?? []);
+        } else {
+          nextErrors.push("加入班级申请加载失败");
+        }
+      } else {
+        nextErrors.push(getFetchErrorMessage(joinResult.reason));
+      }
+
+      if (nextErrors.length > 0) {
+        setError(nextErrors[0]);
       }
 
       onLoaded?.();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "加载教师工作台失败");
+      if (requestId !== latestRequestIdRef.current) {
+        return;
+      }
+      setError(getFetchErrorMessage(nextError));
     } finally {
-      setLoading(false);
+      if (!background && requestId === latestRequestIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [onLoaded, setAssignments, setClasses, setError, setInsights, setJoinRequests, setLoading, setMessage, setUnauthorized]);
 

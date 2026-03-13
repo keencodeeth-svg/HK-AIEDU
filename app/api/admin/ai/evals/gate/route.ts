@@ -1,4 +1,5 @@
 import { createAdminRoute } from "@/lib/api/domains";
+import { assertAdminStepUp } from "@/lib/admin-step-up";
 import { addAdminLog } from "@/lib/admin-log";
 import { badRequest, unauthorized } from "@/lib/api/http";
 import type { AiEvalDatasetName } from "@/lib/ai-evals";
@@ -65,6 +66,7 @@ export const POST = createAdminRoute({
     if (!user || user.role !== "admin") {
       unauthorized();
     }
+    assertAdminStepUp(user);
 
     let payload: unknown;
     try {

@@ -1,4 +1,5 @@
 import { addAdminLog } from "@/lib/admin-log";
+import { assertAdminStepUp } from "@/lib/admin-step-up";
 import {
   getAiTaskPolicies,
   listAiTaskOptions,
@@ -102,6 +103,7 @@ export const POST = createAdminRoute({
     if (!admin) {
       unauthorized();
     }
+    assertAdminStepUp(admin);
 
     const body = await parseJson(request, updateBodySchema);
 

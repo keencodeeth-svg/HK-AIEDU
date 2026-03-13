@@ -182,6 +182,12 @@ export async function getApiMetricsSummary(limit = 20) {
     return Number.isFinite(ts) && ts >= day24Ago;
   });
   const errors24h = logs24h.filter((log) => log.status >= 400).length;
+  const statusBuckets24h = {
+    s2xx: logs24h.filter((log) => log.status >= 200 && log.status < 300).length,
+    s3xx: logs24h.filter((log) => log.status >= 300 && log.status < 400).length,
+    s4xx: logs24h.filter((log) => log.status >= 400 && log.status < 500).length,
+    s5xx: logs24h.filter((log) => log.status >= 500).length
+  };
   const statusBuckets = {
     s2xx: logs.filter((log) => log.status >= 200 && log.status < 300).length,
     s3xx: logs.filter((log) => log.status >= 300 && log.status < 400).length,
@@ -203,7 +209,8 @@ export async function getApiMetricsSummary(limit = 20) {
       requests: logs24h.length,
       errors: errors24h,
       errorRate: logs24h.length ? round((errors24h / logs24h.length) * 100) : 0,
-      p95DurationMs: computeP95(logs24h.map((item) => item.durationMs))
+      p95DurationMs: computeP95(logs24h.map((item) => item.durationMs)),
+      statusBuckets: statusBuckets24h
     },
     statusBuckets,
     routes: topRows.map((row) => ({

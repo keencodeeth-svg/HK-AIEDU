@@ -1,5 +1,6 @@
 import { getQuestions } from "@/lib/content";
 import { requireRole } from "@/lib/guard";
+import { assertAdminStepUp } from "@/lib/admin-step-up";
 import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import { parseJson } from "@/lib/api/validation";
 import { questionQualityCheckBodySchema, trimStringArray } from "@/lib/api/schemas/admin";
@@ -15,6 +16,7 @@ export const POST = createAdminRoute({
     if (!user) {
       unauthorized();
     }
+    assertAdminStepUp(user);
 
   const body = await parseJson(request, questionQualityCheckBodySchema);
   const allQuestions = await getQuestions();

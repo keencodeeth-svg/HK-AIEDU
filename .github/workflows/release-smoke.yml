@@ -1,0 +1,66 @@
+name: Release Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Release target label
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
+      base_url:
+        description: Deployed environment base URL, for example https://staging.example.com
+        required: true
+        type: string
+      scope:
+        description: Smoke scope
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - health
+
+permissions:
+  contents: read
+
+jobs:
+  remote-smoke:
+    environment: ${{ inputs.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run remote smoke suite
+        env:
+          API_TEST_BASE_URL: ${{ inputs.base_url }}
+          API_TEST_SCOPE: ${{ inputs.scope }}
+          API_TEST_SERVER_MODE: remote
+          API_TEST_FALLBACK_TO_DEV: "0"
+          API_TEST_READINESS_TOKEN: ${{ secrets.READINESS_PROBE_TOKEN }}
+        run: node scripts/test-api-routes.mjs
+
+      - name: Publish summary
+        run: |
+          {
+            echo "## Release Smoke"
+            echo ""
+            echo "- target: \`${{ inputs.target }}\`"
+            echo "- scope: \`${{ inputs.scope }}\`"
+            echo "- base_url: \`${{ inputs.base_url }}\`"
+            echo "- result: passed"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -3,7 +3,6 @@
 import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
-import { buildTutorLaunchHref } from "@/lib/tutor-launch";
 import type { ScheduleResponse } from "@/lib/class-schedules";
 import type { TodayTask, TodayTaskEventName, TodayTaskPayload } from "../types";
 import { getTodayTaskSourceLabel, getTodayTaskStatusLabel } from "../utils";
@@ -47,7 +46,6 @@ export default function StudentExecutionSummaryCard({
   const urgentCount = (summary?.overdue ?? 0) + (summary?.dueToday ?? 0);
   const nextQueueAnchor = summary?.mustDo ? "#student-priority-tasks" : "#student-task-queue";
   const nextQueueLabel = summary?.mustDo ? "先清必做任务" : "查看完整队列";
-  const tutorHref = buildTutorLaunchHref({ intent: "image", source: "student-execution-summary" });
   const nextLesson = schedule?.nextLesson ?? null;
   const linkedLessonTask = nextLesson && todayTasks?.tasks?.length
     ? todayTasks.tasks.find((task) => task.source === "lesson" && task.sourceId === nextLesson.id) ?? null
@@ -61,6 +59,9 @@ export default function StudentExecutionSummaryCard({
 
   let lessonHeadline: string | null = null;
   let lessonDescription: string | null = null;
+  let budgetHeadline = "今天适合稳步推进";
+  let budgetDescription = "先看清今天大概要花多少时间，再决定现在开哪一项，最能减少焦虑和反复切换。";
+  let budgetMeta = `Top3 预计 ${summary?.top3EstimatedMinutes ?? 0} 分钟`;
 
   if (nextLesson) {
     if (nextLesson.status === "in_progress") {
@@ -90,8 +91,22 @@ export default function StudentExecutionSummaryCard({
     }
   }
 
+  if (urgentCount > 0) {
+    budgetHeadline = `先清 ${urgentCount} 项时间敏感任务`;
+    budgetDescription = `其中逾期 ${summary?.overdue ?? 0} 项、今日到期 ${summary?.dueToday ?? 0} 项。先把这组处理掉，今天后面的学习会顺很多。`;
+    budgetMeta = `必须先清 ${summary?.mustDo ?? 0} 项`;
+  } else if (lessonIsUrgent && nextLesson) {
+    budgetHeadline = `距离下节 ${nextLesson.subjectLabel} 已经不远`;
+    budgetDescription = "现在更适合先确认课堂相关事项，避免刚开任务就被上课或课前准备打断。";
+    budgetMeta = nextLesson.status === "in_progress" ? "当前处于上课时段" : `${minutesUntilNextLesson ?? 0} 分钟后上课`;
+  } else if (recommendedTask) {
+    budgetHeadline = `把「${recommendedTask.title}」做完，今天就开起来了`;
+    budgetDescription = `第一项预计 ${recommendedTask.effortMinutes} 分钟。先完成它，能最快把今天的学习节奏从“准备开始”切到“正在推进”。`;
+    budgetMeta = `Top3 预计 ${summary?.top3EstimatedMinutes ?? recommendedTask.effortMinutes} 分钟`;
+  }
+
   return (
-    <Card title="今日执行摘要" tag="Today">
+    <Card title="时间与风险" tag="Budget">
       <div className="grid" style={{ gap: 14 }}>
         {nextLesson ? (
           <div className="card" style={{ border: "1px solid rgba(105, 65, 198, 0.18)", background: "rgba(105, 65, 198, 0.06)" }}>
@@ -146,17 +161,18 @@ export default function StudentExecutionSummaryCard({
         >
           <div className="grid" style={{ gap: 10 }}>
             <div className="feature-card" style={{ alignItems: "flex-start" }}>
-              <EduIcon name="rocket" />
+              <EduIcon name="board" />
               <div>
-                <div className="section-title">{recommendedTask ? `第一优先：${recommendedTask.title}` : "今天先按当前节奏推进"}</div>
-                <p style={{ marginTop: 6, lineHeight: 1.65 }}>
-                  {recommendedTask
-                    ? recommendedTask.recommendedReason
-                    : urgentCount > 0
-                      ? "建议先清逾期和今日到期任务，再安排练习或拍题，避免后面越积越多。"
-                      : "当前没有明显卡点，适合先做一轮练习、推进薄弱项，或者把不会的题直接拍下来问。"}
-                </p>
+                <div className="section-title">{budgetHeadline}</div>
+                <p style={{ marginTop: 6, lineHeight: 1.65 }}>{budgetDescription}</p>
               </div>
+            </div>
+
+            <div className="badge-row" style={{ marginTop: 0 }}>
+              <span className="badge">{budgetMeta}</span>
+              <span className="badge">进行中 {summary?.inProgress ?? 0}</span>
+              <span className="badge">薄弱项 {weakPlanCount}</span>
+              {recommendedTask ? <span className="badge">第一项 {recommendedTask.effortMinutes} 分钟</span> : null}
             </div>
 
             {recommendedTask ? (
@@ -186,8 +202,16 @@ export default function StudentExecutionSummaryCard({
               >
                 {recommendedTask ? "继续第一项" : "先做一轮练习"}
               </Link>
-              <Link className="button secondary" href={tutorHref}>
-                卡住就拍题
+              <Link
+                className="button secondary"
+                href={nextLesson ? lessonActionHref : "/calendar"}
+                onClick={() => {
+                  if (nextLesson && linkedLessonTask) {
+                    onTaskEvent(linkedLessonTask, "task_started");
+                  }
+                }}
+              >
+                {nextLesson ? lessonActionLabel : "查看完整课表"}
               </Link>
               <a className="button ghost" href={nextQueueAnchor}>
                 {nextQueueLabel}
@@ -220,7 +244,7 @@ export default function StudentExecutionSummaryCard({
         </div>
 
         <div className="meta-text" style={{ lineHeight: 1.65 }}>
-          建议顺序：{nextLesson ? "先看下节课 → " : ""}先做这些 → 继续推进 → 成长加分。系统已经帮你排好优先级，尽量不要再自己从头筛一遍。
+          这张卡只负责帮你看清今天的时间预算和风险密度。真正开工时，优先跟着“现在最值得先做”和上面的学习闭环走，不需要再自己重新排一次。
         </div>
       </div>
     </Card>

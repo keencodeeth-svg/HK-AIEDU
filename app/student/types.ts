@@ -32,6 +32,15 @@ export type TodayTask = {
 
 export type TodayTaskPayload = {
   generatedAt: string;
+  recentStudyVariantActivity?: {
+    recentAttemptCount: number;
+    recentCorrectCount: number;
+    latestAttemptAt: string;
+    latestKnowledgePointId: string;
+    latestKnowledgePointTitle: string;
+    latestSubject: string;
+    latestCorrect: boolean;
+  } | null;
   summary: {
     total: number;
     mustDo: number;
@@ -57,6 +66,18 @@ export type TodayTaskPayload = {
   };
   topTasks: TodayTask[];
   tasks: TodayTask[];
+};
+
+export type StudentWeakKnowledgePointSnapshot = {
+  knowledgePointId: string;
+  title: string;
+  subject: string;
+  masteryScore: number;
+  weaknessRank: number | null;
+};
+
+export type StudentRadarSnapshot = {
+  weakKnowledgePoint: StudentWeakKnowledgePointSnapshot | null;
 };
 
 export type MotivationBadge = {

@@ -53,6 +53,28 @@ export async function runLearningSuite(context) {
   assert.equal(studentMetrics.status, 401, "Student should not access /api/admin/observability/metrics");
   assert.equal(studentMetrics.body?.error, "unauthorized");
 
+  const studentAlerts = await apiFetch("/api/admin/observability/alerts");
+  assert.equal(studentAlerts.status, 401, "Student should not access /api/admin/observability/alerts");
+  assert.equal(studentAlerts.body?.error, "unauthorized");
+
+  const clientErrorReport = await apiFetch("/api/observability/client-error", {
+    method: "POST",
+    json: {
+      component: "dashboard",
+      pathname: "/dashboard",
+      message: "api test client render error",
+      stack: "stack:line",
+      digest: "digest-api-test"
+    }
+  });
+  assert.equal(clientErrorReport.status, 200, `POST /api/observability/client-error failed: ${clientErrorReport.raw}`);
+  assert.equal(clientErrorReport.body?.data?.accepted, true, "Client error reporting should accept payload");
+  assert.equal(
+    typeof clientErrorReport.body?.data?.reporter?.enabled,
+    "boolean",
+    "Client error reporting should expose reporter status"
+  );
+
   const studentFunnel = await apiFetch("/api/analytics/funnel");
   assert.equal(studentFunnel.status, 401, "Student should not access /api/analytics/funnel");
   assert.equal(studentFunnel.body?.error, "unauthorized");
@@ -120,6 +142,108 @@ export async function runLearningSuite(context) {
   assert.equal(typeof answerOnlyAssistData?.answer, "string", "Answer-only assist should return answer");
   assert.equal((answerOnlyAssistData?.steps ?? []).length, 0, "Answer-only assist should suppress steps");
   assert.equal((answerOnlyAssistData?.hints ?? []).length, 0, "Answer-only assist should suppress hints");
+
+  const coachStart = await apiFetch("/api/ai/coach", {
+    method: "POST",
+    json: {
+      question: "3/4 + 1/4 等于多少？",
+      subject: "math",
+      grade: "4",
+      origin: "text"
+    }
+  });
+  assert.equal(coachStart.status, 200, `POST /api/ai/coach start failed: ${coachStart.raw}`);
+  const coachStartData = coachStart.body?.data;
+  assert.equal(coachStartData?.learningMode, "study", "Coach should expose study learningMode");
+  assert.equal(coachStartData?.stage, "diagnose", "Coach should start in diagnose stage");
+  assert.equal(coachStartData?.answer, "", "Coach should lock answer until explicit reveal");
+  assert.equal(coachStartData?.answerAvailable, true, "Coach should expose answer availability");
+  assert.ok((coachStartData?.knowledgeChecks ?? []).length >= 3, "Coach should include knowledge checks");
+
+  const coachReveal = await apiFetch("/api/ai/coach", {
+    method: "POST",
+    json: {
+      question: "3/4 + 1/4 等于多少？",
+      subject: "math",
+      grade: "4",
+      studentAnswer: "我会先看分母是不是一样，再决定要不要通分。",
+      revealAnswer: true,
+      origin: "text"
+    }
+  });
+  assert.equal(coachReveal.status, 200, `POST /api/ai/coach reveal failed: ${coachReveal.raw}`);
+  const coachRevealData = coachReveal.body?.data;
+  assert.equal(coachRevealData?.stage, "reveal", "Coach reveal should switch to reveal stage");
+  assert.equal(typeof coachRevealData?.answer, "string", "Coach reveal should return answer");
+  assert.ok((coachRevealData?.steps ?? []).length >= 1, "Coach reveal should return steps");
+  assert.equal(typeof coachRevealData?.feedback, "string", "Coach reveal should retain feedback");
+
+  const studyVariants = await apiFetch("/api/ai/study-variants", {
+    method: "POST",
+    json: {
+      question: "3/4 + 1/4 等于多少？",
+      answer: coachRevealData?.answer ?? "1",
+      subject: "math",
+      grade: "4",
+      count: 2
+    }
+  });
+  assert.equal(studyVariants.status, 200, `POST /api/ai/study-variants failed: ${studyVariants.raw}`);
+  assert.equal(typeof studyVariants.body?.data?.transferGoal, "string", "Study variants should return transferGoal");
+  assert.ok(Array.isArray(studyVariants.body?.data?.variants), "Study variants should return variants array");
+  assert.equal(studyVariants.body?.data?.variants?.length, 2, "Study variants should honor requested count");
+  assert.equal(
+    typeof studyVariants.body?.data?.variants?.[0]?.explanation,
+    "string",
+    "Study variants should return explanations"
+  );
+
+  const reflectionVariants = (studyVariants.body?.data?.variants ?? []).map((variant, index) => ({
+    stem: variant.stem,
+    answer: variant.answer,
+    explanation: variant.explanation,
+    studentAnswer: index === 0 ? variant.answer : variant.options?.find((option) => option !== variant.answer) ?? "__API_TEST_WRONG__"
+  }));
+  const studyReflection = await apiFetch("/api/ai/study-reflection", {
+    method: "POST",
+    json: {
+      question: "3/4 + 1/4 等于多少？",
+      subject: "math",
+      grade: "4",
+      knowledgePointTitle: studyVariants.body?.data?.knowledgePointTitle,
+      variants: reflectionVariants
+    }
+  });
+  assert.equal(studyReflection.status, 200, `POST /api/ai/study-reflection failed: ${studyReflection.raw}`);
+  assert.equal(typeof studyReflection.body?.data?.masteryLabel, "string", "Study reflection should return masteryLabel");
+  assert.equal(typeof studyReflection.body?.data?.correctCount, "number", "Study reflection should return correctCount");
+  assert.equal(typeof studyReflection.body?.data?.detail?.analysis, "string", "Study reflection should return detail.analysis");
+  assert.ok(["ai", "fallback"].includes(String(studyReflection.body?.data?.detailSource ?? "")), "Study reflection should expose detailSource");
+
+  const studyVariantProgress = await apiFetch("/api/ai/study-variant-progress", {
+    method: "POST",
+    json: {
+      question: "3/4 + 1/4 等于多少？",
+      subject: "math",
+      grade: "4",
+      knowledgePointId: studyVariants.body?.data?.knowledgePointId,
+      knowledgePointTitle: studyVariants.body?.data?.knowledgePointTitle,
+      variant: {
+        stem: studyVariants.body?.data?.variants?.[0]?.stem ?? "分数加法变式",
+        answer: studyVariants.body?.data?.variants?.[0]?.answer ?? "1",
+        explanation: studyVariants.body?.data?.variants?.[0]?.explanation ?? "先判断是否需要通分。",
+        studentAnswer: studyVariants.body?.data?.variants?.[0]?.answer ?? "1"
+      }
+    }
+  });
+  assert.equal(studyVariantProgress.status, 200, `POST /api/ai/study-variant-progress failed: ${studyVariantProgress.raw}`);
+  assert.equal(studyVariantProgress.body?.data?.persisted, true, "Study variant progress should persist for student");
+  assert.equal(typeof studyVariantProgress.body?.data?.message, "string", "Study variant progress should return message");
+  assert.equal(typeof studyVariantProgress.body?.data?.mastery?.masteryScore, "number", "Study variant progress should return mastery score");
+  assert.ok(
+    studyVariantProgress.body?.data?.plan === null || typeof studyVariantProgress.body?.data?.plan?.recommendedReason === "string",
+    "Study variant progress should return optional plan recommendation"
+  );
 
   const imageAssistForm = new FormData();
   imageAssistForm.set("question", "3/4 + 1/4 等于多少？");
@@ -191,6 +315,11 @@ export async function runLearningSuite(context) {
   assert.ok(createdHistoryItem, "History list should include newly created item");
   assert.equal(createdHistoryItem?.meta?.provider, "mock", "History list should preserve meta.provider");
   assert.equal(createdHistoryItem?.meta?.recognizedQuestion, "3/4 + 1/4 等于多少？");
+  const studyHistoryItem = (historyList.body?.data ?? []).find(
+    (item) => item.meta?.learningMode === "study" && item.meta?.recognizedQuestion === "3/4 + 1/4 等于多少？"
+  );
+  assert.ok(studyHistoryItem, "History list should include study-mode coach entry");
+  assert.equal(studyHistoryItem?.meta?.answerMode, "hints_first", "Study-mode history should persist coach answerMode");
 
   const tooManyImageAssist = new FormData();
   tooManyImageAssist.append("images", new Blob([Buffer.from("1")], { type: "image/png" }), "1.png");
@@ -284,6 +413,11 @@ export async function runLearningSuite(context) {
     Array.isArray(studentRadar.body?.data?.mastery?.weakKnowledgePoints),
     "Radar response should include mastery.weakKnowledgePoints"
   );
+  assert.equal(
+    typeof studentRadar.body?.data?.mastery?.recentStudyVariantActivity?.latestKnowledgePointTitle,
+    "string",
+    "Radar response should include recent Tutor study-variant summary after Tutor drill sync"
+  );
 
   const wrongBook = await apiFetch("/api/wrong-book");
   assert.equal(wrongBook.status, 200, `GET /api/wrong-book failed: ${wrongBook.raw}`);
@@ -317,6 +451,13 @@ export async function runLearningSuite(context) {
     "number",
     "Today tasks should include lesson source count"
   );
+  assert.equal(
+    typeof todayTasks.body?.data?.recentStudyVariantActivity?.latestKnowledgePointTitle,
+    "string",
+    "Today tasks should expose recent Tutor drill summary"
+  );
+  const tutorMomentumTask = (todayTasks.body?.data?.tasks ?? []).find((item) => String(item.recommendedReason ?? "").includes("Tutor"));
+  assert.ok(tutorMomentumTask, "Today tasks should surface at least one Tutor-activated recommendation");
   const firstTodayTask = todayTasks.body?.data?.tasks?.[0];
   if (firstTodayTask) {
     assert.equal(typeof firstTodayTask.id, "string");
@@ -404,8 +545,18 @@ export async function runLearningSuite(context) {
   assert.equal(reviewResult.body?.intervalLevel, 2, "After one correct review, interval should move to level 2");
   assert.equal(typeof reviewResult.body?.nextReviewAt, "string", "Review result should include nextReviewAt");
   assert.ok(reviewResult.body?.mastery && typeof reviewResult.body.mastery === "object");
-  assert.equal(reviewResult.body?.mastery?.total, 2, "Wrong review should advance mastery.total to 2 for the same question");
-  assert.equal(reviewResult.body?.mastery?.correct, 1, "Wrong review correct answer should advance mastery.correct to 1");
+  const tutorDrillHitsSameKnowledgePoint =
+    studyVariantProgress.body?.data?.knowledgePointId === practiceNext.body.question.knowledgePointId;
+  assert.equal(
+    reviewResult.body?.mastery?.total,
+    tutorDrillHitsSameKnowledgePoint ? 3 : 2,
+    "Wrong review should accumulate knowledge-point mastery totals across practice and Tutor drill attempts"
+  );
+  assert.equal(
+    reviewResult.body?.mastery?.correct,
+    tutorDrillHitsSameKnowledgePoint ? 2 : 1,
+    "Wrong review correct answer should keep mastery.correct aligned with all successful attempts on the knowledge point"
+  );
   const reviewQueueAfterCorrect = await apiFetch("/api/wrong-book/review-queue");
   assert.equal(reviewQueueAfterCorrect.status, 200, `GET /api/wrong-book/review-queue after review submit failed: ${reviewQueueAfterCorrect.raw}`);
   const reviewQueueItemsAfterCorrect = [

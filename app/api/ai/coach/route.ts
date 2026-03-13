@@ -1,9 +1,9 @@
-import { getCurrentUser } from "@/lib/auth";
 import { generateAssistAnswer } from "@/lib/ai";
-import { addHistoryItem, getHistoryByUser, type AiHistoryItem } from "@/lib/ai-history";
+import { buildStudyCoachResponse } from "@/lib/ai-study-mode";
+import { addHistoryItem, AI_HISTORY_ORIGINS, getHistoryByUser, type AiHistoryItem } from "@/lib/ai-history";
 import { assessAiQuality } from "@/lib/ai-quality-control";
 import { badRequest, unauthorized } from "@/lib/api/http";
-import { parseJson, v } from "@/lib/api/validation";
+import { v } from "@/lib/api/validation";
 import { createAiRoute } from "@/lib/api/domains";
 
 const coachBodySchema = v.object<{
@@ -11,12 +11,16 @@ const coachBodySchema = v.object<{
   subject?: string;
   grade?: string;
   studentAnswer?: string;
+  revealAnswer?: boolean;
+  origin?: (typeof AI_HISTORY_ORIGINS)[number];
 }>(
   {
     question: v.string({ minLength: 1 }),
     subject: v.optional(v.string({ minLength: 1 })),
     grade: v.optional(v.string({ minLength: 1 })),
-    studentAnswer: v.optional(v.string({ allowEmpty: true, trim: false }))
+    studentAnswer: v.optional(v.string({ allowEmpty: true, trim: false })),
+    revealAnswer: v.optional(v.boolean()),
+    origin: v.optional(v.enum(AI_HISTORY_ORIGINS))
   },
   { allowUnknown: false }
 );
@@ -83,18 +87,18 @@ function buildCoachMemorySnapshot(params: {
 
 export const POST = createAiRoute({
   role: ["student", "teacher", "parent", "admin", "school_admin"],
+  body: coachBodySchema,
   cache: "private-realtime",
-  handler: async ({ request }) => {
-    const user = await getCurrentUser();
+  handler: async ({ body, user }) => {
     if (!user) {
       unauthorized();
     }
 
-    const body = await parseJson(request, coachBodySchema);
     if (!body.question?.trim()) {
       badRequest("missing question");
     }
 
+    const question = body.question.trim();
     const subject = body.subject?.trim();
     const grade = body.grade?.trim();
     let memorySnapshot: CoachMemorySnapshot;
@@ -125,44 +129,72 @@ export const POST = createAiRoute({
     }
 
     const assist = await generateAssistAnswer({
-      question: body.question.trim(),
+      question,
       subject,
       grade,
-      memoryContext: memorySnapshot.contextPrompt
+      memoryContext: memorySnapshot.contextPrompt,
+      answerMode: "hints_first"
     });
 
-    const checkpoints = [
-      "你能先说出题目里给了哪些已知条件吗？",
-      "这道题对应哪个知识点或公式？",
-      "下一步你准备怎么做？"
-    ];
-
-    const feedback = body.studentAnswer
-      ? `我看到你的思路：${body.studentAnswer}。我们先对照已知条件和关键公式，再把步骤拆成 2-3 步。`
-      : null;
+    const study = buildStudyCoachResponse({
+      question,
+      subject,
+      studentAnswer: body.studentAnswer,
+      revealAnswer: body.revealAnswer,
+      assist
+    });
     const quality = assessAiQuality({
       kind: "coach",
       taskType: "assist",
       provider: assist.provider,
-      textBlocks: [assist.answer, ...(assist.steps ?? []), ...(assist.hints ?? []), feedback ?? ""],
-      listCountHint: checkpoints.length + (assist.steps?.length ?? 0)
+      textBlocks: [
+        study.coachReply,
+        study.nextPrompt,
+        ...(study.hints ?? []),
+        ...(study.knowledgeChecks ?? []),
+        ...(study.steps ?? []),
+        study.answer,
+        study.feedback ?? ""
+      ],
+      listCountHint: study.knowledgeChecks.length + study.hints.length + study.steps.length
     });
 
     if (user.role === "student") {
       try {
         const tags = [
           "coach_session",
+          "study_mode",
           subject ? `subject:${subject}` : "",
           grade ? `grade:${grade}` : "",
-          body.studentAnswer?.trim() ? "with_thinking" : "without_thinking"
+          body.studentAnswer?.trim() ? "with_thinking" : "without_thinking",
+          body.revealAnswer ? "answer_revealed" : "answer_locked"
         ].filter(Boolean);
-        const answerSummary = [assist.answer, feedback ?? ""].filter(Boolean).join("\n").slice(0, 4000);
+        const answerSummary = [
+          study.coachReply,
+          study.feedback ?? "",
+          study.nextPrompt,
+          body.revealAnswer ? study.answer : "答案暂未揭晓",
+          ...(body.revealAnswer ? study.steps.slice(0, 2) : study.hints.slice(0, 2))
+        ]
+          .filter(Boolean)
+          .join("\n")
+          .slice(0, 4000);
         await addHistoryItem({
           userId: user.id,
-          question: body.question.trim(),
+          question,
           answer: answerSummary,
           favorite: false,
-          tags
+          tags,
+          meta: {
+            origin: body.origin ?? "text",
+            learningMode: "study",
+            subject,
+            grade,
+            answerMode: "hints_first",
+            provider: assist.provider,
+            recognizedQuestion: question,
+            quality
+          }
         });
       } catch {
         // History persistence failure should not block real-time coaching.
@@ -171,11 +203,9 @@ export const POST = createAiRoute({
 
     return {
       data: {
-        answer: assist.answer,
-        steps: assist.steps,
-        hints: assist.hints,
-        checkpoints,
-        feedback,
+        ...study,
+        source: study.sources,
+        recognizedQuestion: question,
         memory: {
           recentSessionCount: memorySnapshot.recentSessionCount,
           recentQuestions: memorySnapshot.recentQuestions,

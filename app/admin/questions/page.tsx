@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAdminStepUp } from "@/components/useAdminStepUp";
+import { getRequestErrorMessage, requestJson } from "@/lib/client-request";
 import QuestionsListPanel from "./_components/QuestionsListPanel";
 import QuestionsToolsPanel from "./_components/QuestionsToolsPanel";
 import type {
@@ -21,7 +23,22 @@ import type {
 } from "./types";
 import { downloadQuestionTemplate, parseCsv, parseListText } from "./utils";
 
+type QuestionQualityRecheckResponse = {
+  data?: {
+    scope?: {
+      processedCount?: number;
+    };
+    summary?: {
+      updated?: number;
+      newlyTracked?: number;
+      highRiskCount?: number;
+      isolatedCount?: number;
+    };
+  };
+};
+
 export default function QuestionsAdminPage() {
+  const { runWithStepUp, stepUpDialog } = useAdminStepUp();
   const [list, setList] = useState<Question[]>([]);
   const [knowledgePoints, setKnowledgePoints] = useState<KnowledgePoint[]>([]);
   const [workspace, setWorkspace] = useState<"list" | "tools">("list");
@@ -80,6 +97,8 @@ export default function QuestionsAdminPage() {
   const [recheckLoading, setRecheckLoading] = useState(false);
   const [recheckMessage, setRecheckMessage] = useState<string | null>(null);
   const [recheckError, setRecheckError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [pageActionError, setPageActionError] = useState<string | null>(null);
 
   const chapterOptions = useMemo(() => {
     const filtered = knowledgePoints.filter(
@@ -178,6 +197,7 @@ export default function QuestionsAdminPage() {
     if (!file) return;
     setImportMessage(null);
     setImportErrors([]);
+    setPageActionError(null);
     const text = await file.text();
     const rows = parseCsv(text);
     if (rows.length < 2) {
@@ -232,28 +252,31 @@ export default function QuestionsAdminPage() {
       return;
     }
 
-    const res = await fetch("/api/admin/questions/import", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items })
-    });
-    const data = (await res.json()) as QuestionImportResponse;
-    if (!res.ok) {
-      setImportErrors([data.error ?? "导入失败"]);
-      return;
-    }
-    const highRiskCount = (data.items ?? []).filter(isHighRiskQuestionResult).length;
-    setImportMessage(
-      `已导入 ${data.created ?? 0} 题，失败 ${data.failed?.length ?? 0} 条，高风险 ${highRiskCount} 题。`
+    await runWithStepUp(
+      async () => {
+        const data = await requestJson<QuestionImportResponse>("/api/admin/questions/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items })
+        });
+        const highRiskCount = (data.items ?? []).filter(isHighRiskQuestionResult).length;
+        setImportMessage(
+          `已导入 ${data.created ?? 0} 题，失败 ${data.failed?.length ?? 0} 条，高风险 ${highRiskCount} 题。`
+        );
+        setImportErrors(errors);
+        await loadQuestions();
+      },
+      (error) => {
+        setImportErrors([getRequestErrorMessage(error, "导入失败")]);
+      }
     );
-    setImportErrors(errors);
-    loadQuestions();
   }
 
   async function handleGenerate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAiMessage(null);
     setAiErrors([]);
+    setPageActionError(null);
     setAiLoading(true);
 
     const endpoint =
@@ -277,31 +300,36 @@ export default function QuestionsAdminPage() {
             difficulty: aiForm.difficulty
           };
 
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+    try {
+      await runWithStepUp(
+        async () => {
+          const data = await requestJson<QuestionGenerateResponse>(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
 
-    const data = (await res.json()) as QuestionGenerateResponse;
-    if (!res.ok) {
-      setAiErrors([data.error ?? "生成失败"]);
+          const failed: QuestionProcessFailedItem[] = data.failed ?? [];
+          if (failed.length) {
+            setAiErrors(failed.map((item) => `第 ${item.index + 1} 题：${item.reason}`));
+          }
+          const highRiskCount = (data.created ?? []).filter(isHighRiskQuestionResult).length;
+          setAiMessage(`已生成 ${data.created?.length ?? 0} 题，高风险 ${highRiskCount} 题。`);
+          await loadQuestions();
+        },
+        (error) => {
+          setAiErrors([getRequestErrorMessage(error, "生成失败")]);
+        }
+      );
+    } finally {
       setAiLoading(false);
-      return;
     }
-
-    const failed: QuestionProcessFailedItem[] = data.failed ?? [];
-    if (failed.length) {
-      setAiErrors(failed.map((item) => `第 ${item.index + 1} 题：${item.reason}`));
-    }
-    const highRiskCount = (data.created ?? []).filter(isHighRiskQuestionResult).length;
-    setAiMessage(`已生成 ${data.created?.length ?? 0} 题，高风险 ${highRiskCount} 题。`);
-    setAiLoading(false);
-    loadQuestions();
   }
 
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setCreateError(null);
+    setPageActionError(null);
     const options = form.options
       .split("\n")
       .map((item) => item.trim())
@@ -309,61 +337,85 @@ export default function QuestionsAdminPage() {
     const tags = parseListText(form.tags);
     const abilities = parseListText(form.abilities);
 
-    await fetch("/api/admin/questions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        subject: form.subject,
-        grade: form.grade,
-        knowledgePointId: form.knowledgePointId,
-        stem: form.stem,
-        options,
-        answer: form.answer,
-        explanation: form.explanation,
-        difficulty: form.difficulty,
-        questionType: form.questionType,
-        tags,
-        abilities
-      })
-    });
+    await runWithStepUp(
+      async () => {
+        await requestJson("/api/admin/questions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: form.subject,
+            grade: form.grade,
+            knowledgePointId: form.knowledgePointId,
+            stem: form.stem,
+            options,
+            answer: form.answer,
+            explanation: form.explanation,
+            difficulty: form.difficulty,
+            questionType: form.questionType,
+            tags,
+            abilities
+          })
+        });
 
-    setForm({
-      subject: form.subject,
-      grade: form.grade,
-      knowledgePointId: form.knowledgePointId,
-      stem: "",
-      options: "",
-      answer: "",
-      explanation: "",
-      difficulty: form.difficulty,
-      questionType: form.questionType,
-      tags: "",
-      abilities: ""
-    });
-    loadQuestions();
+        setForm({
+          subject: form.subject,
+          grade: form.grade,
+          knowledgePointId: form.knowledgePointId,
+          stem: "",
+          options: "",
+          answer: "",
+          explanation: "",
+          difficulty: form.difficulty,
+          questionType: form.questionType,
+          tags: "",
+          abilities: ""
+        });
+        await loadQuestions();
+      },
+      (error) => {
+        setCreateError(getRequestErrorMessage(error, "保存失败"));
+      }
+    );
   }
 
   async function handleDelete(id: string) {
-    await fetch(`/api/admin/questions/${id}`, { method: "DELETE" });
-    loadQuestions();
+    setPageActionError(null);
+    await runWithStepUp(
+      async () => {
+        await requestJson(`/api/admin/questions/${id}`, { method: "DELETE" });
+        await loadQuestions();
+      },
+      (error) => {
+        setPageActionError(getRequestErrorMessage(error, "删除失败"));
+      }
+    );
   }
 
   async function handleToggleIsolation(id: string, isolated: boolean) {
-    await fetch("/api/admin/questions/quality/isolation", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        questionId: id,
-        isolated,
-        reason: isolated ? ["管理员手动加入隔离池"] : ["管理员手动移出隔离池"]
-      })
-    });
-    loadQuestions();
+    setPageActionError(null);
+    await runWithStepUp(
+      async () => {
+        await requestJson("/api/admin/questions/quality/isolation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            questionId: id,
+            isolated,
+            reason: isolated ? ["管理员手动加入隔离池"] : ["管理员手动移出隔离池"]
+          })
+        });
+        await loadQuestions();
+      },
+      (error) => {
+        setPageActionError(getRequestErrorMessage(error, isolated ? "加入隔离池失败" : "移出隔离池失败"));
+      }
+    );
   }
 
   async function handleRecheckQuality() {
     setRecheckMessage(null);
     setRecheckError(null);
+    setPageActionError(null);
     setRecheckLoading(true);
     try {
       const payload: Record<string, unknown> = {};
@@ -372,27 +424,29 @@ export default function QuestionsAdminPage() {
       if (query.pool === "active") payload.includeIsolated = false;
       payload.limit = 1000;
 
-      const res = await fetch("/api/admin/questions/quality/recheck", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setRecheckError(data?.error ?? "批量重算失败");
-        return;
-      }
+      await runWithStepUp(
+        async () => {
+          const data = await requestJson<QuestionQualityRecheckResponse>("/api/admin/questions/quality/recheck", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
 
-      const processedCount = Number(data?.data?.scope?.processedCount ?? 0);
-      const updated = Number(data?.data?.summary?.updated ?? 0);
-      const newlyTracked = Number(data?.data?.summary?.newlyTracked ?? 0);
-      const highRiskCount = Number(data?.data?.summary?.highRiskCount ?? 0);
-      const isolatedCount = Number(data?.data?.summary?.isolatedCount ?? 0);
-      setRecheckMessage(
-        `已重算 ${processedCount} 题（新增质检 ${newlyTracked}，变更 ${updated}，高风险 ${highRiskCount}，隔离池 ${isolatedCount}）。`
+          const processedCount = Number(data?.data?.scope?.processedCount ?? 0);
+          const updated = Number(data?.data?.summary?.updated ?? 0);
+          const newlyTracked = Number(data?.data?.summary?.newlyTracked ?? 0);
+          const highRiskCount = Number(data?.data?.summary?.highRiskCount ?? 0);
+          const isolatedCount = Number(data?.data?.summary?.isolatedCount ?? 0);
+          setRecheckMessage(
+            `已重算 ${processedCount} 题（新增质检 ${newlyTracked}，变更 ${updated}，高风险 ${highRiskCount}，隔离池 ${isolatedCount}）。`
+          );
+
+          await loadQuestions();
+        },
+        (error) => {
+          setRecheckError(getRequestErrorMessage(error, "批量重算失败"));
+        }
       );
-
-      await loadQuestions();
     } finally {
       setRecheckLoading(false);
     }
@@ -428,6 +482,8 @@ export default function QuestionsAdminPage() {
         </button>
       </div>
 
+      {pageActionError ? <div className="status-note error">{pageActionError}</div> : null}
+
       {workspace === "tools" ? (
         <QuestionsToolsPanel
           importMessage={importMessage}
@@ -445,6 +501,7 @@ export default function QuestionsAdminPage() {
           form={form}
           setForm={setForm}
           knowledgePoints={knowledgePoints}
+          createError={createError}
           onCreate={handleCreate}
         />
       ) : null}
@@ -472,6 +529,7 @@ export default function QuestionsAdminPage() {
           onRecheckQuality={handleRecheckQuality}
         />
       ) : null}
+      {stepUpDialog}
     </div>
   );
 }

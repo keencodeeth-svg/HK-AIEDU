@@ -9,6 +9,7 @@ import StudentDashboardGuideCard from "./_components/StudentDashboardGuideCard";
 import StudentExecutionSummaryCard from "./_components/StudentExecutionSummaryCard";
 import StudentEntryCompactCard from "./_components/StudentEntryCompactCard";
 import StudentEntryDetailCard from "./_components/StudentEntryDetailCard";
+import StudentLearningLoopCard from "./_components/StudentLearningLoopCard";
 import StudentMotivationCard from "./_components/StudentMotivationCard";
 import StudentNextActionCard from "./_components/StudentNextActionCard";
 import StudentPriorityTasksCard from "./_components/StudentPriorityTasksCard";
@@ -23,6 +24,8 @@ import type {
   JoinRequest,
   MotivationPayload,
   PlanItem,
+  StudentRadarSnapshot,
+  StudentWeakKnowledgePointSnapshot,
   TodayTask,
   TodayTaskEventName,
   TodayTaskPayload
@@ -44,6 +47,13 @@ type JoinRequestsResponse = { data?: JoinRequest[] };
 type TodayTasksResponse = { data?: TodayTaskPayload | null };
 type JoinClassResponse = { message?: string; data?: { message?: string } };
 type ScheduleData = NonNullable<ScheduleResponse["data"]>;
+type RadarSummaryResponse = {
+  data?: {
+    mastery?: {
+      weakKnowledgePoints?: StudentWeakKnowledgePointSnapshot[];
+    } | null;
+  };
+};
 
 function extractPlanItems(payload: PlanResponse | null | undefined): PlanItem[] {
   if (Array.isArray(payload?.data?.items)) return payload.data.items;
@@ -63,12 +73,20 @@ function extractMotivation(payload: MotivationResponse | null | undefined): Moti
   return null;
 }
 
+function extractRadarSnapshot(payload: RadarSummaryResponse | null | undefined): StudentRadarSnapshot | null {
+  return {
+    weakKnowledgePoint: payload?.data?.mastery?.weakKnowledgePoints?.[0] ?? null
+  };
+}
+
 export default function StudentPage() {
   const trackedTaskExposureRef = useRef<string | null>(null);
   const [plan, setPlan] = useState<PlanItem[]>([]);
   const [motivation, setMotivation] = useState<MotivationPayload | null>(null);
   const [todayTasks, setTodayTasks] = useState<TodayTaskPayload | null>(null);
+  const [radarSnapshot, setRadarSnapshot] = useState<StudentRadarSnapshot | null>(null);
   const [todayTaskError, setTodayTaskError] = useState<string | null>(null);
+  const [radarError, setRadarError] = useState<string | null>(null);
   const [schedule, setSchedule] = useState<ScheduleData | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleLoading, setScheduleLoading] = useState(true);
@@ -103,6 +121,21 @@ export default function StudentPage() {
         throw nextError;
       }
       setTodayTaskError(getRequestErrorMessage(nextError, "加载今日任务失败"));
+      return false;
+    }
+  }, []);
+
+  const loadRadarSnapshot = useCallback(async () => {
+    setRadarError(null);
+    try {
+      const payload = await requestJson<RadarSummaryResponse>("/api/student/radar");
+      setRadarSnapshot(extractRadarSnapshot(payload));
+      return true;
+    } catch (nextError) {
+      if (isAuthError(nextError)) {
+        throw nextError;
+      }
+      setRadarError(getRequestErrorMessage(nextError, "加载学习画像摘要失败"));
       return false;
     }
   }, []);
@@ -150,6 +183,7 @@ export default function StudentPage() {
           requestJson<MotivationResponse>("/api/student/motivation"),
           loadJoinRequests(),
           loadTodayTasks(),
+          loadRadarSnapshot(),
           loadSchedule(mode === "refresh" ? "refresh" : "initial")
         ]);
 
@@ -165,6 +199,8 @@ export default function StudentPage() {
           setJoinRequests([]);
           setTodayTasks(null);
           setTodayTaskError(null);
+          setRadarSnapshot(null);
+          setRadarError(null);
           setSchedule(null);
           setScheduleError(null);
           setScheduleLastLoadedAt(null);
@@ -176,7 +212,7 @@ export default function StudentPage() {
         setRefreshing(false);
       }
     },
-    [loadJoinRequests, loadSchedule, loadTodayTasks]
+    [loadJoinRequests, loadRadarSnapshot, loadSchedule, loadTodayTasks]
   );
 
   const refreshSchedule = useCallback(async () => {
@@ -346,6 +382,7 @@ export default function StudentPage() {
       });
       setPlan(extractPlanItems(payload));
       await loadTodayTasks();
+      await loadRadarSnapshot();
       setAuthRequired(false);
       setLastLoadedAt(new Date().toISOString());
     } catch (nextError) {
@@ -393,9 +430,13 @@ export default function StudentPage() {
     <WorkspacePage
       className="grid dashboard-stack"
       title="学习控制台"
-      subtitle="今日课表、任务闭环、成长激励与学习入口。"
+      subtitle="先做什么、卡住怎么办、做完看哪里，都在这里直接推进。"
       lastLoadedAt={lastLoadedAt}
-      chips={[<span key="student-term" className="chip">学期进行中</span>]}
+      chips={[
+        <span key="student-term" className="chip">学期进行中</span>,
+        todayTasks?.recentStudyVariantActivity ? <span key="student-momentum" className="chip">Tutor 动量已同步</span> : null,
+        radarSnapshot?.weakKnowledgePoint ? <span key="student-portrait" className="chip">画像已给出薄弱点</span> : null
+      ].filter(Boolean)}
       actions={
         <button className="button secondary" type="button" onClick={() => void loadDashboard("refresh")} disabled={loading || refreshing}>
           {refreshing ? "刷新中..." : "刷新"}
@@ -414,6 +455,78 @@ export default function StudentPage() {
           : undefined
       }
     >
+      <div className="section-head">
+        <div>
+          <h2>现在直接开始</h2>
+          <div className="section-sub">先看第一项和时间风险，不再在首页自己重排一遍优先级。</div>
+        </div>
+        <span className="chip">Action-first</span>
+      </div>
+
+      <div className="student-focus-grid">
+        <StudentNextActionCard
+          schedule={schedule}
+          todayTasks={todayTasks}
+          recommendedTask={recommendedTask}
+          mustDoCount={todayTasks?.summary?.mustDo ?? visiblePriorityTasks.length}
+          totalTaskCount={todayTasks?.summary?.total ?? visiblePriorityTasks.length}
+          weakPlanCount={weakPlanCount}
+          onTaskEvent={handleTaskEvent}
+        />
+
+        <StudentExecutionSummaryCard
+          schedule={schedule}
+          todayTasks={todayTasks}
+          recommendedTask={recommendedTask}
+          weakPlanCount={weakPlanCount}
+          onTaskEvent={handleTaskEvent}
+        />
+      </div>
+
+      {radarError ? <div className="status-note info">{radarError}。首页仍会展示任务与课表，但画像相关建议可能不是最新。</div> : null}
+
+      <div className="section-head">
+        <div>
+          <h2>卡住时别停</h2>
+          <div className="section-sub">首屏只保留两个兜底入口：快问快答和高优先任务。</div>
+        </div>
+        <span className="chip">Keep Moving</span>
+      </div>
+
+      <div id="student-next-action" className="student-context-grid">
+        <StudentQuickTutorCard
+          schedule={schedule}
+          mustDoCount={todayTasks?.summary?.mustDo ?? visiblePriorityTasks.length}
+          weakPlanCount={weakPlanCount}
+        />
+
+        <div className="grid" style={{ gap: 10 }}>
+          <div id="student-priority-tasks">
+            <StudentPriorityTasksCard
+              schedule={schedule}
+              todayTaskError={todayTaskError}
+              visiblePriorityTasks={visiblePriorityTasks}
+              hiddenTodayTaskCount={hiddenTodayTaskCount}
+              onTaskEvent={handleTaskEvent}
+            />
+          </div>
+          <StudentTaskOverviewCard
+            todayTasks={todayTasks}
+            totalPlanCount={totalPlanCount}
+            weakPlanCount={weakPlanCount}
+            refreshing={refreshing}
+            onRefreshPlan={refreshPlan}
+          />
+        </div>
+      </div>
+
+      <div className="section-head">
+        <div>
+          <h2>课表与完整队列</h2>
+          <div className="section-sub">当你需要看上下文时，再查看课表联动和完整任务列表。</div>
+        </div>
+        <span className="chip">Context</span>
+      </div>
 
       <StudentScheduleCard
         schedule={schedule}
@@ -427,67 +540,36 @@ export default function StudentPage() {
         }}
       />
 
-      <StudentExecutionSummaryCard
-        schedule={schedule}
-        todayTasks={todayTasks}
-        recommendedTask={recommendedTask}
-        weakPlanCount={weakPlanCount}
-        onTaskEvent={handleTaskEvent}
-      />
-
-      <div id="student-next-action" className="student-focus-grid">
-        <StudentNextActionCard
-          schedule={schedule}
-          todayTasks={todayTasks}
-          recommendedTask={recommendedTask}
-          mustDoCount={todayTasks?.summary?.mustDo ?? visiblePriorityTasks.length}
-          totalTaskCount={todayTasks?.summary?.total ?? visiblePriorityTasks.length}
-          weakPlanCount={weakPlanCount}
-          onTaskEvent={handleTaskEvent}
-        />
-
-        <StudentQuickTutorCard
-          schedule={schedule}
-          mustDoCount={todayTasks?.summary?.mustDo ?? visiblePriorityTasks.length}
-          weakPlanCount={weakPlanCount}
-        />
-      </div>
-
-      <StudentDashboardGuideCard
-        showDashboardGuide={showDashboardGuide}
-        onHide={hideDashboardGuide}
-        onShow={showDashboardGuideAgain}
-      />
-
-      <div className="student-overview-grid">
-        <div id="student-priority-tasks">
-          <StudentPriorityTasksCard
-            schedule={schedule}
-            todayTaskError={todayTaskError}
-            visiblePriorityTasks={visiblePriorityTasks}
-            hiddenTodayTaskCount={hiddenTodayTaskCount}
-            onTaskEvent={handleTaskEvent}
-          />
-        </div>
-
-        <div className="grid" style={{ gap: 10 }}>
-          <StudentTaskOverviewCard
-            todayTasks={todayTasks}
-            totalPlanCount={totalPlanCount}
-            weakPlanCount={weakPlanCount}
-            refreshing={refreshing}
-            onRefreshPlan={refreshPlan}
-          />
-          <StudentMotivationCard motivation={motivation} />
-        </div>
-      </div>
-
       <div id="student-task-queue">
         <StudentUnifiedTaskQueueCard
           schedule={schedule}
           todayTasks={todayTasks}
           todayTaskError={todayTaskError}
           onTaskEvent={handleTaskEvent}
+        />
+      </div>
+
+      <div className="section-head">
+        <div>
+          <h2>做完后再回看</h2>
+          <div className="section-sub">这里放学习闭环说明、激励和新手引导，不抢你开工前的注意力。</div>
+        </div>
+        <span className="chip">After Start</span>
+      </div>
+
+      <StudentLearningLoopCard
+        recommendedTask={recommendedTask}
+        todayTasks={todayTasks}
+        radarSnapshot={radarSnapshot}
+        onTaskEvent={handleTaskEvent}
+      />
+
+      <div className="student-overview-grid">
+        <StudentMotivationCard motivation={motivation} />
+        <StudentDashboardGuideCard
+          showDashboardGuide={showDashboardGuide}
+          onHide={hideDashboardGuide}
+          onShow={showDashboardGuideAgain}
         />
       </div>
 

@@ -8,6 +8,7 @@ import {
   setSessionCookie
 } from "@/lib/auth";
 import { validatePasswordPolicy } from "@/lib/password";
+import { decideSelfRegisterAccess, isInitialSelfRegisterEnabled } from "@/lib/self-register-policy";
 import { apiSuccess, badRequest, conflict, forbidden } from "@/lib/api/http";
 import { parseJson, v } from "@/lib/api/validation";
 import { createAuthRoute } from "@/lib/api/domains";
@@ -41,14 +42,14 @@ export const POST = createAuthRoute({
 
     const expectedInvite = process.env.ADMIN_INVITE_CODE?.trim();
     const adminCount = await getAdminCount();
-    const allowWithoutInvite = !expectedInvite && adminCount === 0;
-
-    if (expectedInvite) {
-      if (!body.inviteCode || body.inviteCode !== expectedInvite) {
-        forbidden("invalid invite code");
-      }
-    } else if (!allowWithoutInvite) {
-      forbidden("invite code required");
+    const decision = decideSelfRegisterAccess({
+      existingCount: adminCount,
+      inputInviteCode: body.inviteCode,
+      configuredInviteCodes: [expectedInvite],
+      bootstrapEnabled: isInitialSelfRegisterEnabled(process.env.ADMIN_ALLOW_INITIAL_SELF_REGISTER)
+    });
+    if (!decision.accepted) {
+      forbidden(decision.error ?? "invite code required");
     }
 
     const existing = await getUserByEmail(body.email);

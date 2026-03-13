@@ -1,6 +1,7 @@
 import { deleteKnowledgePoint, updateKnowledgePoint } from "@/lib/content";
 import { requireRole } from "@/lib/guard";
 import { addAdminLog } from "@/lib/admin-log";
+import { assertAdminStepUp } from "@/lib/admin-step-up";
 import type { KnowledgePoint } from "@/lib/types";
 import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import {
@@ -19,6 +20,7 @@ export const PATCH = createAdminRoute({
     if (!user) {
       unauthorized();
     }
+    assertAdminStepUp(user);
     const params = parseParams(rawParams, adminIdParamsSchema);
     const body = await parseJson(request, updateKnowledgePointBodySchema);
 
@@ -85,6 +87,7 @@ export const DELETE = createAdminRoute({
     if (!user) {
       unauthorized();
     }
+    assertAdminStepUp(user);
     const params = parseParams(rawParams, adminIdParamsSchema);
 
     const ok = await deleteKnowledgePoint(params.id);

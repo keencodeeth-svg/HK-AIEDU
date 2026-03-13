@@ -14,6 +14,21 @@ export default function DashboardError({
 }) {
   useEffect(() => {
     console.error("dashboard route error", error);
+    void fetch("/api/observability/client-error", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        component: "dashboard",
+        pathname: window.location.pathname,
+        message: error.message || "dashboard route error",
+        stack: error.stack || "",
+        digest: error.digest || ""
+      })
+    }).catch(() => {
+      // client error reporting must never block the fallback UI
+    });
   }, [error]);
 
   return (

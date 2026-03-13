@@ -1,3 +1,4 @@
+import { isStudyVariantAttemptReason, summarizeRecentStudyVariantAttempts } from "@/lib/ai-study-progress";
 import { getCurrentUser } from "@/lib/auth";
 import { combineDateAndTime, getDateKey, getWeekdayFromDate, listClassScheduleSessions } from "@/lib/class-schedules";
 import { getClassesByStudent } from "@/lib/classes";
@@ -6,7 +7,7 @@ import { getChallengeState } from "@/lib/challenges";
 import { SUBJECT_LABELS } from "@/lib/constants";
 import { getKnowledgePoints } from "@/lib/content";
 import { ensureExamAssignment, getExamAssignment, getExamPapersByClassIds } from "@/lib/exams";
-import { generateStudyPlans, getStudyPlans } from "@/lib/progress";
+import { generateStudyPlans, getStudyPlans, getAttemptsByUser } from "@/lib/progress";
 import { getStudentProfile } from "@/lib/profiles";
 import { getUnifiedReviewQueue } from "@/lib/review-scheduler";
 import { unauthorized } from "@/lib/api/http";
@@ -154,28 +155,31 @@ function buildTask(
     nowTs: number;
     targetCountHint?: number;
     isInProgress?: boolean;
+    priorityBoost?: number;
+    impactBoost?: number;
   }
 ) {
   const group = resolveTaskGroup(input.source, input.status);
-  const impactScore = SOURCE_IMPACT[input.source];
+  const impactScore = clamp(SOURCE_IMPACT[input.source] + (input.impactBoost ?? 0), 0, 100);
   const urgencyScore = resolveUrgencyScore({
     source: input.source,
     status: input.status,
     dueAt: input.dueAt,
     nowTs: input.nowTs
   });
+  const priorityBoost = input.priorityBoost ?? 0;
   const effortMinutes = resolveEffortMinutes({
     source: input.source,
     targetCountHint: input.targetCountHint,
     isInProgress: input.isInProgress
   });
   const expectedGain = clamp(
-    Math.round(impactScore * 0.62 + urgencyScore * 0.28 + (100 - effortMinutes) * 0.1),
+    Math.round(impactScore * 0.62 + urgencyScore * 0.28 + (100 - effortMinutes) * 0.1 + priorityBoost * 0.5),
     0,
     100
   );
   const priority = clamp(
-    Math.round(impactScore * 0.52 + urgencyScore * 0.38 + (100 - effortMinutes) * 0.1),
+    Math.round(impactScore * 0.52 + urgencyScore * 0.38 + (100 - effortMinutes) * 0.1 + priorityBoost),
     0,
     100
   );
@@ -229,6 +233,24 @@ export const GET = createLearningRoute({
     getChallengeState(user.id),
     getStudentProfile(user.id)
   ]);
+  const attempts = await getAttemptsByUser(user.id);
+  const recentStudyVariantActivity = summarizeRecentStudyVariantAttempts({ attempts });
+  const recentStudyVariantByKnowledgePoint = new Map<string, { count: number; latestAttemptAt: string }>();
+  attempts.forEach((attempt) => {
+    if (!recentStudyVariantActivity) return;
+    const latestTs = new Date(recentStudyVariantActivity.latestAttemptAt).getTime();
+    const attemptTs = new Date(attempt.createdAt).getTime();
+    if (!Number.isFinite(attemptTs) || attemptTs < latestTs - 24 * 60 * 60 * 1000) return;
+    if (!isStudyVariantAttemptReason(attempt.reason)) return;
+    const current = recentStudyVariantByKnowledgePoint.get(attempt.knowledgePointId) ?? {
+      count: 0,
+      latestAttemptAt: attempt.createdAt
+    };
+    recentStudyVariantByKnowledgePoint.set(attempt.knowledgePointId, {
+      count: current.count + 1,
+      latestAttemptAt: current.latestAttemptAt > attempt.createdAt ? current.latestAttemptAt : attempt.createdAt
+    });
+  });
 
   const assignmentProgressMap = new Map(assignmentProgress.map((item) => [item.assignmentId, item]));
   const pendingAssignmentMetaByClass = new Map<string, { count: number; nextTitle?: string; nextDueAt?: string }>();
@@ -441,6 +463,7 @@ export const GET = createLearningRoute({
   rankedPlanItems.forEach((item) => {
     const status = resolveDueStatus(item.dueDate, nowTs, todayEndTs);
     const kpTitle = kpMap.get(item.knowledgePointId)?.title ?? item.knowledgePointId;
+    const recentTutorDrill = recentStudyVariantByKnowledgePoint.get(item.knowledgePointId) ?? null;
     const query = new URLSearchParams({
       subject: item.subject,
       knowledgePointId: item.knowledgePointId
@@ -455,13 +478,54 @@ export const GET = createLearningRoute({
         href: `/practice?${query.toString()}`,
         status,
         dueAt: item.dueDate,
-        tags: ["学习计划", SUBJECT_LABELS[item.subject] ?? item.subject],
-        recommendedReason: "围绕薄弱知识点做定向修复",
+        tags: ["学习计划", SUBJECT_LABELS[item.subject] ?? item.subject, ...(recentTutorDrill ? ["Tutor 刚练过"] : [])],
+        recommendedReason: recentTutorDrill
+          ? `你刚在 Tutor 做过「${kpTitle}」变式巩固，趁热再完成计划题，最容易把掌握度坐实。`
+          : "围绕薄弱知识点做定向修复",
         nowTs,
-        targetCountHint: item.targetCount
+        targetCountHint: item.targetCount,
+        priorityBoost: recentTutorDrill ? 8 : 0,
+        impactBoost: recentTutorDrill ? 4 : 0
       })
     );
   });
+
+  const hasTutorMomentumTask = tasks.some(
+    (task) => task.tags.includes("Tutor 刚练过") || task.tags.includes("Tutor 动量") || task.recommendedReason.includes("Tutor")
+  );
+  if (recentStudyVariantActivity && !hasTutorMomentumTask) {
+    const latestKnowledgePointId = recentStudyVariantActivity.latestKnowledgePointId;
+    const latestKnowledgePointTitle = kpMap.get(latestKnowledgePointId)?.title ?? latestKnowledgePointId;
+    const latestSubjectLabel =
+      SUBJECT_LABELS[recentStudyVariantActivity.latestSubject] ?? recentStudyVariantActivity.latestSubject;
+    const momentumQuery = new URLSearchParams({
+      subject: recentStudyVariantActivity.latestSubject,
+      knowledgePointId: latestKnowledgePointId
+    });
+    const masteredInTutor = recentStudyVariantActivity.latestCorrect;
+    tasks.push(
+      buildTask({
+        id: `tutor-momentum-${recentStudyVariantActivity.latestSubject}-${latestKnowledgePointId}`,
+        source: "plan",
+        sourceId: `tutor-momentum-${latestKnowledgePointId}`,
+        title: `${latestSubjectLabel} Tutor 趁热巩固`,
+        description: `${latestKnowledgePointTitle} · 从 Tutor 变式切到正式练习，建议立刻完成 ${
+          masteredInTutor ? 3 : 4
+        } 题。`,
+        href: `/practice?${momentumQuery.toString()}`,
+        status: "pending",
+        dueAt: null,
+        tags: ["Tutor 动量", latestSubjectLabel, masteredInTutor ? "刚做对" : "刚暴露薄弱点"],
+        recommendedReason: masteredInTutor
+          ? `你刚在 Tutor 做对了「${latestKnowledgePointTitle}」，现在切到正式练习，最适合把会做变成稳定会做。`
+          : `你刚在 Tutor 暴露了「${latestKnowledgePointTitle}」的薄弱点，立刻补 4 题正式练习，修复效率最高。`,
+        nowTs,
+        targetCountHint: masteredInTutor ? 3 : 4,
+        priorityBoost: masteredInTutor ? 10 : 14,
+        impactBoost: masteredInTutor ? 6 : 8
+      })
+    );
+  }
 
   const claimableChallenges = challengeState.tasks.filter((task) => task.completed && !task.claimed).slice(0, 2);
   const pendingChallenges = challengeState.tasks.filter((task) => !task.completed && !task.claimed).slice(0, 1);
@@ -536,6 +600,18 @@ export const GET = createLearningRoute({
   return {
     data: {
       generatedAt: new Date().toISOString(),
+      recentStudyVariantActivity: recentStudyVariantActivity
+        ? {
+            recentAttemptCount: recentStudyVariantActivity.recentAttemptCount,
+            recentCorrectCount: recentStudyVariantActivity.recentCorrectCount,
+            latestAttemptAt: recentStudyVariantActivity.latestAttemptAt,
+            latestKnowledgePointId: recentStudyVariantActivity.latestKnowledgePointId,
+            latestKnowledgePointTitle:
+              kpMap.get(recentStudyVariantActivity.latestKnowledgePointId)?.title ?? recentStudyVariantActivity.latestKnowledgePointId,
+            latestSubject: recentStudyVariantActivity.latestSubject,
+            latestCorrect: recentStudyVariantActivity.latestCorrect
+          }
+        : null,
       summary: {
         total: sortedTasks.length,
         mustDo: groups.mustDo.length,
