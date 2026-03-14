@@ -3730,6 +3730,10 @@ function writeRuntimeStore(fileName, items) {
   fs.writeFileSync(path.join(runtimeDir, fileName), JSON.stringify(items, null, 2));
 }
 
+function toJson(value) {
+  return value == null ? null : JSON.stringify(value);
+}
+
 function mergeRuntimeStore(fileName, nextItems, matcher) {
   const existing = readRuntimeStore(fileName);
   const filtered = existing.filter((item) => !matcher(item));
@@ -4341,7 +4345,7 @@ function toDbRows(data) {
       id: item.id,
       assignment_id: item.assignmentId,
       student_id: item.studentId,
-      answers: item.answers,
+      answers: toJson(item.answers),
       score: item.score,
       total: item.total,
       submitted_at: item.submittedAt,
@@ -4364,7 +4368,7 @@ function toDbRows(data) {
       assignment_id: item.assignmentId,
       title: item.title,
       description: item.description,
-      levels: item.levels,
+      levels: toJson(item.levels),
       max_score: item.maxScore,
       weight: item.weight,
       created_at: item.createdAt
@@ -4396,7 +4400,7 @@ function toDbRows(data) {
       assignment_id: item.assignmentId,
       student_id: item.studentId,
       provider: item.provider,
-      result: item.result,
+      result: toJson(item.result),
       created_at: item.createdAt,
       updated_at: item.updatedAt
     })),
@@ -4502,14 +4506,14 @@ function toDbRows(data) {
       id: item.id,
       paper_id: item.paperId,
       student_id: item.studentId,
-      answers: item.answers,
+      answers: toJson(item.answers),
       updated_at: item.updatedAt
     })),
     examSubmissions: data.examSubmissions.map((item) => ({
       id: item.id,
       paper_id: item.paperId,
       student_id: item.studentId,
-      answers: item.answers,
+      answers: toJson(item.answers),
       score: item.score,
       total: item.total,
       submitted_at: item.submittedAt
@@ -4518,7 +4522,7 @@ function toDbRows(data) {
       id: item.id,
       paper_id: item.paperId,
       student_id: item.studentId,
-      data: item.data,
+      data: toJson(item.data),
       generated_at: item.generatedAt
     })),
     examEvents: data.examEvents.map((item) => ({
@@ -4576,7 +4580,7 @@ function toDbRows(data) {
       favorite: item.favorite,
       tags: item.tags,
       created_at: item.createdAt,
-      meta: item.meta
+      meta: toJson(item.meta)
     })),
     correctionTasks: data.correctionTasks.map((item) => ({
       id: item.id,
@@ -4625,7 +4629,7 @@ function toDbRows(data) {
       origin_type: item.originType ?? null,
       origin_paper_id: item.originPaperId ?? null,
       origin_submitted_at: item.originSubmittedAt ?? null,
-      payload: item.payload,
+      payload: toJson(item.payload),
       created_at: item.createdAt,
       updated_at: item.updatedAt
     })),
@@ -4678,7 +4682,7 @@ function toDbRows(data) {
       grade: item.grade,
       title: item.title ?? null,
       content: item.content,
-      feedback: item.feedback,
+      feedback: toJson(item.feedback),
       created_at: item.createdAt
     })),
     experimentFlags: data.experimentFlags.map((item) => ({
@@ -4703,7 +4707,7 @@ function toDbRows(data) {
       session_id: item.sessionId,
       trace_id: item.traceId,
       entity_id: item.entityId,
-      props: item.props,
+      props: toJson(item.props),
       props_truncated: item.propsTruncated,
       user_agent: item.userAgent,
       ip: item.ip
@@ -4727,7 +4731,7 @@ function toDbRows(data) {
       weight: item.weight,
       timeout_ms: item.timeoutMs,
       max_retries: item.maxRetries,
-      extra: item.extra,
+      extra: toJson(item.extra),
       updated_at: item.updatedAt
     })),
     aiProviderRuntimeConfig: {
@@ -4772,7 +4776,7 @@ function toDbRows(data) {
       error_code: item.errorCode ?? null,
       error_message: item.errorMessage ?? null,
       trace_id: item.traceId ?? null,
-      meta: item.meta,
+      meta: toJson(item.meta),
       created_at: item.createdAt
     })),
     adminLogs: data.adminLogs.map((item) => ({
