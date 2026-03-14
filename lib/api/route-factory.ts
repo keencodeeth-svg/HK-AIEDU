@@ -85,6 +85,51 @@ function normalizeOrigin(value: string | null | undefined) {
   }
 }
 
+function getPrimaryHeaderValue(value: string | null | undefined) {
+  if (!value) return null;
+  const primary = value
+    .split(",")[0]
+    ?.trim();
+  return primary || null;
+}
+
+function normalizeForwardedProto(value: string | null | undefined) {
+  const normalized = getPrimaryHeaderValue(value)?.toLowerCase() ?? null;
+  if (normalized === "http" || normalized === "https") {
+    return normalized;
+  }
+  return null;
+}
+
+function normalizeForwardedPort(value: string | null | undefined) {
+  const normalized = getPrimaryHeaderValue(value);
+  if (!normalized) return null;
+  return /^\d+$/.test(normalized) ? normalized : null;
+}
+
+function buildExpectedOriginFromForwardedHeaders(request: Request) {
+  const forwardedHost = getPrimaryHeaderValue(request.headers.get("x-forwarded-host"));
+  const host = getPrimaryHeaderValue(request.headers.get("host"));
+  const authority = forwardedHost ?? host;
+  if (!authority) return null;
+
+  const forwardedProto = normalizeForwardedProto(request.headers.get("x-forwarded-proto"));
+  const forwardedPort = normalizeForwardedPort(request.headers.get("x-forwarded-port"));
+  const fallbackOrigin = normalizeOrigin(request.url);
+  const protocol = forwardedProto ?? fallbackOrigin?.split("://")[0] ?? null;
+  if (!protocol) return null;
+
+  if (authority.includes(":") || !forwardedPort) {
+    return `${protocol}://${authority}`;
+  }
+
+  const isDefaultPort =
+    (protocol === "http" && forwardedPort === "80") ||
+    (protocol === "https" && forwardedPort === "443");
+
+  return `${protocol}://${isDefaultPort ? authority : `${authority}:${forwardedPort}`}`;
+}
+
 function getRequestSourceOrigin(request: Request) {
   const originHeader = normalizeOrigin(request.headers.get("origin"));
   if (originHeader) return originHeader;
@@ -109,7 +154,7 @@ function shouldEnforceSameOrigin(
 }
 
 function enforceSameOrigin(request: Request) {
-  const expectedOrigin = normalizeOrigin(request.url);
+  const expectedOrigin = buildExpectedOriginFromForwardedHeaders(request) ?? normalizeOrigin(request.url);
   const sourceOrigin = getRequestSourceOrigin(request);
   if (!expectedOrigin || !sourceOrigin || sourceOrigin !== expectedOrigin) {
     forbidden("same-origin request required");
