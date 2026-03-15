@@ -88,7 +88,7 @@ test("guarded runtime blocks JSON access for high-frequency state files even whe
   try {
     assert.throws(
       () => mod.readJson("sessions.json", []),
-      /cannot use JSON storage when runtime guardrails are enforced/
+      /cannot use JSON storage once DATABASE_URL is configured/
     );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -101,7 +101,23 @@ test("guarded runtime blocks JSON access for promoted execution-state files", as
   try {
     assert.throws(
       () => mod.readJson("assignment-submissions.json", []),
-      /cannot use JSON storage when runtime guardrails are enforced/
+      /cannot use JSON storage once DATABASE_URL is configured/
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("database-backed high-frequency state cannot fall back to JSON even when runtime guardrails are not enforced", async () => {
+  const { mod, root } = await loadStorageModule({
+    NODE_ENV: "development",
+    RUNTIME_GUARDRAILS_ENFORCE: "false"
+  });
+
+  try {
+    assert.throws(
+      () => mod.readJson("sessions.json", []),
+      /cannot use JSON storage once DATABASE_URL is configured/
     );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -115,6 +131,21 @@ test("guarded runtime still allows JSON fallback for migration-priority state th
     await fs.writeFile(path.join(seedDir, "study-plans.json"), JSON.stringify([{ id: "plan-1" }], null, 2));
     const plans = mod.readJson("study-plans.json", []);
     assert.deepEqual(plans, [{ id: "plan-1" }]);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("database-backed runtime still allows JSON fallback for non-blocking migration-priority files", async () => {
+  const { mod, root, seedDir } = await loadStorageModule({
+    NODE_ENV: "development",
+    RUNTIME_GUARDRAILS_ENFORCE: "false"
+  });
+
+  try {
+    await fs.writeFile(path.join(seedDir, "study-plans.json"), JSON.stringify([{ id: "plan-dev-1" }], null, 2));
+    const plans = mod.readJson("study-plans.json", []);
+    assert.deepEqual(plans, [{ id: "plan-dev-1" }]);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

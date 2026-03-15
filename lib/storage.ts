@@ -3,6 +3,7 @@ import path from "path";
 import { assertDatabaseEnabled, isDbEnabled } from "./db";
 import {
   assertRuntimeGuardrails,
+  isHighFrequencyStateFile,
   requiresDatabaseBackedState,
   shouldEnforceRuntimeGuardrails,
   warnOnJsonFallbackUsage
@@ -14,6 +15,11 @@ const fileQueues = new Map<string, Promise<void>>();
 
 function assertJsonStorageAllowed(fileName: string) {
   assertRuntimeGuardrails();
+  if (isHighFrequencyStateFile(fileName) && isDbEnabled()) {
+    throw new Error(
+      `[runtime-guardrails] ${fileName} cannot use JSON storage once DATABASE_URL is configured. Use the database-backed store for this state to avoid DB/JSON divergence.`
+    );
+  }
   if (requiresDatabaseBackedState(fileName)) {
     if (shouldEnforceRuntimeGuardrails()) {
       throw new Error(

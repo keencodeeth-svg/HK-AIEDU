@@ -28,7 +28,8 @@
     "seed:showcase": "node scripts/seed-showcase.mjs",
     "export:users": "node scripts/export-users.mjs",
     "security:migrate-passwords": "node scripts/migrate-password-hash.mjs",
-    "storage:migrate": "node scripts/migrate-file-payloads-to-object-storage.mjs"
+    "storage:migrate": "node scripts/migrate-file-payloads-to-object-storage.mjs",
+    "runtime:migrate:p0": "node scripts/migrate-p0-runtime-state-to-db.mjs"
   },
   "dependencies": {
     "html-to-image": "1.11.11",

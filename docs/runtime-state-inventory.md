@@ -58,7 +58,19 @@
 3. 掌握度、计划、练习与复练链路
 4. 分析与运营埋点
 
-## 5. 代码对应关系
+## 5. 执行命令
+
+在数据库 schema 已初始化后，可以先执行：
+
+`npm run runtime:migrate:p0`
+
+约定与 `lib/storage.ts` 一致：
+
+- 优先读取 `DATA_DIR`（默认 `.runtime-data`）下的运行态 JSON。
+- 如果运行态文件不存在，再回退读取 `DATA_SEED_DIR`（默认 `data`）下的种子文件。
+- 当前脚本已覆盖会话、登录安全、恢复尝试、审计日志、作业进度与提交、考试发放与答题草稿与提交、通知、家长回执、专注记录。
+
+## 6. 代码对应关系
 
 - 运行时 guardrails：`lib/runtime-guardrails.ts`
 - readiness 检查：`lib/health.ts`
