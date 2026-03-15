@@ -7,7 +7,7 @@ export function createRuntime(port) {
   const configuredBaseUrl = process.env.API_TEST_BASE_URL?.trim();
   const baseUrl = configuredBaseUrl
     ? configuredBaseUrl.replace(/\/+$/, "")
-    : `http://127.0.0.1:${port}`;
+    : `http://localhost:${port}`;
   const baseOrigin = new URL(baseUrl).origin;
   const isRemote = Boolean(configuredBaseUrl);
   const readinessToken = process.env.API_TEST_READINESS_TOKEN?.trim() || process.env.READINESS_PROBE_TOKEN?.trim() || "";
@@ -50,6 +50,7 @@ export function createRuntime(port) {
   async function apiFetch(path, options = {}) {
     const { json, useCookies = true, timeoutMs = 20000, referrer, ...rest } = options;
     const headers = new Headers(rest.headers ?? {});
+    const explicitTestOrigin = headers.has("x-test-origin");
     const method = String(rest.method ?? "GET").toUpperCase();
     const safeMethod = method === "GET" || method === "HEAD" || method === "OPTIONS";
 
@@ -66,9 +67,9 @@ export function createRuntime(port) {
       }
     }
     if (!headers.has("x-test-origin")) {
-      headers.set("x-test-origin", baseUrl);
+      headers.set("x-test-origin", baseOrigin);
     }
-    if (isRemote && !safeMethod) {
+    if (!safeMethod && !explicitTestOrigin) {
       if (!headers.has("origin")) {
         headers.set("origin", baseOrigin);
       }
@@ -79,7 +80,7 @@ export function createRuntime(port) {
     const requestReferrer =
       typeof referrer === "string" && referrer.trim()
         ? referrer.trim()
-        : !headers.has("x-test-origin") && !safeMethod
+        : !safeMethod && !explicitTestOrigin
           ? `${baseUrl}/api-test`
           : undefined;
 
