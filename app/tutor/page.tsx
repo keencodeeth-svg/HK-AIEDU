@@ -9,7 +9,19 @@ import StatePanel from "@/components/StatePanel";
 import MathText from "@/components/MathText";
 import { trackEvent } from "@/lib/analytics-client";
 import { GRADE_OPTIONS, SUBJECT_LABELS, SUBJECT_OPTIONS, getGradeLabel } from "@/lib/constants";
-import { TUTOR_LAUNCH_INTENTS, TUTOR_LAUNCH_PANELS, type TutorLaunchIntent, type TutorLaunchPanel } from "@/lib/tutor-launch";
+import { type TutorLaunchIntent } from "@/lib/tutor-launch";
+import {
+  ALLOWED_IMAGE_TYPES,
+  ANSWER_MODE_OPTIONS,
+  DEFAULT_ANSWER_MODE,
+  DEFAULT_GRADE,
+  DEFAULT_SUBJECT,
+  HISTORY_ORIGIN_OPTIONS,
+  LEARNING_MODE_OPTIONS,
+  MAX_IMAGE_COUNT,
+  MAX_IMAGE_SIZE_MB,
+  QUALITY_RISK_LABELS
+} from "./config";
 import type {
   TutorAnswer,
   TutorAnswerMode,
@@ -30,246 +42,32 @@ import type {
   TutorVariantReflection,
   TutorVariantReflectionResponse
 } from "./types";
-
-const DEFAULT_SUBJECT = "math";
-const DEFAULT_GRADE = "4";
-const DEFAULT_ANSWER_MODE: TutorAnswerMode = "step_by_step";
-const MAX_IMAGE_SIZE_MB = 5;
-const MAX_IMAGE_COUNT = 3;
-const MIN_CROP_PERCENT = 2;
-const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
-
-const ANSWER_MODE_OPTIONS = [
-  {
-    value: "answer_only",
-    label: "只要答案",
-    description: "快速核对结果，不展开步骤。"
-  },
-  {
-    value: "step_by_step",
-    label: "分步讲解",
-    description: "适合完整学会这道题。"
-  },
-  {
-    value: "hints_first",
-    label: "先提示后答案",
-    description: "先自己思考，再看答案。"
-  }
-] as const;
-
-const LEARNING_MODE_OPTIONS = [
-  {
-    value: "direct",
-    label: "直接讲解",
-    description: "像常规 AI 解题一样，快速得到答案与讲解。"
-  },
-  {
-    value: "study",
-    label: "学习模式",
-    description: "先提示和追问，再让你说思路，最后按需揭晓完整讲解。"
-  }
-] as const;
-
-const HISTORY_ORIGIN_OPTIONS: Array<{ value: TutorHistoryOriginFilter; label: string }> = [
-  { value: "all", label: "全部来源" },
-  { value: "image", label: "图片识题" },
-  { value: "text", label: "文字求解" },
-  { value: "refine", label: "编辑重算" }
-];
-
-const HISTORY_ORIGIN_LABELS: Record<TutorHistoryOrigin, string> = {
-  text: "文字求解",
-  image: "图片识题",
-  refine: "编辑重算"
-};
-
-const QUALITY_RISK_LABELS = {
-  low: "低风险",
-  medium: "中风险",
-  high: "高风险"
-} as const;
-
-type ActiveAction = "text" | "image" | "refine" | "study" | "study_image" | null;
-type TutorLearningMode = "direct" | "study";
-type ResultOrigin = TutorHistoryOrigin | null;
-type CropSelection = { x: number; y: number; width: number; height: number };
-type DragState = { index: number; startX: number; startY: number } | null;
-type PreviewItem = { url: string; width: number; height: number };
-type StudyQuestionResolution = { question: string; origin: TutorHistoryOrigin; imageCount: number };
-
-function clampPercent(value: number) {
-  return Math.max(0, Math.min(100, value));
-}
-
-function buildSelection(startX: number, startY: number, endX: number, endY: number): CropSelection {
-  const x = clampPercent(Math.min(startX, endX));
-  const y = clampPercent(Math.min(startY, endY));
-  const maxX = clampPercent(Math.max(startX, endX));
-  const maxY = clampPercent(Math.max(startY, endY));
-  return {
-    x,
-    y,
-    width: Math.max(0, maxX - x),
-    height: Math.max(0, maxY - y)
-  };
-}
-
-function hasCrop(selection: CropSelection | null | undefined) {
-  return Boolean(selection && selection.width >= MIN_CROP_PERCENT && selection.height >= MIN_CROP_PERCENT);
-}
-
-function shouldRenderCrop(selection: CropSelection | null | undefined) {
-  return Boolean(selection && selection.width > 0.5 && selection.height > 0.5);
-}
-
-function getCropSummary(selection: CropSelection | null | undefined) {
-  if (!hasCrop(selection)) {
-    return "整图上传";
-  }
-
-  return `已框选 ${Math.round(selection!.width)}% × ${Math.round(selection!.height)}%`;
-}
-
-function getPointerPercent(event: ReactPointerEvent<HTMLDivElement>) {
-  const rect = event.currentTarget.getBoundingClientRect();
-  const x = ((event.clientX - rect.left) / rect.width) * 100;
-  const y = ((event.clientY - rect.top) / rect.height) * 100;
-  return {
-    x: clampPercent(x),
-    y: clampPercent(y)
-  };
-}
-
-function getAnswerSections(answer: TutorAnswer, answerMode: TutorAnswerMode) {
-  if (answer.learningMode === "study") {
-    return [];
-  }
-
-  if (answerMode === "answer_only") {
-    return [];
-  }
-
-  if (answerMode === "hints_first") {
-    return [
-      { key: "hints", title: "提示", items: answer.hints ?? [] },
-      { key: "steps", title: "步骤", items: answer.steps ?? [] }
-    ];
-  }
-
-  return [
-    { key: "steps", title: "步骤", items: answer.steps ?? [] },
-    { key: "hints", title: "提示", items: answer.hints ?? [] }
-  ];
-}
-
-function readImageFromFile(file: File) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
-    const image = new window.Image();
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve(image);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("image load failed"));
-    };
-    image.src = objectUrl;
-  });
-}
-
-async function cropImageFile(file: File, selection: CropSelection | null | undefined) {
-  if (!hasCrop(selection)) {
-    return file;
-  }
-
-  const image = await readImageFromFile(file);
-  const cropX = Math.floor((image.naturalWidth * selection!.x) / 100);
-  const cropY = Math.floor((image.naturalHeight * selection!.y) / 100);
-  const cropWidth = Math.max(1, Math.floor((image.naturalWidth * selection!.width) / 100));
-  const cropHeight = Math.max(1, Math.floor((image.naturalHeight * selection!.height) / 100));
-
-  const canvas = document.createElement("canvas");
-  canvas.width = cropWidth;
-  canvas.height = cropHeight;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    return file;
-  }
-
-  context.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
-
-  const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob(resolve, file.type || "image/png", 0.92);
-  });
-
-  if (!blob) {
-    return file;
-  }
-
-  const dotIndex = file.name.lastIndexOf(".");
-  const fileName = dotIndex >= 0 ? `${file.name.slice(0, dotIndex)}-crop${file.name.slice(dotIndex)}` : `${file.name}-crop`;
-  return new File([blob], fileName, {
-    type: blob.type || file.type,
-    lastModified: Date.now()
-  });
-}
-
-async function copyToClipboard(value: string) {
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
-  }
-  if (typeof document === "undefined") return;
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.setAttribute("readonly", "true");
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  document.body.removeChild(textarea);
-}
-
-function getOriginLabel(origin?: TutorHistoryOrigin | null) {
-  if (!origin) return "文字求解";
-  return HISTORY_ORIGIN_LABELS[origin] ?? "文字求解";
-}
-
-function getQualityToneClass(riskLevel?: "low" | "medium" | "high") {
-  if (riskLevel === "high") return "error";
-  if (riskLevel === "medium") return "info";
-  return "success";
-}
-
-function isStudyResult(answer: TutorAnswer | null | undefined) {
-  return answer?.learningMode === "study";
-}
-
-function truncateText(value: string, maxLength = 140) {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-  return `${normalized.slice(0, maxLength)}…`;
-}
-
-function isTutorAnswerMode(value: string | null): value is TutorAnswerMode {
-  return ANSWER_MODE_OPTIONS.some((item) => item.value === value);
-}
-
-function getShareTargetActionLabel(target: TutorShareTarget) {
-  return target.kind === "teacher" ? `发给老师 · ${target.name}` : `发给家长 · ${target.name}`;
-}
-
-function isTutorLaunchIntent(value: string | null): value is TutorLaunchIntent {
-  return Boolean(value && TUTOR_LAUNCH_INTENTS.includes(value as TutorLaunchIntent));
-}
-
-function isTutorLaunchPanel(value: string | null): value is TutorLaunchPanel {
-  return Boolean(value && TUTOR_LAUNCH_PANELS.includes(value as TutorLaunchPanel));
-}
+import {
+  type ActiveAction,
+  type CropSelection,
+  type DragState,
+  type PreviewItem,
+  type ResultOrigin,
+  type StudyQuestionResolution,
+  type TutorLearningMode,
+  buildSelection,
+  copyToClipboard,
+  cropImageFile,
+  getAnswerSections,
+  getCropSummary,
+  getOriginLabel,
+  getPointerPercent,
+  getQualityToneClass,
+  getShareTargetActionLabel,
+  hasCrop,
+  isStudyResult,
+  isTutorAnswerMode,
+  isTutorLaunchIntent,
+  isTutorLaunchPanel,
+  readImageFromFile,
+  shouldRenderCrop,
+  truncateText
+} from "./utils";
 
 export default function TutorPage() {
   const router = useRouter();
