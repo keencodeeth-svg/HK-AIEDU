@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { addAdminLog, getAdminLogById, listAdminLogs, updateAdminLog, type AdminLog } from "./admin-log";
 import { buildAdminAuditDetail, diffAuditFields } from "./admin-audit";
 import { getUserByEmail } from "./auth";
-import { isDbEnabled, query } from "./db";
+import { isDbEnabled, query, requireDatabaseEnabled } from "./db";
 import { mutateJson, readJson } from "./storage";
 
 export type AccountRecoveryRole = "student" | "teacher" | "parent" | "admin" | "school_admin";
@@ -252,6 +252,14 @@ function mapRecoveryAttempt(row: DbAccountRecoveryAttempt): AccountRecoveryAttem
   };
 }
 
+function canUseApiTestRecoveryAttemptsFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireRecoveryAttemptsDatabase() {
+  requireDatabaseEnabled("auth_recovery_attempts");
+}
+
 function getWaitingHours(createdAt: string) {
   const createdTs = new Date(createdAt).getTime();
   if (!Number.isFinite(createdTs)) return 0;
@@ -437,7 +445,7 @@ async function listRecentRecoveryAttempts(input: {
 }) {
   const cutoffIso = new Date(Date.now() - input.lookbackMs).toISOString();
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestRecoveryAttemptsFallback()) {
     return readJson<AccountRecoveryAttemptRecord[]>(RECOVERY_ATTEMPTS_FILE, []).filter((item) => {
       const createdAt = new Date(item.createdAt).getTime();
       if (!Number.isFinite(createdAt) || createdAt < Date.now() - input.lookbackMs) {
@@ -448,6 +456,7 @@ async function listRecentRecoveryAttempts(input: {
     });
   }
 
+  requireRecoveryAttemptsDatabase();
   const params: Array<string | null> = [cutoffIso, input.email];
   let sql =
     `SELECT id, role, email, issue_type, requester_ip, user_agent, result, limited_by, retry_at, ticket_id, created_at
@@ -491,7 +500,7 @@ async function recordRecoveryAttempt(input: {
     createdAt: new Date().toISOString()
   };
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestRecoveryAttemptsFallback()) {
     return mutateJson<AccountRecoveryAttemptRecord[], AccountRecoveryAttemptRecord>(
       RECOVERY_ATTEMPTS_FILE,
       [],
@@ -505,6 +514,7 @@ async function recordRecoveryAttempt(input: {
     );
   }
 
+  requireRecoveryAttemptsDatabase();
   await query(
     `INSERT INTO auth_recovery_attempts
       (id, role, email, issue_type, requester_ip, user_agent, result, limited_by, retry_at, ticket_id, created_at)

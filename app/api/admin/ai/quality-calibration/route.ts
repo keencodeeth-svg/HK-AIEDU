@@ -4,6 +4,7 @@ import { addAdminLog } from "@/lib/admin-log";
 import { buildAdminAuditDetail, diffAuditFields } from "@/lib/admin-audit";
 import { badRequest, notFound, unauthorized } from "@/lib/api/http";
 import {
+  refreshAiQualityCalibrationState,
   getAiQualityCalibration,
   listAiQualityCalibrationSnapshots,
   rollbackAiQualityCalibration,
@@ -30,7 +31,8 @@ function toNumberMap(input: unknown) {
   return next;
 }
 
-function buildPayload(historyLimit = 20) {
+async function buildPayload(historyLimit = 20) {
+  await refreshAiQualityCalibrationState();
   return {
     ...getAiQualityCalibration(),
     snapshots: listAiQualityCalibrationSnapshots(historyLimit)
@@ -57,7 +59,7 @@ export const GET = createAdminRoute({
       unauthorized();
     }
 
-    return { data: buildPayload(query.historyLimit ?? 20) };
+    return { data: await buildPayload(query.historyLimit ?? 20) };
   }
 });
 
@@ -85,6 +87,7 @@ export const POST = createAdminRoute({
     const action = typeof input.action === "string" ? input.action.trim().toLowerCase() : "";
     const reason = typeof input.reason === "string" ? input.reason.trim() : undefined;
     const confirmAction = input.confirmAction === true;
+    await refreshAiQualityCalibrationState();
     const currentConfig = getAiQualityCalibration();
     const beforeSnapshot = toAuditSnapshot(currentConfig);
 
@@ -96,7 +99,7 @@ export const POST = createAdminRoute({
       if (!confirmAction) {
         badRequest("confirmAction required");
       }
-      const next = rollbackAiQualityCalibration(snapshotId, {
+      const next = await rollbackAiQualityCalibration(snapshotId, {
         updatedBy: user.id,
         reason: reason || `rollback:${snapshotId}`
       });
@@ -121,7 +124,7 @@ export const POST = createAdminRoute({
           }
         })
       });
-      return { data: buildPayload(20) };
+      return { data: await buildPayload(20) };
     }
 
     const patch: AiQualityCalibrationPatch = {};
@@ -150,7 +153,7 @@ export const POST = createAdminRoute({
       badRequest("empty calibration patch");
     }
 
-    const next = upsertAiQualityCalibration(patch, {
+    const next = await upsertAiQualityCalibration(patch, {
       updatedBy: user.id,
       reason: reason || "manual_update"
     });
@@ -172,6 +175,6 @@ export const POST = createAdminRoute({
       })
     });
 
-    return { data: buildPayload(20) };
+    return { data: await buildPayload(20) };
   }
 });

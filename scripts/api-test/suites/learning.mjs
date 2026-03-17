@@ -46,16 +46,16 @@ export async function runLearningSuite(context) {
   assert.equal(invalidThread.body?.error, "missing fields");
 
   const studentAdminLogs = await apiFetch("/api/admin/logs");
-  assert.equal(studentAdminLogs.status, 401, "Student should not access /api/admin/logs");
-  assert.equal(studentAdminLogs.body?.error, "unauthorized");
+  assert.equal(studentAdminLogs.status, 403, "Student should not access /api/admin/logs");
+  assert.equal(studentAdminLogs.body?.error, "forbidden");
 
   const studentMetrics = await apiFetch("/api/admin/observability/metrics");
-  assert.equal(studentMetrics.status, 401, "Student should not access /api/admin/observability/metrics");
-  assert.equal(studentMetrics.body?.error, "unauthorized");
+  assert.equal(studentMetrics.status, 403, "Student should not access /api/admin/observability/metrics");
+  assert.equal(studentMetrics.body?.error, "forbidden");
 
   const studentAlerts = await apiFetch("/api/admin/observability/alerts");
-  assert.equal(studentAlerts.status, 401, "Student should not access /api/admin/observability/alerts");
-  assert.equal(studentAlerts.body?.error, "unauthorized");
+  assert.equal(studentAlerts.status, 403, "Student should not access /api/admin/observability/alerts");
+  assert.equal(studentAlerts.body?.error, "forbidden");
 
   const clientErrorReport = await apiFetch("/api/observability/client-error", {
     method: "POST",
@@ -76,8 +76,8 @@ export async function runLearningSuite(context) {
   );
 
   const studentFunnel = await apiFetch("/api/analytics/funnel");
-  assert.equal(studentFunnel.status, 401, "Student should not access /api/analytics/funnel");
-  assert.equal(studentFunnel.body?.error, "unauthorized");
+  assert.equal(studentFunnel.status, 403, "Student should not access /api/analytics/funnel");
+  assert.equal(studentFunnel.body?.error, "forbidden");
 
   const practiceNext = await apiFetch("/api/practice/next", {
     method: "POST",

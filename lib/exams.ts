@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { readJson, transactJsonFiles, updateJson, writeJson } from "./storage";
-import { isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 import { getClassStudentIds } from "./classes";
 
 export type ExamPaperStatus = "published" | "closed";
@@ -222,6 +222,22 @@ function mapExamSubmission(row: DbExamSubmission): ExamSubmission {
   };
 }
 
+function canUseApiTestExamExecutionFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireExamAssignmentsDatabase() {
+  requireDatabaseEnabled("exam_assignments");
+}
+
+function requireExamAnswersDatabase() {
+  requireDatabaseEnabled("exam_answers");
+}
+
+function requireExamSubmissionsDatabase() {
+  requireDatabaseEnabled("exam_submissions");
+}
+
 export async function getExamPapers(): Promise<ExamPaper[]> {
   if (!isDbEnabled()) {
     const list = readJson<ExamPaper[]>(EXAM_PAPER_FILE, []);
@@ -267,10 +283,11 @@ export async function getExamPaperItems(paperId: string): Promise<ExamPaperItem[
 }
 
 export async function getExamAssignment(paperId: string, studentId: string): Promise<ExamAssignment | null> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestExamExecutionFallback()) {
     const list = readJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, []);
     return list.find((item) => item.paperId === paperId && item.studentId === studentId) ?? null;
   }
+  requireExamAssignmentsDatabase();
   const row = await queryOne<DbExamAssignment>(
     "SELECT * FROM exam_assignments WHERE paper_id = $1 AND student_id = $2",
     [paperId, studentId]
@@ -279,10 +296,11 @@ export async function getExamAssignment(paperId: string, studentId: string): Pro
 }
 
 export async function getExamAssignmentsByPaper(paperId: string): Promise<ExamAssignment[]> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestExamExecutionFallback()) {
     const list = readJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, []);
     return list.filter((item) => item.paperId === paperId);
   }
+  requireExamAssignmentsDatabase();
   const rows = await query<DbExamAssignment>(
     "SELECT * FROM exam_assignments WHERE paper_id = $1 ORDER BY assigned_at ASC",
     [paperId]
@@ -291,10 +309,11 @@ export async function getExamAssignmentsByPaper(paperId: string): Promise<ExamAs
 }
 
 export async function getExamAssignmentsByStudent(studentId: string): Promise<ExamAssignment[]> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestExamExecutionFallback()) {
     const list = readJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, []);
     return list.filter((item) => item.studentId === studentId);
   }
+  requireExamAssignmentsDatabase();
   const rows = await query<DbExamAssignment>(
     "SELECT * FROM exam_assignments WHERE student_id = $1 ORDER BY assigned_at DESC",
     [studentId]
@@ -315,7 +334,7 @@ export async function ensureExamAssignment(paperId: string, studentId: string): 
     assignedAt
   };
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestExamExecutionFallback()) {
     return updateJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, [], (list) => {
       const exists = list.some((item) => item.paperId === paperId && item.studentId === studentId);
       if (!exists) {
@@ -327,6 +346,7 @@ export async function ensureExamAssignment(paperId: string, studentId: string): 
     );
   }
 
+  requireExamAssignmentsDatabase();
   const row = await queryOne<DbExamAssignment>(
     `INSERT INTO exam_assignments (id, paper_id, student_id, status, assigned_at)
      VALUES ($1, $2, $3, $4, $5)
@@ -362,7 +382,7 @@ export async function ensureExamAssignmentsForPaper(paperId: string): Promise<Ex
   if (!missing.length) return existing;
 
   const assignedAt = new Date().toISOString();
-  if (!isDbEnabled()) {
+  if (canUseApiTestExamExecutionFallback()) {
     return updateJson<ExamAssignment[]>(EXAM_ASSIGNMENT_FILE, [], (list) => {
       const assignedSet = new Set(
         list.filter((item) => item.paperId === paperId).map((item) => item.studentId)
@@ -382,6 +402,7 @@ export async function ensureExamAssignmentsForPaper(paperId: string): Promise<Ex
     }).then((list) => list.filter((item) => item.paperId === paperId));
   }
 
+  requireExamAssignmentsDatabase();
   for (const studentId of missing) {
     await query(
       `INSERT INTO exam_assignments (id, paper_id, student_id, status, assigned_at)
@@ -395,10 +416,11 @@ export async function ensureExamAssignmentsForPaper(paperId: string): Promise<Ex
 }
 
 export async function getExamAnswerDraft(paperId: string, studentId: string): Promise<ExamAnswerDraft | null> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestExamExecutionFallback()) {
     const list = readJson<ExamAnswerDraft[]>(EXAM_ANSWER_FILE, []);
     return list.find((item) => item.paperId === paperId && item.studentId === studentId) ?? null;
   }
+  requireExamAnswersDatabase();
   const row = await queryOne<DbExamAnswer>(
     "SELECT * FROM exam_answers WHERE paper_id = $1 AND student_id = $2",
     [paperId, studentId]
@@ -413,7 +435,7 @@ export async function upsertExamAnswerDraft(input: {
 }): Promise<ExamAnswerDraft> {
   const updatedAt = new Date().toISOString();
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestExamExecutionFallback()) {
     const next: ExamAnswerDraft = {
       id: `exam-answer-${crypto.randomBytes(6).toString("hex")}`,
       paperId: input.paperId,
@@ -435,6 +457,7 @@ export async function upsertExamAnswerDraft(input: {
     );
   }
 
+  requireExamAnswersDatabase();
   const id = `exam-answer-${crypto.randomBytes(6).toString("hex")}`;
   const row = await queryOne<DbExamAnswer>(
     `INSERT INTO exam_answers (id, paper_id, student_id, answers, updated_at)
@@ -458,10 +481,11 @@ export async function upsertExamAnswerDraft(input: {
 }
 
 export async function getExamSubmission(paperId: string, studentId: string): Promise<ExamSubmission | null> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestExamExecutionFallback()) {
     const list = readJson<ExamSubmission[]>(EXAM_SUBMISSION_FILE, []);
     return list.find((item) => item.paperId === paperId && item.studentId === studentId) ?? null;
   }
+  requireExamSubmissionsDatabase();
   const row = await queryOne<DbExamSubmission>(
     "SELECT * FROM exam_submissions WHERE paper_id = $1 AND student_id = $2",
     [paperId, studentId]
@@ -470,10 +494,11 @@ export async function getExamSubmission(paperId: string, studentId: string): Pro
 }
 
 export async function getExamSubmissionsByPaper(paperId: string): Promise<ExamSubmission[]> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestExamExecutionFallback()) {
     const list = readJson<ExamSubmission[]>(EXAM_SUBMISSION_FILE, []);
     return list.filter((item) => item.paperId === paperId);
   }
+  requireExamSubmissionsDatabase();
   const rows = await query<DbExamSubmission>(
     "SELECT * FROM exam_submissions WHERE paper_id = $1 ORDER BY submitted_at DESC",
     [paperId]
@@ -520,6 +545,9 @@ export async function createAndPublishExam(input: {
   };
 
   if (!isDbEnabled()) {
+    if (!canUseApiTestExamExecutionFallback()) {
+      requireExamAssignmentsDatabase();
+    }
     const students = await getClassStudentIds(input.classId);
     // Guard against stale/invalid student ids by intersecting with class membership.
     const targetStudents =
@@ -662,7 +690,7 @@ export async function markExamAssignmentInProgress(input: {
     return existing;
   }
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestExamExecutionFallback()) {
     const fallback: ExamAssignment = {
       id: `exam-assign-${crypto.randomBytes(6).toString("hex")}`,
       paperId: input.paperId,
@@ -692,6 +720,7 @@ export async function markExamAssignmentInProgress(input: {
     );
   }
 
+  requireExamAssignmentsDatabase();
   const row = await queryOne<DbExamAssignment>(
     `UPDATE exam_assignments
      SET status = 'in_progress',
@@ -714,7 +743,7 @@ export async function markExamAssignmentSubmitted(input: {
   const existing = await ensureExamAssignment(input.paperId, input.studentId);
   // Submission write also stamps final scoring snapshot onto assignment for teacher dashboards.
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestExamExecutionFallback()) {
     const fallback: ExamAssignment = {
       id: `exam-assign-${crypto.randomBytes(6).toString("hex")}`,
       paperId: input.paperId,
@@ -750,6 +779,7 @@ export async function markExamAssignmentSubmitted(input: {
     );
   }
 
+  requireExamAssignmentsDatabase();
   const row = await queryOne<DbExamAssignment>(
     `UPDATE exam_assignments
      SET status = 'submitted',
@@ -785,7 +815,7 @@ export async function upsertExamSubmission(input: {
   const submittedAt = new Date().toISOString();
   // Idempotent upsert allows repeated submit requests without creating duplicate attempts.
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestExamExecutionFallback()) {
     const next: ExamSubmission = {
       id: `exam-sub-${crypto.randomBytes(6).toString("hex")}`,
       paperId: input.paperId,
@@ -809,6 +839,7 @@ export async function upsertExamSubmission(input: {
     );
   }
 
+  requireExamSubmissionsDatabase();
   const id = `exam-sub-${crypto.randomBytes(6).toString("hex")}`;
   const row = await queryOne<DbExamSubmission>(
     `INSERT INTO exam_submissions (id, paper_id, student_id, answers, score, total, submitted_at)

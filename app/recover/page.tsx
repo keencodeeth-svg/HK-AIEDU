@@ -5,7 +5,8 @@ import { useState } from "react";
 import Card from "@/components/Card";
 import StatePanel from "@/components/StatePanel";
 import PasswordPolicyHint from "@/components/auth/PasswordPolicyHint";
-import { formatLoadedTime, getRequestErrorMessage, requestJson } from "@/lib/client-request";
+import { resolveRecoveryRequestError } from "@/lib/auth-form-errors";
+import { formatLoadedTime, requestJson } from "@/lib/client-request";
 
 const roleOptions = [
   { value: "student" as const, label: "学生", desc: "学习空间、作业、练习" },
@@ -56,23 +57,24 @@ export default function RecoverPage() {
     setResultMessage("");
 
     try {
+      const normalizedEmail = email.trim();
       const payload = await requestJson<RecoveryResponse>("/api/auth/recovery-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           role,
-          email,
-          name,
+          email: normalizedEmail,
+          name: name.trim(),
           issueType,
-          studentEmail,
-          schoolName,
-          note
+          studentEmail: studentEmail.trim(),
+          schoolName: schoolName.trim(),
+          note: note.trim()
         })
       });
       setResult(payload.data ?? null);
       setResultMessage(payload.message ?? "恢复请求已提交");
     } catch (nextError) {
-      setError(getRequestErrorMessage(nextError, "提交恢复请求失败"));
+      setError(resolveRecoveryRequestError(nextError));
     } finally {
       setLoading(false);
     }

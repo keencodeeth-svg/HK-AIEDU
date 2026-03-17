@@ -119,8 +119,19 @@ function buildExpectedOriginFromForwardedHeaders(request: Request) {
   const protocol = forwardedProto ?? fallbackOrigin?.split("://")[0] ?? null;
   if (!protocol) return null;
 
-  if (authority.includes(":") || !forwardedPort) {
-    return `${protocol}://${authority}`;
+  const rawOrigin =
+    authority.includes(":") || !forwardedPort
+      ? `${protocol}://${authority}`
+      : `${protocol}://${(
+          (protocol === "http" && forwardedPort === "80") ||
+          (protocol === "https" && forwardedPort === "443")
+        )
+          ? authority
+          : `${authority}:${forwardedPort}`}`;
+
+  const normalizedOrigin = normalizeOrigin(rawOrigin);
+  if (normalizedOrigin) {
+    return normalizedOrigin;
   }
 
   const isDefaultPort =

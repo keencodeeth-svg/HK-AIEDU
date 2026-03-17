@@ -2,6 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { pushAppToast } from "@/components/AppToastHub";
+import {
+  getRequestErrorMessage,
+  isAuthError,
+  requestJson
+} from "@/lib/client-request";
 
 type UserMenuProps = {
   user?: { name: string; role: string } | null;
@@ -13,10 +19,20 @@ export default function UserMenu({ user }: UserMenuProps) {
 
   async function handleLogout() {
     setLoading(true);
-    await fetch("/api/auth/logout", { method: "POST" });
-    setLoading(false);
-    router.push("/login");
-    router.refresh();
+    try {
+      await requestJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+      router.push("/login");
+      router.refresh();
+    } catch (error) {
+      if (isAuthError(error)) {
+        router.push("/login");
+        router.refresh();
+        return;
+      }
+      pushAppToast(getRequestErrorMessage(error, "退出失败，请稍后重试"), "error");
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (!user) {

@@ -22,6 +22,13 @@ function pickMatchedLink(pathname: string, links: NavLink[]) {
   return [...matches].sort((a, b) => b.href.length - a.href.length)[0];
 }
 
+function buildDefaultGroupOpenState(pathname: string, navGroups: NavGroup[]) {
+  return navGroups.reduce<Record<string, boolean>>((acc, group) => {
+    acc[group.title] = group.links.some((item) => isActive(pathname, item.href));
+    return acc;
+  }, {});
+}
+
 export default function RoleSidebarNav({
   primaryLinks,
   navGroups
@@ -64,10 +71,7 @@ export default function RoleSidebarNav({
   }, [collapsed]);
 
   useEffect(() => {
-    const defaults = navGroups.reduce<Record<string, boolean>>((acc, group) => {
-      acc[group.title] = true;
-      return acc;
-    }, {});
+    const defaults = buildDefaultGroupOpenState(pathname, navGroups);
     try {
       const raw = window.localStorage.getItem(GROUP_STATE_KEY);
       const parsed = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
@@ -75,7 +79,7 @@ export default function RoleSidebarNav({
     } catch {
       setGroupOpenState(defaults);
     }
-  }, [navGroups]);
+  }, [navGroups, pathname]);
 
   useEffect(() => {
     try {
@@ -204,8 +208,8 @@ export default function RoleSidebarNav({
             className="role-side-search-input"
             value={searchKeyword}
             onChange={(event) => setSearchKeyword(event.target.value)}
-            placeholder="搜索功能（如：考试、报告、题库）"
-            aria-label="搜索侧边栏功能"
+            placeholder="搜索入口（如：考试、报告、题库）"
+            aria-label="搜索侧边栏入口"
           />
           {searchKeyword ? (
             <button type="button" className="role-side-search-clear" onClick={() => setSearchKeyword("")}>
@@ -214,7 +218,7 @@ export default function RoleSidebarNav({
           ) : null}
           <div className="role-side-search-row">
             <div className="role-side-search-meta">
-              已显示 {visibleLinkCount} / {allLinks.length} 个功能
+              已显示 {visibleLinkCount} / {allLinks.length} 个入口
             </div>
             <button type="button" className="role-side-search-launch" onClick={emitOpenCommandPalette}>
               全局搜索⌘K
@@ -235,7 +239,7 @@ export default function RoleSidebarNav({
       ) : null}
 
       <div className="role-side-section">
-        <div className="role-side-section-title">核心功能（{visiblePrimaryLinks.length}）</div>
+        <div className="role-side-section-title">主线功能（{visiblePrimaryLinks.length}）</div>
         <div className="role-side-links">
           {visiblePrimaryLinks.map((item) => renderNavLink(item))}
         </div>
@@ -250,35 +254,40 @@ export default function RoleSidebarNav({
         </div>
       ) : null}
 
-      {visibleGroups.map((group, index) => (
-        <div key={group.title} className="role-side-section">
-          <div className="role-side-section-head">
-            <div className="role-side-section-title">
-              <span className="role-side-step">{index + 1}</span>
-              {group.title}（{group.links.length}）
+      {visibleGroups.map((group, index) => {
+        // 搜索模式下强制展开匹配分组，避免“搜到了但看不见”。
+        const isGroupExpanded = normalizedSearch ? true : (groupOpenState[group.title] ?? false);
+
+        return (
+          <div key={group.title} className="role-side-section">
+            <div className="role-side-section-head">
+              <div className="role-side-section-title">
+                <span className="role-side-step">{index + 1}</span>
+                {group.title}（{group.links.length}）
+              </div>
+              <button
+                type="button"
+                className="role-side-group-toggle"
+                onClick={() => toggleGroup(group.title)}
+                aria-expanded={isGroupExpanded}
+              >
+                {isGroupExpanded ? "收起" : "展开"}
+              </button>
             </div>
-            <button
-              type="button"
-              className="role-side-group-toggle"
-              onClick={() => toggleGroup(group.title)}
-              aria-expanded={groupOpenState[group.title] ?? true}
-            >
-              {(groupOpenState[group.title] ?? true) ? "收起" : "展开"}
-            </button>
+            {isGroupExpanded ? (
+              <div className="role-side-links">
+                {group.links.map((item) => renderNavLink(item))}
+              </div>
+            ) : null}
           </div>
-          {(groupOpenState[group.title] ?? true) ? (
-            <div className="role-side-links">
-              {group.links.map((item) => renderNavLink(item))}
-            </div>
-          ) : null}
-        </div>
-      ))}
+        );
+      })}
 
       {visibleLinkCount === 0 ? (
         <StatePanel
           compact
           tone="empty"
-          title="没找到匹配功能"
+          title="没找到匹配入口"
           description="换个关键词，或者直接打开全局搜索。"
           action={
             <button type="button" className="button secondary" onClick={emitOpenCommandPalette}>

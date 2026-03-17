@@ -7,6 +7,19 @@ import { getRequestStatus, requestJson, getRequestErrorMessage } from "@/lib/cli
 type ProtectedAction = () => Promise<void>;
 type ActionErrorHandler = (error: unknown) => void;
 
+function getAdminStepUpErrorMessage(error: unknown) {
+  const status = getRequestStatus(error) ?? 0;
+  const requestMessage = getRequestErrorMessage(error, "").trim().toLowerCase();
+
+  if (requestMessage === "current password incorrect") {
+    return "当前密码不正确，请重新输入后再验证。";
+  }
+  if (status === 401 || status === 403) {
+    return "管理员会话已失效，请刷新页面后重新登录。";
+  }
+  return getRequestErrorMessage(error, "管理员验证失败");
+}
+
 export function useAdminStepUp() {
   const pendingActionRef = useRef<ProtectedAction | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -60,7 +73,7 @@ export function useAdminStepUp() {
         });
       }
     } catch (error) {
-      setDialogError(getRequestErrorMessage(error, "管理员验证失败"));
+      setDialogError(getAdminStepUpErrorMessage(error));
     } finally {
       setDialogPending(false);
     }

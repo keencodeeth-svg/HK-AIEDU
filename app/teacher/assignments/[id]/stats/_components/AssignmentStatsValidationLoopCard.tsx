@@ -5,6 +5,7 @@ import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
 import { ASSIGNMENT_TYPE_LABELS } from "@/lib/constants";
 import type { AssignmentStatsData } from "../types";
+import { getDueRelativeLabel } from "../utils";
 
 type AssignmentStatsValidationLoopCardProps = {
   assignmentId: string;
@@ -14,15 +15,6 @@ type AssignmentStatsValidationLoopCardProps = {
   questionStats: AssignmentStatsData["questionStats"];
   now: number;
 };
-
-function getDueRelativeLabel(dueDate: string, now: number) {
-  const diffMs = new Date(dueDate).getTime() - now;
-  const diffDays = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
-  if (diffDays < 0) return `已截止 ${Math.abs(diffDays)} 天`;
-  if (diffDays === 0) return "今天截止";
-  if (diffDays === 1) return "明天截止";
-  return `${diffDays} 天后截止`;
-}
 
 export default function AssignmentStatsValidationLoopCard({
   assignmentId,

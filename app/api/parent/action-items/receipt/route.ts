@@ -32,7 +32,7 @@ const querySchema = v.object<{ source?: string }>(
 );
 
 function normalizeSource(input?: string) {
-  const value = (input ?? "weekly_report").trim();
+  const value = (input ?? "weekly_report").trim().toLowerCase();
   if (value === "weekly_report" || value === "assignment_plan") {
     return value;
   }
@@ -40,18 +40,25 @@ function normalizeSource(input?: string) {
 }
 
 function normalizeStatus(input?: string) {
-  const value = (input ?? "done").trim();
+  const value = (input ?? "done").trim().toLowerCase();
   if (value === "done" || value === "skipped") {
     return value;
   }
   badRequest("invalid status");
 }
 
+function normalizeActionItemId(input?: string) {
+  return (input ?? "").trim().toLowerCase();
+}
+
 function isKnownActionItemId(source: "weekly_report" | "assignment_plan", actionItemId: string) {
+  const token = normalizeActionItemId(actionItemId);
+  if (!token) return false;
+
   if (source === "weekly_report") {
     const weeklySet = new Set(["daily-practice", "keep-strength", "wrong-review", "advance-practice"]);
-    if (weeklySet.has(actionItemId)) return true;
-    return /^weak-[a-z0-9-]+$/i.test(actionItemId);
+    if (weeklySet.has(token)) return true;
+    return /^weak-[a-z0-9-]+$/.test(token);
   }
   const assignmentSet = new Set([
     "clear-overdue",
@@ -60,7 +67,7 @@ function isKnownActionItemId(source: "weekly_report" | "assignment_plan", action
     "review-today",
     "stable-rhythm"
   ]);
-  return assignmentSet.has(actionItemId);
+  return assignmentSet.has(token);
 }
 
 function calculateEffectScore(input: { status: "done" | "skipped"; estimatedMinutes: number }) {
@@ -109,7 +116,7 @@ export const POST = createLearningRoute({
     }
 
     const body = await parseJson(request, bodySchema);
-    const actionItemId = body.actionItemId?.trim();
+    const actionItemId = normalizeActionItemId(body.actionItemId);
     if (!actionItemId) {
       badRequest("actionItemId required");
     }

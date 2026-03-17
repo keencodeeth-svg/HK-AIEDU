@@ -17,6 +17,10 @@ const planQuerySchema = v.object<{ subject?: string }>(
   { allowUnknown: true }
 );
 
+function normalizeSubjectInput(value?: string) {
+  return value?.trim().toLowerCase();
+}
+
 export const GET = createLearningRoute({
   role: "student",
   query: planQuerySchema,
@@ -26,9 +30,11 @@ export const GET = createLearningRoute({
       unauthorized();
     }
 
-    const subject = query.subject;
+    const subject = normalizeSubjectInput(query.subject);
     const profile = await getStudentProfile(user.id);
-    const subjects = profile?.subjects?.length ? profile.subjects : ["math"];
+    const subjects = (profile?.subjects?.length ? profile.subjects : ["math"])
+      .map((item) => normalizeSubjectInput(item))
+      .filter((item): item is string => Boolean(item));
 
     if (!subject || subject === "all") {
       const existing = await getStudyPlans(user.id, subjects);

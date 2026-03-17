@@ -5,6 +5,7 @@ import {
   getAdminCount,
   getUserByEmail,
   hashPassword,
+  normalizeAuthEmail,
   setSessionCookie
 } from "@/lib/auth";
 import { validatePasswordPolicy } from "@/lib/password";
@@ -32,6 +33,9 @@ export const POST = createAuthRoute({
   cache: "private-realtime",
   handler: async ({ request, meta }) => {
     const body = await parseJson(request, adminRegisterSchema);
+    const email = normalizeAuthEmail(body.email);
+    const name = body.name.trim();
+    const inviteCode = body.inviteCode?.trim();
     const passwordValidation = validatePasswordPolicy(body.password);
     if (!passwordValidation.ok) {
       badRequest(passwordValidation.errors[0], {
@@ -44,7 +48,7 @@ export const POST = createAuthRoute({
     const adminCount = await getAdminCount();
     const decision = decideSelfRegisterAccess({
       existingCount: adminCount,
-      inputInviteCode: body.inviteCode,
+      inputInviteCode: inviteCode,
       configuredInviteCodes: [expectedInvite],
       bootstrapEnabled: isInitialSelfRegisterEnabled(process.env.ADMIN_ALLOW_INITIAL_SELF_REGISTER)
     });
@@ -52,7 +56,7 @@ export const POST = createAuthRoute({
       forbidden(decision.error ?? "invite code required");
     }
 
-    const existing = await getUserByEmail(body.email);
+    const existing = await getUserByEmail(email);
     if (existing) {
       conflict("email exists");
     }
@@ -60,8 +64,8 @@ export const POST = createAuthRoute({
     const id = `u-admin-${crypto.randomBytes(6).toString("hex")}`;
     const user = {
       id,
-      email: body.email,
-      name: body.name,
+      email,
+      name,
       role: "admin" as const,
       password: hashPassword(body.password)
     };
@@ -73,7 +77,7 @@ export const POST = createAuthRoute({
       {
         ok: true,
         role: "admin",
-        name: body.name
+        name
       },
       {
         requestId: meta.requestId,

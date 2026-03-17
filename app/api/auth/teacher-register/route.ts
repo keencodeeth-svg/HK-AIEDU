@@ -5,6 +5,7 @@ import {
   getTeacherCount,
   getUserByEmail,
   hashPassword,
+  normalizeAuthEmail,
   setSessionCookie
 } from "@/lib/auth";
 import { validatePasswordPolicy } from "@/lib/password";
@@ -35,6 +36,10 @@ export const POST = createAuthRoute({
   cache: "private-realtime",
   handler: async ({ request, meta }) => {
     const body = await parseJson(request, teacherRegisterSchema);
+    const email = normalizeAuthEmail(body.email);
+    const name = body.name.trim();
+    const inviteCode = body.inviteCode?.trim();
+    const schoolCode = body.schoolCode?.trim();
     const passwordValidation = validatePasswordPolicy(body.password);
     if (!passwordValidation.ok) {
       badRequest(passwordValidation.errors[0], {
@@ -48,7 +53,7 @@ export const POST = createAuthRoute({
     const teacherCount = await getTeacherCount();
     const decision = decideSelfRegisterAccess({
       existingCount: teacherCount,
-      inputInviteCode: body.inviteCode,
+      inputInviteCode: inviteCode,
       configuredInviteCodes: [expectedInvite, ...(inviteList ? inviteList.split(/[,;\s]+/) : [])],
       bootstrapEnabled: isInitialSelfRegisterEnabled(process.env.TEACHER_ALLOW_INITIAL_SELF_REGISTER)
     });
@@ -56,23 +61,23 @@ export const POST = createAuthRoute({
       forbidden(decision.error ?? "invite code required");
     }
 
-    const existing = await getUserByEmail(body.email);
+    const existing = await getUserByEmail(email);
     if (existing) {
       conflict("email exists");
     }
     const schoolId = await resolveSchoolIdByCodeOrDefault({
-      schoolCode: body.schoolCode,
+      schoolCode,
       fallbackToDefault: true
     });
-    if (body.schoolCode && !schoolId) {
+    if (schoolCode && !schoolId) {
       forbidden("invalid school code");
     }
 
     const id = `u-teacher-${crypto.randomBytes(6).toString("hex")}`;
     const user = {
       id,
-      email: body.email,
-      name: body.name,
+      email,
+      name,
       role: "teacher" as const,
       schoolId: schoolId ?? undefined,
       password: hashPassword(body.password)
@@ -85,7 +90,7 @@ export const POST = createAuthRoute({
       {
         ok: true,
         role: "teacher",
-        name: body.name
+        name
       },
       {
         requestId: meta.requestId,

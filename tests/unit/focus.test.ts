@@ -7,6 +7,7 @@ import { afterEach, test } from "node:test";
 type FocusModule = typeof import("../../lib/focus");
 
 const ENV_KEYS = [
+  "API_TEST_SCOPE",
   "DATA_DIR",
   "DATA_SEED_DIR",
   "DATABASE_URL",
@@ -47,6 +48,7 @@ async function loadFocusModule(overrides: Partial<Record<(typeof ENV_KEYS)[numbe
   await fs.mkdir(seedDir, { recursive: true });
 
   process.env.NODE_ENV = "development";
+  process.env.API_TEST_SCOPE = "unit-focus";
   process.env.DATA_DIR = runtimeDir;
   process.env.DATA_SEED_DIR = seedDir;
   delete process.env.DATABASE_URL;

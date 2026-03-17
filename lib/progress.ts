@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { readJson, writeJson } from "./storage";
 import { getKnowledgePoints, getQuestions } from "./content";
 import type { Question } from "./types";
-import { assertDatabaseEnabled, isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 import { getReviewItemsByStudent } from "./reviews";
 import { getFocusSessionsByUser } from "./focus";
 import { getFavoritesByUser } from "./favorites";
@@ -149,28 +149,40 @@ function mapAttempt(row: DbAttempt): QuestionAttempt {
   };
 }
 
+function canUseApiTestProgressFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireQuestionAttemptsDatabase() {
+  requireDatabaseEnabled("question_attempts");
+}
+
+function requireStudyPlansDatabase() {
+  requireDatabaseEnabled("study_plans");
+}
+
 export async function getAttempts(): Promise<QuestionAttempt[]> {
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("question_attempts");
+  if (canUseApiTestProgressFallback()) {
     return readJson<QuestionAttempt[]>(ATTEMPTS_FILE, []);
   }
+  requireQuestionAttemptsDatabase();
   const rows = await query<DbAttempt>("SELECT * FROM question_attempts");
   return rows.map(mapAttempt);
 }
 
 export async function saveAttempts(list: QuestionAttempt[]) {
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("question_attempts");
+  if (canUseApiTestProgressFallback()) {
     writeJson(ATTEMPTS_FILE, list);
+    return;
   }
+  requireQuestionAttemptsDatabase();
 }
 
 export async function addAttempt(
   attempt: QuestionAttempt,
   options?: { reviewOrigin?: WrongReviewOriginMeta; skipReviewScheduling?: boolean }
 ) {
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("question_attempts");
+  if (canUseApiTestProgressFallback()) {
     const list = await getAttempts();
     list.push(attempt);
     await saveAttempts(list);
@@ -187,6 +199,7 @@ export async function addAttempt(
     });
     return;
   }
+  requireQuestionAttemptsDatabase();
   await query(
     `INSERT INTO question_attempts
      (id, user_id, question_id, subject, knowledge_point_id, correct, answer, reason, created_at)
@@ -217,17 +230,16 @@ export async function addAttempt(
 }
 
 export async function getAttemptsByUser(userId: string) {
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("question_attempts");
+  if (canUseApiTestProgressFallback()) {
     return (await getAttempts()).filter((item) => item.userId === userId);
   }
+  requireQuestionAttemptsDatabase();
   const rows = await query<DbAttempt>("SELECT * FROM question_attempts WHERE user_id = $1", [userId]);
   return rows.map(mapAttempt);
 }
 
 export async function getAttemptsByKnowledgePoint(userId: string, knowledgePointId: string, subject?: string) {
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("question_attempts");
+  if (canUseApiTestProgressFallback()) {
     const attempts = await getAttemptsByUser(userId);
     return attempts.filter(
       (item) =>
@@ -235,6 +247,7 @@ export async function getAttemptsByKnowledgePoint(userId: string, knowledgePoint
         (!subject || item.subject === subject)
     );
   }
+  requireQuestionAttemptsDatabase();
 
   const rows = subject
     ? await query<DbAttempt>(
@@ -250,12 +263,12 @@ export async function getAttemptsByKnowledgePoint(userId: string, knowledgePoint
 
 export async function getAttemptsByUsers(userIds: string[]) {
   if (!userIds.length) return [];
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("question_attempts");
+  if (canUseApiTestProgressFallback()) {
     const attempts = await getAttempts();
     const set = new Set(userIds);
     return attempts.filter((item) => set.has(item.userId));
   }
+  requireQuestionAttemptsDatabase();
   const rows = await query<DbAttempt>("SELECT * FROM question_attempts WHERE user_id = ANY($1)", [userIds]);
   return rows.map(mapAttempt);
 }
@@ -346,14 +359,14 @@ async function buildStudyPlanDraft(userId: string, subject: string, mode: StudyP
 
 async function saveStudyPlan(plan: StudyPlan) {
   const { userId, subject, items, createdAt } = plan;
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("study_plans");
+  if (canUseApiTestProgressFallback()) {
     const plans = readJson<StudyPlan[]>(PLANS_FILE, []);
     const nextPlans = plans.filter((p) => !(p.userId === userId && p.subject === subject));
     nextPlans.push(plan);
     writeJson(PLANS_FILE, nextPlans);
     return plan;
   }
+  requireStudyPlansDatabase();
 
   const planId = `plan-${crypto.randomBytes(6).toString("hex")}`;
   await query(
@@ -397,11 +410,11 @@ export async function refreshStudyPlan(userId: string, subject: string): Promise
 }
 
 export async function getStudyPlan(userId: string, subject: string) {
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("study_plans");
+  if (canUseApiTestProgressFallback()) {
     const plans = readJson<StudyPlan[]>(PLANS_FILE, []);
     return plans.find((plan) => plan.userId === userId && plan.subject === subject) ?? null;
   }
+  requireStudyPlansDatabase();
 
   const plan = await queryOne<DbPlan>(
     "SELECT * FROM study_plans WHERE user_id = $1 AND subject = $2",
@@ -434,11 +447,11 @@ export async function generateStudyPlans(userId: string, subjects: string[]) {
 }
 
 export async function getStudyPlans(userId: string, subjects: string[]) {
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("study_plans");
+  if (canUseApiTestProgressFallback()) {
     const plans = readJson<StudyPlan[]>(PLANS_FILE, []);
     return plans.filter((plan) => plan.userId === userId && subjects.includes(plan.subject));
   }
+  requireStudyPlansDatabase();
 
   const rows = await query<DbPlan>(
     "SELECT * FROM study_plans WHERE user_id = $1 AND subject = ANY($2)",

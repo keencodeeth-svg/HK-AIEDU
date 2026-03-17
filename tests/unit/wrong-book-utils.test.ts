@@ -1,0 +1,102 @@
+import assert from "node:assert/strict";
+import path from "node:path";
+import { test } from "node:test";
+
+const Module = require("node:module") as {
+  _resolveFilename: (request: string, parent?: unknown, isMain?: boolean, options?: unknown) => string;
+};
+
+const originalResolveFilename = Module._resolveFilename;
+Module._resolveFilename = function resolveFilename(request, parent, isMain, options) {
+  if (request === "@/lib/client-request") {
+    return path.resolve(__dirname, "../../lib/client-request.js");
+  }
+  return originalResolveFilename.call(this, request, parent, isMain, options);
+};
+
+const {
+  getWrongBookCompleteTaskRequestMessage,
+  getWrongBookCreateTasksRequestMessage,
+  getWrongBookHistoryRequestMessage,
+  getWrongBookReviewSubmitRequestMessage,
+  isMissingWrongBookReviewQuestionError,
+  isMissingWrongBookTaskError,
+  normalizeWrongBookSkippedReason,
+  pruneWrongBookReviewState,
+  pruneWrongBookSelection
+} = require("../../app/wrong-book/utils") as typeof import("../../app/wrong-book/utils");
+Module._resolveFilename = originalResolveFilename;
+
+function createRequestError(status: number, message: string) {
+  const error = new Error(message) as Error & { status?: number };
+  error.status = status;
+  return error;
+}
+
+test("wrong-book helpers map auth expiry and action validation errors", () => {
+  assert.equal(
+    getWrongBookHistoryRequestMessage(createRequestError(401, "unauthorized"), "fallback"),
+    "学生登录状态已失效，请重新登录后继续查看错题闭环。"
+  );
+  assert.equal(
+    getWrongBookCreateTasksRequestMessage(createRequestError(400, "questionIds required"), "fallback"),
+    "请先选择要订正的错题。"
+  );
+  assert.equal(
+    getWrongBookCompleteTaskRequestMessage(createRequestError(404, "not found"), "fallback"),
+    "这条订正任务已不存在，列表会在刷新后自动同步。"
+  );
+  assert.equal(
+    getWrongBookReviewSubmitRequestMessage(createRequestError(404, "not found"), "fallback"),
+    "这道复练题已不可用，复练队列会在刷新后自动同步。"
+  );
+  assert.equal(isMissingWrongBookTaskError(createRequestError(404, "not found")), true);
+  assert.equal(isMissingWrongBookReviewQuestionError(createRequestError(404, "not found")), true);
+});
+
+test("wrong-book helpers normalize skipped reasons and prune stale local state", () => {
+  const list = [
+    { id: "question-1" },
+    { id: "question-3" }
+  ];
+  const reviewQueue = {
+    summary: {
+      totalActive: 2,
+      dueToday: 1,
+      overdue: 0,
+      upcoming: 1
+    },
+    today: [
+      {
+        id: "review-1",
+        questionId: "question-1",
+        intervalLevel: 1,
+        intervalLabel: "明天",
+        nextReviewAt: "2026-03-18T08:00:00.000Z",
+        lastReviewResult: null,
+        lastReviewAt: null,
+        reviewCount: 0,
+        status: "active" as const,
+        originType: "wrong_book_review" as const,
+        originLabel: "错题复练",
+        originPaperId: null,
+        originSubmittedAt: null,
+        question: null
+      }
+    ],
+    upcoming: []
+  };
+
+  assert.deepEqual(pruneWrongBookSelection(list, { "question-1": true, "question-2": true }), {
+    "question-1": true
+  });
+  assert.deepEqual(
+    pruneWrongBookReviewState(reviewQueue, {
+      "question-1": "A",
+      "question-2": "B"
+    }),
+    { "question-1": "A" }
+  );
+  assert.equal(normalizeWrongBookSkippedReason("题目不存在"), "题目已不存在");
+  assert.equal(normalizeWrongBookSkippedReason("已有未完成订正任务"), "已有未完成订正任务");
+});

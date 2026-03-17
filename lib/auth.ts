@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import { readJson, updateJson, writeJson } from "./storage";
-import { isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 export { hashPassword, verifyPassword } from "./password";
 
 export type UserRole = "student" | "parent" | "admin" | "teacher" | "school_admin";
@@ -47,8 +47,24 @@ type DbSession = {
   expires_at: string;
 };
 
-function mapUser(row: DbUser): User {
+export function normalizeAuthEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function normalizeUserName(name: string) {
+  return name.trim();
+}
+
+function normalizeStoredUser(user: User): User {
   return {
+    ...user,
+    email: normalizeAuthEmail(user.email),
+    name: normalizeUserName(user.name)
+  };
+}
+
+function mapUser(row: DbUser): User {
+  return normalizeStoredUser({
     id: row.id,
     email: row.email,
     name: row.name,
@@ -57,12 +73,20 @@ function mapUser(row: DbUser): User {
     grade: row.grade ?? undefined,
     schoolId: row.school_id ?? undefined,
     studentId: row.student_id ?? undefined
-  };
+  });
+}
+
+function canUseApiTestSessionFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireSessionsDatabase() {
+  requireDatabaseEnabled("sessions");
 }
 
 export async function getUsers(): Promise<User[]> {
   if (!isDbEnabled()) {
-    return readJson<User[]>(USER_FILE, []);
+    return readJson<User[]>(USER_FILE, []).map(normalizeStoredUser);
   }
   const rows = await query<DbUser>("SELECT * FROM users");
   return rows.map(mapUser);
@@ -70,14 +94,18 @@ export async function getUsers(): Promise<User[]> {
 
 export async function saveUsers(users: User[]) {
   if (!isDbEnabled()) {
-    writeJson(USER_FILE, users);
+    writeJson(
+      USER_FILE,
+      users.map((user) => normalizeStoredUser(user))
+    );
   }
 }
 
 export async function getSessions(): Promise<Session[]> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestSessionFallback()) {
     return readJson<Session[]>(SESSION_FILE, []);
   }
+  requireSessionsDatabase();
   const rows = await query<DbSession>("SELECT * FROM sessions");
   return rows.map((row) => ({
     id: row.id,
@@ -88,41 +116,45 @@ export async function getSessions(): Promise<Session[]> {
 }
 
 export async function saveSessions(sessions: Session[]) {
-  if (!isDbEnabled()) {
+  if (canUseApiTestSessionFallback()) {
     writeJson(SESSION_FILE, sessions);
+    return;
   }
+  requireSessionsDatabase();
 }
 
 export async function createUser(user: User) {
+  const normalizedUser = normalizeStoredUser(user);
+
   if (!isDbEnabled()) {
     await updateJson<User[]>(USER_FILE, [], (users) => {
-      users.push(user);
+      users.push(normalizedUser);
     });
-    return user;
+    return normalizedUser;
   }
 
   await query(
     `INSERT INTO users (id, email, name, role, password, grade, school_id, student_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
-      user.id,
-      user.email,
-      user.name,
-      user.role,
-      user.password,
-      user.grade ?? null,
-      user.schoolId ?? null,
-      user.studentId ?? null
+      normalizedUser.id,
+      normalizedUser.email,
+      normalizedUser.name,
+      normalizedUser.role,
+      normalizedUser.password,
+      normalizedUser.grade ?? null,
+      normalizedUser.schoolId ?? null,
+      normalizedUser.studentId ?? null
     ]
   );
-  return user;
+  return normalizedUser;
 }
 
 export async function createSession(user: User) {
   const id = crypto.randomBytes(18).toString("hex");
   const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestSessionFallback()) {
     await updateJson<Session[]>(SESSION_FILE, [], (sessions) => {
       const nextSessions = sessions.filter((session) => session.userId !== user.id);
       nextSessions.push({ id, userId: user.id, role: user.role, expiresAt });
@@ -131,6 +163,7 @@ export async function createSession(user: User) {
     return { id, expiresAt };
   }
 
+  requireSessionsDatabase();
   // Enforce one active session per user to keep cookie/session behavior deterministic.
   await query("DELETE FROM sessions WHERE user_id = $1", [user.id]);
   await query(
@@ -143,7 +176,7 @@ export async function createSession(user: User) {
 export async function getSessionByToken(token?: string | null) {
   if (!token) return null;
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestSessionFallback()) {
     const sessions = await getSessions();
     const session = sessions.find((item) => item.id === token);
     if (!session) return null;
@@ -155,6 +188,7 @@ export async function getSessionByToken(token?: string | null) {
     return session;
   }
 
+  requireSessionsDatabase();
   const row = await queryOne<DbSession>("SELECT * FROM sessions WHERE id = $1", [token]);
   if (!row) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) {
@@ -166,12 +200,13 @@ export async function getSessionByToken(token?: string | null) {
 }
 
 export async function removeSession(token: string) {
-  if (!isDbEnabled()) {
+  if (canUseApiTestSessionFallback()) {
     await updateJson<Session[]>(SESSION_FILE, [], (sessions) =>
       sessions.filter((item) => item.id !== token)
     );
     return;
   }
+  requireSessionsDatabase();
   await query("DELETE FROM sessions WHERE id = $1", [token]);
 }
 
@@ -222,11 +257,14 @@ export async function getUserById(id: string) {
 }
 
 export async function getUserByEmail(email: string) {
+  const normalizedEmail = normalizeAuthEmail(email);
   if (!isDbEnabled()) {
     const users = await getUsers();
-    return users.find((user) => user.email.toLowerCase() === email.toLowerCase()) ?? null;
+    return users.find((user) => normalizeAuthEmail(user.email) === normalizedEmail) ?? null;
   }
-  const row = await queryOne<DbUser>("SELECT * FROM users WHERE lower(email) = lower($1)", [email]);
+  const row = await queryOne<DbUser>("SELECT * FROM users WHERE lower(trim(email)) = $1", [
+    normalizedEmail
+  ]);
   return row ? mapUser(row) : null;
 }
 

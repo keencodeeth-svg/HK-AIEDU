@@ -79,8 +79,22 @@ type DbJoinRequest = {
   decided_at: string | null;
 };
 
-function mapClass(row: DbClass): ClassItem {
+function normalizeJoinCode(value: string | null | undefined) {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toUpperCase();
+  return normalized.length ? normalized : undefined;
+}
+
+function normalizeClassItem(item: ClassItem): ClassItem {
   return {
+    ...item,
+    joinCode: normalizeJoinCode(item.joinCode),
+    joinMode: item.joinMode ?? "approval"
+  };
+}
+
+function mapClass(row: DbClass): ClassItem {
+  return normalizeClassItem({
     id: row.id,
     name: row.name,
     subject: row.subject as Subject,
@@ -90,7 +104,7 @@ function mapClass(row: DbClass): ClassItem {
     createdAt: row.created_at,
     joinCode: row.join_code ?? undefined,
     joinMode: (row.join_mode as ClassItem["joinMode"]) ?? "approval"
-  };
+  });
 }
 
 type ClassScope = {
@@ -114,7 +128,7 @@ function mapClassStudent(row: DbClassStudent): ClassStudent {
 
 export async function getClasses(scope?: ClassScope): Promise<ClassItem[]> {
   if (!isDbEnabled()) {
-    const classes = readJson<ClassItem[]>(CLASS_FILE, []);
+    const classes = readJson<ClassItem[]>(CLASS_FILE, []).map(normalizeClassItem);
     return classes.filter((item) => matchesClassScope(item, scope));
   }
   const rows = scope?.schoolId
@@ -192,9 +206,9 @@ export async function createClass(input: {
       joinMode
     };
     await updateJson<ClassItem[]>(CLASS_FILE, [], (list) => {
-      list.push(next);
+      list.push(normalizeClassItem(next));
     });
-    return next;
+    return normalizeClassItem(next);
   }
   const id = `class-${crypto.randomBytes(6).toString("hex")}`;
   const row = await queryOne<DbClass>(
@@ -222,15 +236,17 @@ export async function updateClassSettings(
   id: string,
   input: { joinCode?: string; joinMode?: ClassItem["joinMode"] }
 ): Promise<ClassItem | null> {
+  const normalizedJoinCode = normalizeJoinCode(input.joinCode);
+
   if (!isDbEnabled()) {
     return updateJson<ClassItem[]>(CLASS_FILE, [], (list) => {
       const index = list.findIndex((item) => item.id === id);
       if (index === -1) return list;
-      const next: ClassItem = {
+      const next = normalizeClassItem({
         ...list[index],
-        joinCode: input.joinCode ?? list[index].joinCode,
+        joinCode: normalizedJoinCode ?? list[index].joinCode,
         joinMode: input.joinMode ?? list[index].joinMode
-      };
+      });
       list[index] = next;
       return list;
     }).then((list) => list.find((item) => item.id === id) ?? null);
@@ -241,19 +257,25 @@ export async function updateClassSettings(
          join_mode = COALESCE($3, join_mode)
      WHERE id = $1
      RETURNING *`,
-    [id, input.joinCode ?? null, input.joinMode ?? null]
+    [id, normalizedJoinCode ?? null, input.joinMode ?? null]
   );
   return row ? mapClass(row) : null;
 }
 
 export async function getClassByJoinCode(code: string, scope?: ClassScope): Promise<ClassItem | null> {
+  const normalizedCode = normalizeJoinCode(code);
+  if (!normalizedCode) return null;
+
   if (!isDbEnabled()) {
     const list = await getClasses(scope);
-    return list.find((item) => item.joinCode === code) ?? null;
+    return list.find((item) => normalizeJoinCode(item.joinCode) === normalizedCode) ?? null;
   }
   const row = scope?.schoolId
-    ? await queryOne<DbClass>("SELECT * FROM classes WHERE join_code = $1 AND school_id = $2", [code, scope.schoolId])
-    : await queryOne<DbClass>("SELECT * FROM classes WHERE join_code = $1", [code]);
+    ? await queryOne<DbClass>("SELECT * FROM classes WHERE UPPER(join_code) = $1 AND school_id = $2", [
+        normalizedCode,
+        scope.schoolId
+      ])
+    : await queryOne<DbClass>("SELECT * FROM classes WHERE UPPER(join_code) = $1", [normalizedCode]);
   return row ? mapClass(row) : null;
 }
 

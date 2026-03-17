@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 import { readJson, writeJson } from "./storage";
 
 export type ParentActionSource = "weekly_report" | "assignment_plan";
@@ -54,12 +54,36 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.round(value)));
 }
 
-function normalizeSource(value: string): ParentActionSource {
-  return value === "assignment_plan" ? "assignment_plan" : "weekly_report";
+function normalizeSource(value: string | null | undefined): ParentActionSource {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  return normalized === "assignment_plan" ? "assignment_plan" : "weekly_report";
 }
 
-function normalizeStatus(value: string): ParentActionStatus {
-  return value === "skipped" ? "skipped" : "done";
+function normalizeStatus(value: string | null | undefined): ParentActionStatus {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  return normalized === "skipped" ? "skipped" : "done";
+}
+
+function normalizeActionItemId(value: string | null | undefined) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeReceipt(item: ParentActionReceipt): ParentActionReceipt {
+  return {
+    ...item,
+    source: normalizeSource(item.source),
+    actionItemId: normalizeActionItemId(item.actionItemId),
+    status: normalizeStatus(item.status),
+    note: item.note ?? null,
+    estimatedMinutes: clamp(item.estimatedMinutes, 0, 240),
+    effectScore: clamp(item.effectScore, -100, 100)
+  };
 }
 
 function mapDb(row: DbParentActionReceipt): ParentActionReceipt {
@@ -68,7 +92,7 @@ function mapDb(row: DbParentActionReceipt): ParentActionReceipt {
     parentId: row.parent_id,
     studentId: row.student_id,
     source: normalizeSource(row.source),
-    actionItemId: row.action_item_id,
+    actionItemId: normalizeActionItemId(row.action_item_id),
     status: normalizeStatus(row.status),
     note: row.note,
     estimatedMinutes: clamp(row.estimated_minutes, 0, 240),
@@ -79,11 +103,19 @@ function mapDb(row: DbParentActionReceipt): ParentActionReceipt {
   };
 }
 
+function canUseApiTestParentActionReceiptFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireParentActionReceiptsDatabase() {
+  requireDatabaseEnabled("parent_action_receipts");
+}
+
 export function buildParentActionReceiptKey(input: {
   source: ParentActionSource;
   actionItemId: string;
 }) {
-  return `${input.source}:${input.actionItemId}`;
+  return `${normalizeSource(input.source)}:${normalizeActionItemId(input.actionItemId)}`;
 }
 
 export async function listParentActionReceipts(params: {
@@ -91,19 +123,22 @@ export async function listParentActionReceipts(params: {
   studentId: string;
   source?: ParentActionSource;
 }) {
-  if (!isDbEnabled()) {
-    const list = readJson<ParentActionReceipt[]>(FILE, []);
+  const source = params.source ? normalizeSource(params.source) : undefined;
+
+  if (canUseApiTestParentActionReceiptFallback()) {
+    const list = readJson<ParentActionReceipt[]>(FILE, []).map(normalizeReceipt);
     return list
       .filter((item) => item.parentId === params.parentId && item.studentId === params.studentId)
-      .filter((item) => (params.source ? item.source === params.source : true))
+      .filter((item) => (source ? item.source === source : true))
       .sort((a, b) => b.completedAt.localeCompare(a.completedAt));
   }
 
+  requireParentActionReceiptsDatabase();
   const where = ["parent_id = $1", "student_id = $2"];
   const values: Array<string> = [params.parentId, params.studentId];
-  if (params.source) {
-    where.push(`source = $${values.length + 1}`);
-    values.push(params.source);
+  if (source) {
+    where.push(`lower(btrim(source)) = $${values.length + 1}`);
+    values.push(source);
   }
 
   const rows = await query<DbParentActionReceipt>(
@@ -123,17 +158,19 @@ export async function listParentActionReceiptsByStudents(params: {
   until?: string;
 }) {
   const studentIds = Array.from(new Set((params.studentIds ?? []).map((item) => String(item).trim()).filter(Boolean)));
+  const source = params.source ? normalizeSource(params.source) : undefined;
+  const status = params.status ? normalizeStatus(params.status) : undefined;
   if (!studentIds.length) return [] as ParentActionReceipt[];
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestParentActionReceiptFallback()) {
     const studentSet = new Set(studentIds);
     const sinceTs = params.since ? new Date(params.since).getTime() : Number.NaN;
     const untilTs = params.until ? new Date(params.until).getTime() : Number.NaN;
-    const list = readJson<ParentActionReceipt[]>(FILE, []);
+    const list = readJson<ParentActionReceipt[]>(FILE, []).map(normalizeReceipt);
     return list
       .filter((item) => studentSet.has(item.studentId))
-      .filter((item) => (params.source ? item.source === params.source : true))
-      .filter((item) => (params.status ? item.status === params.status : true))
+      .filter((item) => (source ? item.source === source : true))
+      .filter((item) => (status ? item.status === status : true))
       .filter((item) => {
         const ts = new Date(item.completedAt).getTime();
         if (!Number.isFinite(ts)) return false;
@@ -144,16 +181,17 @@ export async function listParentActionReceiptsByStudents(params: {
       .sort((a, b) => b.completedAt.localeCompare(a.completedAt));
   }
 
+  requireParentActionReceiptsDatabase();
   const where = ["student_id = ANY($1)"];
   const values: Array<string | number | boolean | null | string[] | number[] | Record<string, any>> = [studentIds];
 
-  if (params.source) {
-    where.push(`source = $${values.length + 1}`);
-    values.push(params.source);
+  if (source) {
+    where.push(`lower(btrim(source)) = $${values.length + 1}`);
+    values.push(source);
   }
-  if (params.status) {
-    where.push(`status = $${values.length + 1}`);
-    values.push(params.status);
+  if (status) {
+    where.push(`lower(btrim(status)) = $${values.length + 1}`);
+    values.push(status);
   }
   if (params.since) {
     where.push(`completed_at >= $${values.length + 1}`);
@@ -186,26 +224,28 @@ export async function upsertParentActionReceipt(input: {
 }) {
   const now = new Date().toISOString();
   const completedAt = input.completedAt ?? now;
-  const status = input.status ?? "done";
+  const source = normalizeSource(input.source);
+  const actionItemId = normalizeActionItemId(input.actionItemId);
+  const status = normalizeStatus(input.status ?? "done");
   const estimatedMinutes = clamp(input.estimatedMinutes ?? 0, 0, 240);
   const effectScore = clamp(input.effectScore ?? 0, -100, 100);
   // Upsert by (parent, student, source, actionItem) keeps one latest execution receipt per action card.
 
-  if (!isDbEnabled()) {
-    const list = readJson<ParentActionReceipt[]>(FILE, []);
+  if (canUseApiTestParentActionReceiptFallback()) {
+    const list = readJson<ParentActionReceipt[]>(FILE, []).map(normalizeReceipt);
     const index = list.findIndex(
       (item) =>
         item.parentId === input.parentId &&
         item.studentId === input.studentId &&
-        item.source === input.source &&
-        item.actionItemId === input.actionItemId
+        item.source === source &&
+        item.actionItemId === actionItemId
     );
     const next: ParentActionReceipt = {
       id: index >= 0 ? list[index].id : `parent-action-${crypto.randomBytes(6).toString("hex")}`,
       parentId: input.parentId,
       studentId: input.studentId,
-      source: input.source,
-      actionItemId: input.actionItemId,
+      source,
+      actionItemId,
       status,
       note: input.note ?? null,
       estimatedMinutes,
@@ -223,39 +263,48 @@ export async function upsertParentActionReceipt(input: {
     return next;
   }
 
+  requireParentActionReceiptsDatabase();
   const existing = await queryOne<DbParentActionReceipt>(
     `SELECT * FROM parent_action_receipts
-     WHERE parent_id = $1 AND student_id = $2 AND source = $3 AND action_item_id = $4`,
-    [input.parentId, input.studentId, input.source, input.actionItemId]
+     WHERE parent_id = $1 AND student_id = $2 AND lower(btrim(source)) = $3 AND lower(btrim(action_item_id)) = $4`,
+    [input.parentId, input.studentId, source, actionItemId]
   );
 
-  const row = await queryOne<DbParentActionReceipt>(
-    `INSERT INTO parent_action_receipts
-      (id, parent_id, student_id, source, action_item_id, status, note, estimated_minutes, effect_score, completed_at, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-     ON CONFLICT (parent_id, student_id, source, action_item_id) DO UPDATE SET
-       status = EXCLUDED.status,
-       note = EXCLUDED.note,
-       estimated_minutes = EXCLUDED.estimated_minutes,
-       effect_score = EXCLUDED.effect_score,
-       completed_at = EXCLUDED.completed_at,
-       updated_at = EXCLUDED.updated_at
-     RETURNING *`,
-    [
-      existing?.id ?? `parent-action-${crypto.randomBytes(6).toString("hex")}`,
-      input.parentId,
-      input.studentId,
-      input.source,
-      input.actionItemId,
-      status,
-      input.note ?? null,
-      estimatedMinutes,
-      effectScore,
-      completedAt,
-      existing?.created_at ?? now,
-      now
-    ]
-  );
+  const row = existing
+    ? await queryOne<DbParentActionReceipt>(
+        `UPDATE parent_action_receipts
+         SET source = $2,
+             action_item_id = $3,
+             status = $4,
+             note = $5,
+             estimated_minutes = $6,
+             effect_score = $7,
+             completed_at = $8,
+             updated_at = $9
+         WHERE id = $1
+         RETURNING *`,
+        [existing.id, source, actionItemId, status, input.note ?? null, estimatedMinutes, effectScore, completedAt, now]
+      )
+    : await queryOne<DbParentActionReceipt>(
+        `INSERT INTO parent_action_receipts
+          (id, parent_id, student_id, source, action_item_id, status, note, estimated_minutes, effect_score, completed_at, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         RETURNING *`,
+        [
+          `parent-action-${crypto.randomBytes(6).toString("hex")}`,
+          input.parentId,
+          input.studentId,
+          source,
+          actionItemId,
+          status,
+          input.note ?? null,
+          estimatedMinutes,
+          effectScore,
+          completedAt,
+          now,
+          now
+        ]
+      );
   return row ? mapDb(row) : null;
 }
 

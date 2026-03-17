@@ -1,4 +1,4 @@
-export type RequestError = Error & { status?: number };
+export type RequestError = Error & { status?: number; payload?: unknown };
 
 type ErrorPayload = {
   error?: string;
@@ -19,6 +19,7 @@ export async function requestJson<T>(input: RequestInfo | URL, init?: RequestIni
     const errorPayload = (payload as ErrorPayload | null) ?? null;
     const error = new Error(errorPayload?.error ?? errorPayload?.message ?? "加载失败") as RequestError;
     error.status = response.status;
+    error.payload = payload;
     throw error;
   }
 
@@ -30,6 +31,13 @@ export function getRequestStatus(error: unknown) {
     return error.status;
   }
   return undefined;
+}
+
+export function getRequestErrorPayload<T = unknown>(error: unknown) {
+  if (error && typeof error === "object" && "payload" in error) {
+    return ((error as { payload?: T | null }).payload ?? null) as T | null;
+  }
+  return null;
 }
 
 export function isAuthError(error: unknown) {

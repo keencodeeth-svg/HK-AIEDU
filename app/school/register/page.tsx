@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Card from "@/components/Card";
 import PasswordPolicyHint from "@/components/auth/PasswordPolicyHint";
+import { resolveRegisterFormError } from "@/lib/auth-form-errors";
+import { requestJson } from "@/lib/client-request";
 
 export default function SchoolRegisterPage() {
   const [email, setEmail] = useState("");
@@ -19,25 +21,31 @@ export default function SchoolRegisterPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/auth/school-register", {
+      const normalizedEmail = email.trim();
+      const normalizedName = name.trim();
+      await requestJson("/api/auth/school-register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email,
-          name,
+          email: normalizedEmail,
+          name: normalizedName,
           password,
-          schoolName: schoolName || undefined,
-          schoolCode: schoolCode || undefined,
-          inviteCode: inviteCode || undefined
+          schoolName: schoolName.trim() || undefined,
+          schoolCode: schoolCode.trim() || undefined,
+          inviteCode: inviteCode.trim() || undefined
         })
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error ?? "注册失败");
-      }
       window.location.assign("/school");
     } catch (err) {
-      setError((err as Error).message);
+      setError(
+        resolveRegisterFormError(err, {
+          fallback: "注册失败",
+          emailExistsMessage: "该学校管理员邮箱已注册，可直接登录。",
+          invalidInviteMessage: "邀请码无效，或当前不允许学校管理员自助注册。",
+          invalidSchoolCodeMessage: "学校编码无效；若要新建学校，请同时填写学校名称。",
+          schoolRequiredMessage: "请填写学校名称，或输入一个有效的学校编码。"
+        })
+      );
     } finally {
       setLoading(false);
     }

@@ -134,21 +134,23 @@ function normalizeStem(text: string) {
 }
 
 function normalizeSourceType(value?: string) {
-  if (value === "file" || value === "link" || value === "text") {
-    return value;
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "file" || normalized === "link" || normalized === "text") {
+    return normalized;
   }
   return "text";
 }
 
 function normalizeContentType(value?: string) {
-  if (value === "courseware" || value === "lesson_plan" || value === "textbook") {
-    return value;
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "courseware" || normalized === "lesson_plan" || normalized === "textbook") {
+    return normalized;
   }
   return "textbook";
 }
 
 function normalizeAccessScope(value?: string) {
-  return value === "class" ? "class" : "global";
+  return value?.trim().toLowerCase() === "class" ? "class" : "global";
 }
 
 function makeKpKey(input: {

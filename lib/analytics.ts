@@ -1,9 +1,8 @@
 import crypto from "crypto";
 import type { UserRole } from "./auth";
-import { isDbEnabled, query } from "./db";
+import { isDbEnabled, query, requireDatabaseEnabled } from "./db";
 import { readJson, updateJson } from "./storage";
 
-const ANALYTICS_FILE = "analytics-events.json";
 const MAX_EVENTS = 50000;
 const MAX_BATCH_SIZE = 100;
 const MAX_PROPS_SIZE = 4096;
@@ -87,6 +86,14 @@ type BuildResult =
       ok: false;
       reason: string;
     };
+
+function requireAnalyticsDatabase() {
+  requireDatabaseEnabled("analytics_events");
+}
+
+function canUseApiTestAnalyticsFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
 
 function normalizeString(value: unknown, maxLength: number) {
   if (typeof value !== "string") return null;
@@ -198,49 +205,51 @@ export function buildAnalyticsEvent(rawEvent: unknown, context: BuildAnalyticsCo
 export async function appendAnalyticsEvents(events: AnalyticsEventRecord[]) {
   if (!events.length) return;
 
-  if (isDbEnabled()) {
-    for (const event of events) {
-      await query(
-        `INSERT INTO analytics_events
-         (id, event_name, event_time, received_at, user_id, role, subject, grade, page, session_id, trace_id, entity_id, props, props_truncated, user_agent, ip)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16)`,
-        [
-          event.id,
-          event.eventName,
-          event.eventTime,
-          event.receivedAt,
-          event.userId,
-          event.role,
-          event.subject,
-          event.grade,
-          event.page,
-          event.sessionId,
-          event.traceId,
-          event.entityId,
-          JSON.stringify(event.props ?? null),
-          event.propsTruncated,
-          event.userAgent,
-          event.ip
-        ]
-      );
-    }
-    await query(
-      `DELETE FROM analytics_events
-       WHERE id IN (
-         SELECT id
-         FROM analytics_events
-         ORDER BY event_time DESC, received_at DESC
-         OFFSET $1
-       )`,
-      [MAX_EVENTS]
-    );
+  if (canUseApiTestAnalyticsFallback()) {
+    await updateJson<AnalyticsEventRecord[]>("analytics-events.json", [], (list) => {
+      list.push(...events);
+      return list.length > MAX_EVENTS ? list.slice(list.length - MAX_EVENTS) : list;
+    });
     return;
   }
 
-  await updateJson<AnalyticsEventRecord[]>(ANALYTICS_FILE, [], (list) => {
-    list.push(...events);
-    return list.length > MAX_EVENTS ? list.slice(list.length - MAX_EVENTS) : list;
-  });
+  requireAnalyticsDatabase();
+
+  for (const event of events) {
+    await query(
+      `INSERT INTO analytics_events
+       (id, event_name, event_time, received_at, user_id, role, subject, grade, page, session_id, trace_id, entity_id, props, props_truncated, user_agent, ip)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16)`,
+      [
+        event.id,
+        event.eventName,
+        event.eventTime,
+        event.receivedAt,
+        event.userId,
+        event.role,
+        event.subject,
+        event.grade,
+        event.page,
+        event.sessionId,
+        event.traceId,
+        event.entityId,
+        JSON.stringify(event.props ?? null),
+        event.propsTruncated,
+        event.userAgent,
+        event.ip
+      ]
+    );
+  }
+  await query(
+    `DELETE FROM analytics_events
+     WHERE id IN (
+       SELECT id
+       FROM analytics_events
+       ORDER BY event_time DESC, received_at DESC
+       OFFSET $1
+     )`,
+    [MAX_EVENTS]
+  );
 }
 
 function mapDbAnalyticsEvent(row: DbAnalyticsEvent): AnalyticsEventRecord {
@@ -285,8 +294,8 @@ export async function getAnalyticsEvents(options: {
   const subject = options.subject?.trim() || null;
   const grade = options.grade?.trim() || null;
 
-  if (!isDbEnabled()) {
-    return readJson<AnalyticsEventRecord[]>(ANALYTICS_FILE, []).filter((event) => {
+  if (canUseApiTestAnalyticsFallback()) {
+    return readJson<AnalyticsEventRecord[]>("analytics-events.json", []).filter((event) => {
       const eventTs = new Date(event.eventTime).getTime();
       if (Number.isNaN(eventTs)) return false;
       if (fromTs !== null && eventTs < fromTs) return false;
@@ -296,6 +305,8 @@ export async function getAnalyticsEvents(options: {
       return true;
     });
   }
+
+  requireAnalyticsDatabase();
 
   const where: string[] = [];
   const params: Array<string> = [];

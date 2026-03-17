@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { readJson, writeJson } from "./storage";
-import { isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 
 export type ReviewTaskSourceType = "wrong" | "memory";
 export type ReviewTaskResult = "correct" | "wrong" | null;
@@ -52,6 +52,14 @@ type DbReviewTask = {
 };
 
 const REVIEW_TASK_FILE = "review-tasks.json";
+
+function canUseApiTestReviewTaskFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireReviewTasksDatabase() {
+  requireDatabaseEnabled("review_tasks");
+}
 
 function normalizeOptionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;
@@ -162,7 +170,7 @@ export async function getReviewTasksByUser(
   const includeCompleted = options?.includeCompleted ?? false;
   const sourceTypes = options?.sourceTypes?.length ? Array.from(new Set(options.sourceTypes)) : null;
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestReviewTaskFallback()) {
     const list = readJson<ReviewTask[]>(REVIEW_TASK_FILE, []).map(mapJsonItem);
     return list
       .filter((item) => item.userId === userId)
@@ -170,6 +178,7 @@ export async function getReviewTasksByUser(
       .filter((item) => (sourceTypes ? sourceTypes.includes(item.sourceType) : true))
       .sort(compareReviewTasks);
   }
+  requireReviewTasksDatabase();
 
   const clauses = ["user_id = $1"];
   const params: Array<string | string[]> = [userId];
@@ -234,7 +243,7 @@ export async function upsertReviewTask(input: {
     updatedAt: now
   };
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestReviewTaskFallback()) {
     const list = readJson<ReviewTask[]>(REVIEW_TASK_FILE, []).map(mapJsonItem);
     const identity = buildIdentity(input.userId, input.questionId, input.sourceType);
     const index = list.findIndex((item) => buildIdentity(item.userId, item.questionId, item.sourceType) === identity);
@@ -252,6 +261,7 @@ export async function upsertReviewTask(input: {
     writeJson(REVIEW_TASK_FILE, list);
     return merged;
   }
+  requireReviewTasksDatabase();
 
   const existing = await queryOne<DbReviewTask>(
     "SELECT * FROM review_tasks WHERE user_id = $1 AND question_id = $2 AND source_type = $3 LIMIT 1",

@@ -32,6 +32,12 @@ export function assertDatabaseEnabled(context = "runtime") {
   throw new Error(`DATABASE_URL is required for ${context}. Set REQUIRE_DATABASE=false to allow JSON fallback.`);
 }
 
+export function requireDatabaseEnabled(context = "runtime") {
+  assertDatabaseEnabled(context);
+  if (isDbEnabled()) return;
+  throw new Error(`DATABASE_URL is required for ${context}. This state no longer supports JSON fallback.`);
+}
+
 function getPool() {
   assertRuntimeGuardrails();
   if (!pool) {

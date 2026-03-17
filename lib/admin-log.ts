@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { readJson, updateJson } from "./storage";
-import { isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 
 export type AdminLog = {
   id: string;
@@ -45,6 +45,14 @@ function mapLog(row: DbLog): AdminLog {
   };
 }
 
+function canUseApiTestAdminLogFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireAdminLogDatabase() {
+  requireDatabaseEnabled("admin_logs");
+}
+
 export async function addAdminLog(log: Omit<AdminLog, "id" | "createdAt">) {
   const entry: AdminLog = {
     id: `log-${crypto.randomBytes(6).toString("hex")}`,
@@ -52,7 +60,7 @@ export async function addAdminLog(log: Omit<AdminLog, "id" | "createdAt">) {
     ...log
   };
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestAdminLogFallback()) {
     await updateJson<AdminLog[]>(LOG_FILE, [], (list) => {
       list.unshift(entry);
       return list.slice(0, 200);
@@ -60,6 +68,7 @@ export async function addAdminLog(log: Omit<AdminLog, "id" | "createdAt">) {
     return entry;
   }
 
+  requireAdminLogDatabase();
   await query(
     `INSERT INTO admin_logs (id, admin_id, action, entity_type, entity_id, detail, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -86,7 +95,7 @@ export async function listAdminLogs(options: AdminLogQueryOptions = {}) {
   const entityType = options.entityType?.trim().toLowerCase() || null;
   const textQuery = options.query?.trim().toLowerCase() || null;
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestAdminLogFallback()) {
     const list = readJson<AdminLog[]>(LOG_FILE, []);
     return list
       .filter((item) => {
@@ -104,6 +113,7 @@ export async function listAdminLogs(options: AdminLogQueryOptions = {}) {
       .slice(0, limit);
   }
 
+  requireAdminLogDatabase();
   const where: string[] = [];
   const params: Array<string | number> = [];
 
@@ -139,10 +149,11 @@ export async function listAdminLogs(options: AdminLogQueryOptions = {}) {
 }
 
 export async function getAdminLogById(id: string) {
-  if (!isDbEnabled()) {
+  if (canUseApiTestAdminLogFallback()) {
     const list = readJson<AdminLog[]>(LOG_FILE, []);
     return list.find((item) => item.id === id) ?? null;
   }
+  requireAdminLogDatabase();
   const row = await queryOne<DbLog>("SELECT * FROM admin_logs WHERE id = $1", [id]);
   return row ? mapLog(row) : null;
 }
@@ -160,13 +171,14 @@ export async function updateAdminLog(id: string, updates: AdminLogMutation) {
     detail: updates.detail !== undefined ? updates.detail : current.detail
   };
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestAdminLogFallback()) {
     await updateJson<AdminLog[]>(LOG_FILE, [], (list) =>
       list.map((item) => (item.id === id ? next : item)).slice(0, 200)
     );
     return next;
   }
 
+  requireAdminLogDatabase();
   const row = await queryOne<DbLog>(
     `UPDATE admin_logs
      SET admin_id = $2, action = $3, entity_type = $4, entity_id = $5, detail = $6

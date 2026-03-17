@@ -2,6 +2,7 @@ import {
   createSession,
   getUserByEmail,
   hashPassword,
+  normalizeAuthEmail,
   setSessionCookie,
   updateUserPassword,
   verifyPassword
@@ -51,15 +52,16 @@ export const POST = createAuthRoute({
   cache: "private-realtime",
   handler: async ({ request, meta }) => {
     const body = await parseJson(request, loginBodySchema);
+    const email = normalizeAuthEmail(body.email);
     const attemptIdentity = buildLoginAttemptIdentity({
-      email: body.email,
+      email,
       forwardedFor: request.headers.get("x-forwarded-for")
     });
     const attemptStatus = await getLoginAttemptStatus(attemptIdentity);
     if (attemptStatus.locked) {
       try {
         await handleLoginLockoutSecurity({
-          user: await getUserByEmail(body.email),
+          user: await getUserByEmail(email),
           ip: attemptIdentity.ip,
           requestedRole: body.role ?? null,
           failedCount: attemptStatus.failedCount,
@@ -73,7 +75,7 @@ export const POST = createAuthRoute({
       throw new ApiError(429, "登录失败次数过多，请稍后再试", toAttemptDetails(attemptStatus));
     }
 
-    const user = await getUserByEmail(body.email);
+    const user = await getUserByEmail(email);
     const legacyPasswordDisabled = Boolean(
       user?.password.startsWith("plain:") && !allowLegacyPlainPasswords()
     );

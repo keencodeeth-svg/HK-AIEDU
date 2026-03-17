@@ -2,6 +2,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { conflict, notFound } from "./api/http";
+import { isDbEnabled, query, queryOne } from "./db";
 import {
   listClassScheduleSessions,
   replaceClassScheduleSessions,
@@ -53,6 +54,23 @@ export type SchoolAiScheduleOperationSummary = {
 const FILE = "school-schedule-ai-operations.json";
 const runtimeDir = path.resolve(process.cwd(), process.env.DATA_DIR ?? ".runtime-data");
 const seedDir = path.resolve(process.cwd(), process.env.DATA_SEED_DIR ?? "data");
+let syncPromise: Promise<void> | null = null;
+
+type DbSchoolAiScheduleOperationRecord = {
+  id: string;
+  school_id: string | null;
+  status: SchoolAiScheduleOperationStatus;
+  created_at: string;
+  updated_at: string;
+  applied_at: string | null;
+  rolled_back_at: string | null;
+  target_class_ids: string[] | null;
+  replace_class_ids: string[] | null;
+  base_sessions: unknown;
+  after_sessions: unknown;
+  drafts: unknown;
+  result: unknown;
+};
 
 function normalizeSchoolId(value?: string | null) {
   return value?.trim() || DEFAULT_SCHOOL_ID;
@@ -65,6 +83,12 @@ function readFileIfExists(filePath: string) {
   } catch {
     return null;
   }
+}
+
+function normalizeTimestamp(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value instanceof Date) return value.toISOString();
+  return "";
 }
 
 function normalizeRecord(item: Partial<SchoolAiScheduleOperationRecord>): SchoolAiScheduleOperationRecord {
@@ -86,7 +110,37 @@ function normalizeRecord(item: Partial<SchoolAiScheduleOperationRecord>): School
   } satisfies SchoolAiScheduleOperationRecord;
 }
 
-function readStore(): SchoolAiScheduleOperationRecord[] {
+function parseDbJson<T>(value: unknown, fallback: T): T {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  return value as T;
+}
+
+function mapDbRecord(row: DbSchoolAiScheduleOperationRecord): SchoolAiScheduleOperationRecord {
+  return normalizeRecord({
+    id: row.id,
+    schoolId: row.school_id ?? undefined,
+    status: row.status,
+    createdAt: normalizeTimestamp(row.created_at),
+    updatedAt: normalizeTimestamp(row.updated_at),
+    appliedAt: row.applied_at ? normalizeTimestamp(row.applied_at) : undefined,
+    rolledBackAt: row.rolled_back_at ? normalizeTimestamp(row.rolled_back_at) : undefined,
+    targetClassIds: Array.isArray(row.target_class_ids) ? row.target_class_ids : [],
+    replaceClassIds: Array.isArray(row.replace_class_ids) ? row.replace_class_ids : [],
+    baseSessions: parseDbJson<ClassScheduleSession[]>(row.base_sessions, []),
+    afterSessions: parseDbJson<ClassScheduleSession[]>(row.after_sessions, []),
+    drafts: parseDbJson<ClassScheduleSessionInput[]>(row.drafts, []),
+    result: parseDbJson<SchoolAiScheduleResult>(row.result, undefined as unknown as SchoolAiScheduleResult)
+  });
+}
+
+function readFileStore(): SchoolAiScheduleOperationRecord[] {
   const runtimePath = path.join(runtimeDir, FILE);
   const seedPath = path.join(seedDir, FILE);
   const list = readFileIfExists(runtimePath) ?? readFileIfExists(seedPath) ?? [];
@@ -95,9 +149,75 @@ function readStore(): SchoolAiScheduleOperationRecord[] {
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
-function writeStore(items: SchoolAiScheduleOperationRecord[]) {
+function writeFileStore(items: SchoolAiScheduleOperationRecord[]) {
   fs.mkdirSync(runtimeDir, { recursive: true });
   fs.writeFileSync(path.join(runtimeDir, FILE), JSON.stringify(items, null, 2));
+}
+
+async function persistRecordToDb(record: SchoolAiScheduleOperationRecord) {
+  await query(
+    `INSERT INTO school_ai_schedule_operations
+     (id, school_id, status, created_at, updated_at, applied_at, rolled_back_at, target_class_ids, replace_class_ids, base_sessions, after_sessions, drafts, result)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb)
+     ON CONFLICT (id) DO UPDATE
+     SET school_id = EXCLUDED.school_id,
+         status = EXCLUDED.status,
+         created_at = EXCLUDED.created_at,
+         updated_at = EXCLUDED.updated_at,
+         applied_at = EXCLUDED.applied_at,
+         rolled_back_at = EXCLUDED.rolled_back_at,
+         target_class_ids = EXCLUDED.target_class_ids,
+         replace_class_ids = EXCLUDED.replace_class_ids,
+         base_sessions = EXCLUDED.base_sessions,
+         after_sessions = EXCLUDED.after_sessions,
+         drafts = EXCLUDED.drafts,
+         result = EXCLUDED.result`,
+    [
+      record.id,
+      record.schoolId,
+      record.status,
+      record.createdAt,
+      record.updatedAt,
+      record.appliedAt ?? null,
+      record.rolledBackAt ?? null,
+      record.targetClassIds,
+      record.replaceClassIds,
+      JSON.stringify(record.baseSessions),
+      JSON.stringify(record.afterSessions),
+      JSON.stringify(record.drafts),
+      JSON.stringify(record.result)
+    ]
+  );
+}
+
+async function syncStoreFromFileIfNeeded() {
+  if (!isDbEnabled()) return;
+  if (syncPromise) return syncPromise;
+
+  syncPromise = (async () => {
+    const existing = await queryOne<{ id: string }>("SELECT id FROM school_ai_schedule_operations LIMIT 1");
+    if (existing) return;
+    const fallback = readFileStore();
+    for (const item of fallback) {
+      await persistRecordToDb(item);
+    }
+  })().finally(() => {
+    syncPromise = null;
+  });
+
+  return syncPromise;
+}
+
+async function readStore(): Promise<SchoolAiScheduleOperationRecord[]> {
+  if (!isDbEnabled()) {
+    return readFileStore();
+  }
+
+  await syncStoreFromFileIfNeeded();
+  const rows = await query<DbSchoolAiScheduleOperationRecord>(
+    "SELECT * FROM school_ai_schedule_operations ORDER BY updated_at DESC"
+  );
+  return rows.map(mapDbRecord).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 function buildSessionSignature(sessions: ClassScheduleSession[]) {
@@ -144,19 +264,23 @@ function toSummary(record: SchoolAiScheduleOperationRecord): SchoolAiScheduleOpe
   };
 }
 
-function upsertRecord(record: SchoolAiScheduleOperationRecord) {
-  const list: SchoolAiScheduleOperationRecord[] = readStore();
-  const index = list.findIndex((item) => item.id === record.id);
-  if (index >= 0) {
-    list[index] = record;
-  } else {
-    list.push(record);
+async function upsertRecord(record: SchoolAiScheduleOperationRecord) {
+  if (!isDbEnabled()) {
+    const list = readFileStore();
+    const index = list.findIndex((item) => item.id === record.id);
+    if (index >= 0) {
+      list[index] = record;
+    } else {
+      list.push(record);
+    }
+    writeFileStore(list);
+    return;
   }
-  writeStore(list);
+  await persistRecordToDb(record);
 }
 
 async function getRecordById(id: string, scope?: { schoolId?: string | null }) {
-  const record = readStore().find((item) => item.id === id) ?? null;
+  const record = (await readStore()).find((item) => item.id === id) ?? null;
   if (!record) return null;
   if (scope?.schoolId && normalizeSchoolId(record.schoolId) !== normalizeSchoolId(scope.schoolId)) {
     return null;
@@ -205,7 +329,7 @@ async function applyRecord(record: SchoolAiScheduleOperationRecord): Promise<Sch
   });
   const afterSessions = await listClassScheduleSessions({ schoolId: record.schoolId, classIds: record.targetClassIds });
   const now = new Date().toISOString();
-  upsertRecord({
+  await upsertRecord({
     ...record,
     status: "applied",
     updatedAt: now,
@@ -222,7 +346,7 @@ async function applyRecord(record: SchoolAiScheduleOperationRecord): Promise<Sch
 export async function previewSchoolAiScheduleOperation(input: SchoolAiScheduleInput): Promise<SchoolAiScheduleExecutionResult> {
   const plan = await buildSchoolAiSchedulePlan(input);
   const record = createPreviewRecord(plan);
-  upsertRecord(record);
+  await upsertRecord(record);
   return {
     ...plan.result,
     generatedAt: plan.generatedAt,
@@ -250,12 +374,12 @@ export async function applySchoolAiSchedulePreview(
 export async function applySchoolAiScheduleDirect(input: SchoolAiScheduleInput): Promise<SchoolAiScheduleExecutionResult> {
   const plan = await buildSchoolAiSchedulePlan(input);
   const record = createPreviewRecord(plan);
-  upsertRecord(record);
+  await upsertRecord(record);
   return applyRecord(record);
 }
 
 export async function getLatestAppliedSchoolAiScheduleOperation(scope?: { schoolId?: string | null }) {
-  const record = readStore().find(
+  const record = (await readStore()).find(
     (item) =>
       item.status === "applied" &&
       (!scope?.schoolId || normalizeSchoolId(item.schoolId) === normalizeSchoolId(scope.schoolId))
@@ -292,7 +416,7 @@ export async function rollbackSchoolAiScheduleOperation(input: {
   });
 
   const now = new Date().toISOString();
-  upsertRecord({
+  await upsertRecord({
     ...record,
     status: "rolled_back",
     rolledBackAt: now,
@@ -307,7 +431,7 @@ export async function rollbackSchoolAiScheduleOperation(input: {
 }
 
 export async function getLatestAppliedSchoolAiScheduleOperationRecord(scope?: { schoolId?: string | null }) {
-  return readStore().find(
+  return (await readStore()).find(
     (item) =>
       item.status === "applied" &&
       (!scope?.schoolId || normalizeSchoolId(item.schoolId) === normalizeSchoolId(scope.schoolId))

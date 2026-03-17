@@ -1,9 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 import Card from "@/components/Card";
+import StatePanel from "@/components/StatePanel";
 import { useAdminStepUp } from "@/components/useAdminStepUp";
-import { getRequestErrorMessage, requestJson } from "@/lib/client-request";
+import {
+  getRequestErrorMessage,
+  getRequestStatus,
+  isAuthError,
+  requestJson
+} from "@/lib/client-request";
 
 type ExperimentFlag = {
   id: string;
@@ -52,41 +59,65 @@ type ABReport = {
   };
 };
 
+type ExperimentFlagsResponse = {
+  data?: ExperimentFlag[];
+};
+
+type ExperimentABReportResponse = {
+  data?: ABReport | null;
+};
+
+function getAdminExperimentsErrorMessage(error: unknown, fallback: string) {
+  const status = getRequestStatus(error) ?? 0;
+  const requestMessage = getRequestErrorMessage(error, "").trim().toLowerCase();
+
+  if (status === 401 || status === 403) {
+    return "管理员会话已失效，请重新登录后继续操作。";
+  }
+  if (requestMessage === "missing key") {
+    return "实验标识缺失，请刷新页面后重试。";
+  }
+  if (requestMessage === "missing update fields") {
+    return "未检测到需要保存的灰度变更。";
+  }
+  return getRequestErrorMessage(error, fallback);
+}
+
 export default function AdminExperimentsPage() {
   const { runWithStepUp, stepUpDialog } = useAdminStepUp();
   const [flags, setFlags] = useState<ExperimentFlag[]>([]);
   const [report, setReport] = useState<ABReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const [authRequired, setAuthRequired] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const [flagsRes, reportRes] = await Promise.all([
-      fetch("/api/admin/experiments/flags"),
-      fetch("/api/admin/experiments/ab-report?days=7")
-    ]);
-    const flagsPayload = await flagsRes.json();
-    const reportPayload = await reportRes.json();
-    if (!flagsRes.ok) {
-      setError(flagsPayload?.error ?? "加载开关失败");
+    try {
+      const [flagsPayload, reportPayload] = await Promise.all([
+        requestJson<ExperimentFlagsResponse>("/api/admin/experiments/flags"),
+        requestJson<ExperimentABReportResponse>(
+          "/api/admin/experiments/ab-report?days=7"
+        )
+      ]);
+      setFlags(flagsPayload.data ?? []);
+      setReport(reportPayload.data ?? null);
+      setAuthRequired(false);
+    } catch (nextError) {
+      if (isAuthError(nextError)) {
+        setAuthRequired(true);
+      }
+      setError(getAdminExperimentsErrorMessage(nextError, "加载实验数据失败"));
+    } finally {
       setLoading(false);
-      return;
     }
-    if (!reportRes.ok) {
-      setError(reportPayload?.error ?? "加载报告失败");
-      setLoading(false);
-      return;
-    }
-    setFlags(flagsPayload.data ?? []);
-    setReport(reportPayload.data ?? null);
-    setLoading(false);
-  }
+  }, []);
 
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+  }, [load]);
 
   async function saveFlag(flag: ExperimentFlag, patch: Partial<Pick<ExperimentFlag, "enabled" | "rollout">>) {
     setMessage(null);
@@ -103,12 +134,33 @@ export default function AdminExperimentsPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-        setMessage("灰度开关已更新");
         await load();
+        setMessage("灰度开关已更新");
       },
       (error) => {
-        setError(getRequestErrorMessage(error, "保存失败"));
+        if (isAuthError(error)) {
+          setAuthRequired(true);
+        }
+        setError(getAdminExperimentsErrorMessage(error, "保存失败"));
       }
+    );
+  }
+
+  if (authRequired) {
+    return (
+      <Card title="A/B 实验与灰度">
+        <StatePanel
+          compact
+          tone="info"
+          title="请先登录后进入管理端"
+          description="登录管理员账号后即可查看实验数据、调整灰度比例并执行高风险变更。"
+          action={
+            <Link className="button secondary" href="/login">
+              前往登录
+            </Link>
+          }
+        />
+      </Card>
     );
   }
 
@@ -123,7 +175,9 @@ export default function AdminExperimentsPage() {
       </div>
 
       <Card title="灰度开关" tag="开关">
-        {loading ? <p>加载中...</p> : null}
+        {loading ? (
+          <StatePanel compact tone="loading" title="实验数据加载中" description="正在同步灰度开关与 A/B 报告。" />
+        ) : null}
         {error ? <div style={{ color: "#b42318", fontSize: 13 }}>{error}</div> : null}
         {message ? <div style={{ color: "#027a48", fontSize: 13 }}>{message}</div> : null}
         <div className="grid" style={{ gap: 10, marginTop: 8 }}>
@@ -173,7 +227,7 @@ export default function AdminExperimentsPage() {
       </Card>
 
       <Card title="A/B 结果报告" tag="报告">
-        {!report ? <p>暂无报告数据。</p> : null}
+        {!loading && !report ? <p>暂无报告数据。</p> : null}
         {report ? (
           <div className="grid" style={{ gap: 10 }}>
             <div style={{ fontSize: 12, color: "var(--ink-1)" }}>

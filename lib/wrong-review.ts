@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { readJson, writeJson } from "./storage";
-import { isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 import {
   getReviewTasksByUser,
   isUnifiedReviewTaskStoreEnabled,
@@ -49,6 +49,14 @@ const INTERVAL_HOURS: Record<ReviewIntervalLevel, number> = {
   2: 72,
   3: 7 * 24
 };
+
+function canUseApiTestWrongReviewFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireWrongReviewDatabase() {
+  requireDatabaseEnabled("wrong_review_items");
+}
 
 type DbWrongReviewItem = {
   id: string;
@@ -229,12 +237,13 @@ async function getPersistedWrongReviewItemsByUser(userId: string, includeComplet
 }
 
 async function getLegacyWrongReviewItemsByUser(userId: string, includeCompleted = false) {
-  if (!isDbEnabled()) {
+  if (canUseApiTestWrongReviewFallback()) {
     const list = readJson<WrongReviewItem[]>(WRONG_REVIEW_FILE, []).map(normalizeWrongReviewItem);
     return list
       .filter((item) => item.userId === userId && (includeCompleted || item.status === "active"))
       .sort(compareWrongReviewItems);
   }
+  requireWrongReviewDatabase();
 
   const rows = includeCompleted
     ? await query<DbWrongReviewItem>(
@@ -278,6 +287,9 @@ export async function getWrongReviewItemsByUser(
   includeCompleted = false,
   options?: WrongReviewReadOptions
 ) {
+  if (!canUseApiTestWrongReviewFallback() && !isDbEnabled()) {
+    requireWrongReviewDatabase();
+  }
   const preferUnifiedStore = options?.preferUnifiedStore ?? true;
   if (preferUnifiedStore && isUnifiedReviewTaskStoreEnabled()) {
     await ensureWrongReviewTasksBackfilled(userId);
@@ -311,7 +323,7 @@ export async function enqueueWrongReview(
   const nextReviewAt = calcNextReviewAt(1);
   const originMeta = resolveOriginMeta(params);
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestWrongReviewFallback()) {
     const list = readJson<WrongReviewItem[]>(WRONG_REVIEW_FILE, []).map(normalizeWrongReviewItem);
     const index = list.findIndex((item) => isSameItem(item, params.userId, params.questionId));
     const current = index >= 0 ? list[index] : null;
@@ -345,6 +357,7 @@ export async function enqueueWrongReview(
     await syncWrongReviewTask(next);
     return next;
   }
+  requireWrongReviewDatabase();
 
   const existing = await queryOne<DbWrongReviewItem>(
     "SELECT * FROM wrong_review_items WHERE user_id = $1 AND question_id = $2",
@@ -396,7 +409,7 @@ export async function submitWrongReviewResult(params: {
 }) {
   const now = new Date().toISOString();
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestWrongReviewFallback()) {
     const list = readJson<WrongReviewItem[]>(WRONG_REVIEW_FILE, []).map(normalizeWrongReviewItem);
     const index = list.findIndex((item) => isSameItem(item, params.userId, params.questionId));
     if (index === -1) return null;
@@ -436,6 +449,7 @@ export async function submitWrongReviewResult(params: {
     await syncWrongReviewTask(next);
     return next;
   }
+  requireWrongReviewDatabase();
 
   const existing = await queryOne<DbWrongReviewItem>(
     "SELECT * FROM wrong_review_items WHERE user_id = $1 AND question_id = $2",

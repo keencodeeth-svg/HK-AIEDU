@@ -29,13 +29,18 @@ export default function LibraryAiGeneratePanel({ classes, aiForm, setAiForm, onS
         <label>
           <div className="section-title">班级</div>
           <select value={aiForm.classId} onChange={(event) => setAiForm((prev) => ({ ...prev, classId: event.target.value }))} style={fieldStyle}>
-            {classes.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name} · {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级
-              </option>
-            ))}
+            {classes.length ? (
+              classes.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} · {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级
+                </option>
+              ))
+            ) : (
+              <option value="">暂无可用班级</option>
+            )}
           </select>
         </label>
+        {!classes.length ? <div className="status-note info">当前暂无可用班级，请先创建班级或稍后重试。</div> : null}
         <label>
           <div className="section-title">主题</div>
           <input value={aiForm.topic} onChange={(event) => setAiForm((prev) => ({ ...prev, topic: event.target.value }))} placeholder="例如：分数加减法综合复习" style={fieldStyle} />
@@ -47,7 +52,7 @@ export default function LibraryAiGeneratePanel({ classes, aiForm, setAiForm, onS
             <option value="courseware">课件</option>
           </select>
         </label>
-        <button className="button primary" type="submit">
+        <button className="button primary" type="submit" disabled={!classes.length}>
           AI 生成并发布
         </button>
       </form>

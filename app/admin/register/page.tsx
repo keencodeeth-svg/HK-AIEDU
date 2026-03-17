@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Card from "@/components/Card";
 import PasswordPolicyHint from "@/components/auth/PasswordPolicyHint";
+import { resolveRegisterFormError } from "@/lib/auth-form-errors";
+import { requestJson } from "@/lib/client-request";
 
 export default function AdminRegisterPage() {
   const [email, setEmail] = useState("");
@@ -17,24 +19,28 @@ export default function AdminRegisterPage() {
     setLoading(true);
     setError(null);
     try {
+      const normalizedEmail = email.trim();
+      const normalizedName = name.trim();
       const payload = {
-        email,
-        name,
+        email: normalizedEmail,
+        name: normalizedName,
         password,
         inviteCode: inviteCode.trim() || undefined
       };
-      const res = await fetch("/api/auth/admin-register", {
+      await requestJson("/api/auth/admin-register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error ?? "注册失败");
-      }
       window.location.assign("/admin");
     } catch (err) {
-      setError((err as Error).message);
+      setError(
+        resolveRegisterFormError(err, {
+          fallback: "注册失败",
+          emailExistsMessage: "该管理员邮箱已注册，可直接登录。",
+          invalidInviteMessage: "邀请码无效，或当前不允许管理员自助注册。"
+        })
+      );
     } finally {
       setLoading(false);
     }

@@ -1,5 +1,10 @@
 import type { AiQualityMeta } from "@/lib/ai-types";
 
+export type TeacherAssignmentReviewRouteParams = {
+  id: string;
+  studentId: string;
+};
+
 export type TeacherAssignmentSubmissionType = "quiz" | "upload" | "essay";
 
 export type TeacherAssignmentReviewAssignment = {

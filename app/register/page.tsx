@@ -5,7 +5,9 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import Card from "@/components/Card";
 import PasswordPolicyHint from "@/components/auth/PasswordPolicyHint";
+import { resolveRegisterFormError } from "@/lib/auth-form-errors";
 import { GRADE_OPTIONS } from "@/lib/constants";
+import { requestJson } from "@/lib/client-request";
 import type { RegisterPayload, RegisterResponse, RegisterRole } from "./types";
 
 export default function RegisterPage() {
@@ -34,41 +36,52 @@ export default function RegisterPage() {
     setError(null);
     setMessage(null);
 
+    const normalizedName = name.trim();
+    const normalizedEmail = email.trim();
     const payload: RegisterPayload =
       role === "student"
         ? {
             role,
-            name,
-            email,
+            name: normalizedName,
+            email: normalizedEmail,
             password,
             grade,
-            schoolCode: schoolCode || undefined
+            schoolCode: schoolCode.trim() || undefined
           }
         : {
             role,
-            name,
-            email,
+            name: normalizedName,
+            email: normalizedEmail,
             password,
-            observerCode
+            observerCode: observerCode.trim()
           };
 
-    const res = await fetch("/api/auth/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    const data = (await res.json()) as RegisterResponse;
-    if (!res.ok) {
-      setError(data.error ?? "注册失败");
-    } else {
-      setMessage("注册成功，请登录。");
+    try {
+      const data = await requestJson<RegisterResponse>("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      setMessage(data.message ?? "注册成功，请登录。");
       setName("");
       setEmail("");
       setPassword("");
       setSchoolCode("");
       setObserverCode("");
+    } catch (nextError) {
+      setError(
+        resolveRegisterFormError(nextError, {
+          fallback: "注册失败",
+          emailExistsMessage: "该邮箱已注册，可直接登录或前往账号恢复。",
+          invalidSchoolCodeMessage: "学校编码无效，请核对后重试；不填则会归入默认学校。",
+          observerCodeRequiredMessage: "家长注册必须填写学生资料页中的绑定码。",
+          observerCodeInvalidMessage: "绑定码无效，请回到学生资料页重新获取后再试。",
+          gradeRequiredMessage: "请选择学生年级。"
+        })
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   return (

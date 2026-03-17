@@ -2,6 +2,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { badRequest, notFound } from "./api/http";
+import { isDbEnabled, query, queryOne } from "./db";
 import { DEFAULT_SCHOOL_ID } from "./schools";
 import type { Weekday } from "./class-schedules";
 
@@ -27,6 +28,25 @@ const FILE = "school-schedule-templates.json";
 const runtimeDir = path.resolve(process.cwd(), process.env.DATA_DIR ?? ".runtime-data");
 const seedDir = path.resolve(process.cwd(), process.env.DATA_SEED_DIR ?? "data");
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+let syncPromise: Promise<void> | null = null;
+
+type DbSchoolScheduleTemplate = {
+  id: string;
+  school_id: string | null;
+  grade: string;
+  subject: string;
+  weekly_lessons_per_class: number;
+  lesson_duration_minutes: number;
+  periods_per_day: number;
+  weekdays: number[] | null;
+  day_start_time: string;
+  short_break_minutes: number;
+  lunch_break_after_period: number | null;
+  lunch_break_minutes: number;
+  campus: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 function normalizeSchoolId(value?: string | null) {
   return value?.trim() || DEFAULT_SCHOOL_ID;
@@ -35,6 +55,12 @@ function normalizeSchoolId(value?: string | null) {
 function normalizeText(value?: string | null) {
   const next = value?.trim();
   return next ? next : undefined;
+}
+
+function normalizeTimestamp(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value instanceof Date) return value.toISOString();
+  return "";
 }
 
 function readFileIfExists(filePath: string) {
@@ -57,9 +83,69 @@ function readStore() {
   })) as SchoolScheduleTemplate[];
 }
 
+function mapDbTemplate(row: DbSchoolScheduleTemplate): SchoolScheduleTemplate {
+  return {
+    id: row.id,
+    schoolId: normalizeSchoolId(row.school_id),
+    grade: row.grade,
+    subject: row.subject,
+    weeklyLessonsPerClass: row.weekly_lessons_per_class,
+    lessonDurationMinutes: row.lesson_duration_minutes,
+    periodsPerDay: row.periods_per_day,
+    weekdays: Array.isArray(row.weekdays) ? row.weekdays.map((item) => Number(item)).filter((item) => item >= 1 && item <= 7) as Weekday[] : [],
+    dayStartTime: row.day_start_time,
+    shortBreakMinutes: row.short_break_minutes,
+    lunchBreakAfterPeriod: row.lunch_break_after_period ?? undefined,
+    lunchBreakMinutes: row.lunch_break_minutes,
+    campus: normalizeText(row.campus),
+    createdAt: normalizeTimestamp(row.created_at),
+    updatedAt: normalizeTimestamp(row.updated_at)
+  };
+}
+
 function writeStore(items: SchoolScheduleTemplate[]) {
   fs.mkdirSync(runtimeDir, { recursive: true });
   fs.writeFileSync(path.join(runtimeDir, FILE), JSON.stringify(items, null, 2));
+}
+
+async function syncStoreFromFileIfNeeded() {
+  if (!isDbEnabled()) return;
+  if (syncPromise) return syncPromise;
+
+  syncPromise = (async () => {
+    const existing = await queryOne<{ id: string }>("SELECT id FROM school_schedule_templates LIMIT 1");
+    if (existing) return;
+    const fallback = readStore();
+    for (const item of fallback) {
+      await query(
+        `INSERT INTO school_schedule_templates
+         (id, school_id, grade, subject, weekly_lessons_per_class, lesson_duration_minutes, periods_per_day, weekdays, day_start_time, short_break_minutes, lunch_break_after_period, lunch_break_minutes, campus, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          item.id,
+          item.schoolId,
+          item.grade,
+          item.subject,
+          item.weeklyLessonsPerClass,
+          item.lessonDurationMinutes,
+          item.periodsPerDay,
+          JSON.stringify(item.weekdays),
+          item.dayStartTime,
+          item.shortBreakMinutes,
+          item.lunchBreakAfterPeriod ?? null,
+          item.lunchBreakMinutes,
+          item.campus ?? null,
+          item.createdAt,
+          item.updatedAt
+        ]
+      );
+    }
+  })().finally(() => {
+    syncPromise = null;
+  });
+
+  return syncPromise;
 }
 
 function assertTimeValue(value: string, label: string) {
@@ -116,7 +202,19 @@ function validateTemplateInput(input: {
 }
 
 export async function listSchoolScheduleTemplates(scope?: { schoolId?: string | null }) {
-  return readStore()
+  if (!isDbEnabled()) {
+    return readStore()
+      .filter((item) => !scope?.schoolId || normalizeSchoolId(item.schoolId) === normalizeSchoolId(scope.schoolId))
+      .sort((left, right) => {
+        if (left.grade !== right.grade) return left.grade.localeCompare(right.grade, "zh-CN");
+        return left.subject.localeCompare(right.subject, "zh-CN");
+      });
+  }
+
+  await syncStoreFromFileIfNeeded();
+  const rows = await query<DbSchoolScheduleTemplate>("SELECT * FROM school_schedule_templates");
+  return rows
+    .map(mapDbTemplate)
     .filter((item) => !scope?.schoolId || normalizeSchoolId(item.schoolId) === normalizeSchoolId(scope.schoolId))
     .sort((left, right) => {
       if (left.grade !== right.grade) return left.grade.localeCompare(right.grade, "zh-CN");
@@ -148,8 +246,55 @@ export async function saveSchoolScheduleTemplate(input: {
 }) {
   validateTemplateInput(input);
   const schoolId = normalizeSchoolId(input.schoolId);
-  const list = readStore();
+  const weekdays = Array.from(new Set(input.weekdays)).sort((left, right) => left - right) as Weekday[];
   const now = new Date().toISOString();
+  if (isDbEnabled()) {
+    await syncStoreFromFileIfNeeded();
+    const previous = input.id
+      ? await queryOne<DbSchoolScheduleTemplate>("SELECT * FROM school_schedule_templates WHERE id = $1", [input.id])
+      : await queryOne<DbSchoolScheduleTemplate>(
+          "SELECT * FROM school_schedule_templates WHERE school_id = $1 AND grade = $2 AND subject = $3",
+          [schoolId, input.grade.trim(), input.subject.trim()]
+        );
+    const nextId = previous?.id ?? `stpl-${crypto.randomBytes(6).toString("hex")}`;
+    const row = await queryOne<DbSchoolScheduleTemplate>(
+      `INSERT INTO school_schedule_templates
+       (id, school_id, grade, subject, weekly_lessons_per_class, lesson_duration_minutes, periods_per_day, weekdays, day_start_time, short_break_minutes, lunch_break_after_period, lunch_break_minutes, campus, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14, $15)
+       ON CONFLICT (school_id, grade, subject) DO UPDATE
+       SET weekly_lessons_per_class = EXCLUDED.weekly_lessons_per_class,
+           lesson_duration_minutes = EXCLUDED.lesson_duration_minutes,
+           periods_per_day = EXCLUDED.periods_per_day,
+           weekdays = EXCLUDED.weekdays,
+           day_start_time = EXCLUDED.day_start_time,
+           short_break_minutes = EXCLUDED.short_break_minutes,
+           lunch_break_after_period = EXCLUDED.lunch_break_after_period,
+           lunch_break_minutes = EXCLUDED.lunch_break_minutes,
+           campus = EXCLUDED.campus,
+           updated_at = EXCLUDED.updated_at
+       RETURNING *`,
+      [
+        nextId,
+        schoolId,
+        input.grade.trim(),
+        input.subject.trim(),
+        input.weeklyLessonsPerClass,
+        input.lessonDurationMinutes,
+        input.periodsPerDay,
+        JSON.stringify(weekdays),
+        input.dayStartTime,
+        input.shortBreakMinutes,
+        input.lunchBreakAfterPeriod ?? null,
+        input.lunchBreakMinutes,
+        normalizeText(input.campus) ?? null,
+        previous?.created_at ?? now,
+        now
+      ]
+    );
+    return row ? mapDbTemplate(row) : null;
+  }
+
+  const list = readStore();
   const existingIndex = list.findIndex(
     (item) =>
       (input.id ? item.id === input.id : false) ||
@@ -164,7 +309,7 @@ export async function saveSchoolScheduleTemplate(input: {
     weeklyLessonsPerClass: input.weeklyLessonsPerClass,
     lessonDurationMinutes: input.lessonDurationMinutes,
     periodsPerDay: input.periodsPerDay,
-    weekdays: Array.from(new Set(input.weekdays)).sort((left, right) => left - right) as Weekday[],
+    weekdays,
     dayStartTime: input.dayStartTime,
     shortBreakMinutes: input.shortBreakMinutes,
     lunchBreakAfterPeriod: input.lunchBreakAfterPeriod,
@@ -184,16 +329,29 @@ export async function saveSchoolScheduleTemplate(input: {
 }
 
 export async function deleteSchoolScheduleTemplate(id: string, scope?: { schoolId?: string | null }) {
-  const list = readStore();
-  const index = list.findIndex((item) => item.id === id);
-  if (index === -1) {
+  if (!isDbEnabled()) {
+    const list = readStore();
+    const index = list.findIndex((item) => item.id === id);
+    if (index === -1) {
+      notFound("schedule template not found");
+    }
+    const current = list[index];
+    if (scope?.schoolId && normalizeSchoolId(current.schoolId) !== normalizeSchoolId(scope.schoolId)) {
+      notFound("schedule template not found");
+    }
+    list.splice(index, 1);
+    writeStore(list);
+    return current;
+  }
+
+  await syncStoreFromFileIfNeeded();
+  const current = await queryOne<DbSchoolScheduleTemplate>("SELECT * FROM school_schedule_templates WHERE id = $1", [id]);
+  if (!current) {
     notFound("schedule template not found");
   }
-  const current = list[index];
-  if (scope?.schoolId && normalizeSchoolId(current.schoolId) !== normalizeSchoolId(scope.schoolId)) {
+  if (scope?.schoolId && normalizeSchoolId(current.school_id) !== normalizeSchoolId(scope.schoolId)) {
     notFound("schedule template not found");
   }
-  list.splice(index, 1);
-  writeStore(list);
-  return current;
+  await query("DELETE FROM school_schedule_templates WHERE id = $1", [id]);
+  return mapDbTemplate(current);
 }

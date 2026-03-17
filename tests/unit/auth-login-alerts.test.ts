@@ -8,6 +8,7 @@ type AuthLoginAlertsModule = typeof import("../../lib/auth-login-alerts");
 
 const ENV_KEYS = [
   "ALLOW_JSON_FALLBACK",
+  "API_TEST_SCOPE",
   "DATA_DIR",
   "DATA_SEED_DIR",
   "DATABASE_URL",
@@ -58,6 +59,7 @@ async function loadAuthLoginAlerts() {
   await fs.mkdir(seedDir, { recursive: true });
 
   process.env.NODE_ENV = "development";
+  process.env.API_TEST_SCOPE = "unit-auth-login-alerts";
   process.env.DATA_DIR = runtimeDir;
   process.env.DATA_SEED_DIR = seedDir;
   delete process.env.DATABASE_URL;

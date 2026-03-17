@@ -1,84 +1,31 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import Card from "@/components/Card";
-import EduIcon from "@/components/EduIcon";
-import StatePanel from "@/components/StatePanel";
-import WorkspacePage, { WorkspaceAuthState, WorkspaceEmptyState, WorkspaceErrorState, WorkspaceLoadingState, buildStaleDataNotice } from "@/components/WorkspacePage";
-import Stat from "@/components/Stat";
-import { getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
-import type { SchoolActionTone, SchoolClassRecord, SchoolOverview, SchoolUserRecord } from "@/lib/school-admin-types";
-
-type SchoolOverviewResponse = { data?: SchoolOverview | null };
-type SchoolClassesResponse = { data?: SchoolClassRecord[] };
-type SchoolUsersResponse = { data?: SchoolUserRecord[] };
-
-const ACTION_TONE_META: Record<SchoolActionTone, { label: string; color: string; background: string }> = {
-  critical: { label: "立即处理", color: "#b42318", background: "rgba(180, 35, 24, 0.12)" },
-  warning: { label: "优先跟进", color: "#b54708", background: "rgba(245, 158, 11, 0.16)" },
-  info: { label: "建议补齐", color: "#175cd3", background: "rgba(23, 92, 211, 0.12)" },
-  success: { label: "运行稳定", color: "#027a48", background: "rgba(2, 122, 72, 0.12)" }
-};
+import WorkspacePage, { WorkspaceAuthState, WorkspaceEmptyState, WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspacePage";
+import { SchoolAttentionClassesCard } from "./_components/SchoolAttentionClassesCard";
+import { SchoolClassSnapshotCard } from "./_components/SchoolClassSnapshotCard";
+import { SchoolDashboardOverviewCard } from "./_components/SchoolDashboardOverviewCard";
+import { SchoolHealthMetricsCard } from "./_components/SchoolHealthMetricsCard";
+import { SchoolMemberSnapshotCard } from "./_components/SchoolMemberSnapshotCard";
+import { SchoolPriorityActionsCard } from "./_components/SchoolPriorityActionsCard";
+import { useSchoolPageView } from "./useSchoolPageView";
 
 export default function SchoolPage() {
-  const [overview, setOverview] = useState<SchoolOverview | null>(null);
-  const [classes, setClasses] = useState<SchoolClassRecord[]>([]);
-  const [teachers, setTeachers] = useState<SchoolUserRecord[]>([]);
-  const [students, setStudents] = useState<SchoolUserRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [authRequired, setAuthRequired] = useState(false);
-  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
+  const {
+    loading,
+    authRequired,
+    hasOverview,
+    pageError,
+    reload,
+    workspacePageProps,
+    overviewCardProps,
+    healthMetricsCardProps,
+    priorityActionsCardProps,
+    attentionClassesCardProps,
+    classSnapshotCardProps,
+    memberSnapshotCardProps
+  } = useSchoolPageView();
 
-  const loadAll = useCallback(async (mode: "initial" | "refresh" = "initial") => {
-    if (mode === "refresh") {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-    setError(null);
-
-    try {
-      const [overviewData, classesData, teachersData, studentsData] = await Promise.all([
-        requestJson<SchoolOverviewResponse>("/api/school/overview"),
-        requestJson<SchoolClassesResponse>("/api/school/classes"),
-        requestJson<SchoolUsersResponse>("/api/school/users?role=teacher"),
-        requestJson<SchoolUsersResponse>("/api/school/users?role=student")
-      ]);
-
-      setOverview(overviewData.data ?? null);
-      setClasses(classesData.data ?? []);
-      setTeachers(teachersData.data ?? []);
-      setStudents(studentsData.data ?? []);
-      setAuthRequired(false);
-      setLastLoadedAt(new Date().toISOString());
-    } catch (nextError) {
-      if (isAuthError(nextError)) {
-        setAuthRequired(true);
-        setOverview(null);
-        setClasses([]);
-        setTeachers([]);
-        setStudents([]);
-      } else {
-        setError(getRequestErrorMessage(nextError, "加载学校控制台失败"));
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadAll();
-  }, [loadAll]);
-
-  const teacherPreview = useMemo(() => teachers.slice(0, 6), [teachers]);
-  const studentPreview = useMemo(() => students.slice(0, 6), [students]);
-  const classPreview = useMemo(() => classes.slice(0, 6), [classes]);
-
-  if (loading && !overview && !authRequired) {
+  if (loading && !hasOverview && !authRequired) {
     return <WorkspaceLoadingState title="学校控制台加载中" description="正在汇总学校组织、班级和成员数据。" />;
   }
 
@@ -86,198 +33,30 @@ export default function SchoolPage() {
     return <WorkspaceAuthState title="需要学校管理员权限" description="请使用学校管理员或平台主管账号登录后查看学校控制台。" />;
   }
 
-  if (error && !overview) {
-    return <WorkspaceErrorState title="学校控制台加载失败" description={error} onRetry={() => void loadAll()} />;
+  if (pageError && !hasOverview) {
+    return <WorkspaceErrorState title="学校控制台加载失败" description={pageError} onRetry={reload} />;
   }
 
-  if (!overview) {
+  if (!hasOverview) {
     return <WorkspaceEmptyState title="暂无学校数据" description="当前租户还没有生成学校概览数据，请稍后再试。" />;
   }
 
   return (
-    <WorkspacePage
-      title="学校控制台"
-      subtitle="统一查看学校组织运行、班级执行、课程表覆盖与成员状态，并给出优先整改动作。"
-      lastLoadedAt={lastLoadedAt}
-      chips={[<span key="school-admin" className="chip">School Admin</span>]}
-      actions={
-        <>
-          <Link className="button ghost" href="/school/schedules">
-            课程表管理
-          </Link>
-          <button className="button secondary" type="button" onClick={() => void loadAll("refresh")} disabled={loading || refreshing}>
-            {refreshing ? "刷新中..." : "刷新"}
-          </button>
-        </>
-      }
-      notices={
-        error
-          ? [
-              buildStaleDataNotice(
-                error,
-                <button className="button secondary" type="button" onClick={() => void loadAll("refresh")}>
-                  再试一次
-                </button>
-              )
-            ]
-          : undefined
-      }
-    >
+    <WorkspacePage {...workspacePageProps}>
+      <SchoolDashboardOverviewCard {...overviewCardProps} />
 
-      <Card title="组织与执行概览" tag="运营">
-        <div className="feature-card">
-          <EduIcon name="chart" />
-          <p>当前学校 ID：{overview.schoolId}</p>
-        </div>
-        <div className="grid grid-3" style={{ marginTop: 12 }}>
-          <Stat label="教师数" value={String(overview.teacherCount)} helper="学校范围" />
-          <Stat label="学生数" value={String(overview.studentCount)} helper="学校范围" />
-          <Stat label="家长数" value={String(overview.parentCount)} helper="家校协同" />
-          <Stat label="班级数" value={String(overview.classCount)} helper="组织单元" />
-          <Stat label="作业数" value={String(overview.assignmentCount)} helper="教学执行" />
-          <Stat label="高负载班级" value={String(overview.overloadedClassCount)} helper="人数偏高" />
-        </div>
-      </Card>
-
-      <Card title="运营健康指标" tag="覆盖率">
-        <div className="grid grid-3">
-          <Stat label="教师覆盖率" value={`${overview.teacherCoverageRate}%`} helper={`${overview.classesWithoutTeacherCount} 个班级待绑定`} />
-          <Stat label="作业覆盖率" value={`${overview.assignmentCoverageRate}%`} helper={`${overview.classesWithoutAssignmentsCount} 个班级未开始`} />
-          <Stat label="课表覆盖率" value={`${overview.scheduleCoverageRate}%`} helper={`${overview.classesWithoutSchedulesCount} 个班级待排课`} />
-          <Stat label="平均班级人数" value={String(overview.averageStudentsPerClass)} helper={`${overview.classesWithoutStudentsCount} 个空班级`} />
-          <Stat label="平均班级作业" value={String(overview.averageAssignmentsPerClass)} helper="按当前班级均值" />
-          <Stat label="平均每班课时" value={String(overview.averageLessonsPerWeek)} helper="按周估算" />
-          <Stat label="未绑定教师班级" value={String(overview.classesWithoutTeacherCount)} helper="组织风险" />
-          <Stat label="未排课班级" value={String(overview.classesWithoutSchedulesCount)} helper="直接影响学生主页" />
-          <Stat label="空班级数" value={String(overview.classesWithoutStudentsCount)} helper="需要补员" />
-        </div>
-      </Card>
+      <SchoolHealthMetricsCard {...healthMetricsCardProps} />
 
       <div className="grid grid-2" style={{ alignItems: "start" }}>
-        <Card title="本周优先动作" tag="待办">
-          <div className="grid" style={{ gap: 10 }}>
-            {overview.actionItems.map((item) => {
-              const meta = ACTION_TONE_META[item.tone];
-              return (
-                <div className="card" key={item.id}>
-                  <div className="cta-row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-                    <div>
-                      <div className="section-title">{item.title}</div>
-                      <div style={{ fontSize: 13, color: "var(--ink-1)", marginTop: 6 }}>{item.description}</div>
-                    </div>
-                    <span
-                      className="pill"
-                      style={{ background: meta.background, color: meta.color, border: `1px solid ${meta.background}` }}
-                    >
-                      {meta.label}
-                    </span>
-                  </div>
-                  <div className="cta-row" style={{ marginTop: 10, justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ fontSize: 12, color: "var(--ink-1)" }}>{item.count ? `涉及 ${item.count} 个对象` : "建议持续巡检"}</div>
-                    <Link className="button ghost" href={item.href}>
-                      {item.ctaLabel}
-                    </Link>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
+        <SchoolPriorityActionsCard {...priorityActionsCardProps} />
 
-        <Card title="重点关注班级" tag="风险">
-          {overview.attentionClasses.length ? (
-            <div className="grid" style={{ gap: 10 }}>
-              {overview.attentionClasses.map((item) => (
-                <div className="card" key={item.id}>
-                  <div className="section-title">{item.name}</div>
-                  <div style={{ fontSize: 13, color: "var(--ink-1)", marginTop: 4 }}>
-                    {item.subject} · {item.grade} 年级 · {item.studentCount} 人 · {item.assignmentCount} 份作业 · {item.scheduleCount} 节/周 · {item.scheduleCount} 节/周
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 4 }}>
-                    教师：{item.teacherName ?? item.teacherId ?? "未绑定"}
-                  </div>
-                  <div className="cta-row" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
-                    {item.issueTags.map((tag) => (
-                      <span className="pill" key={`${item.id}-${tag}`}>
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <StatePanel
-              title="当前没有高风险班级"
-              description="教师绑定、学生编班和作业覆盖状态都比较稳定。"
-              tone="success"
-              compact
-            />
-          )}
-        </Card>
+        <SchoolAttentionClassesCard {...attentionClassesCardProps} />
       </div>
 
       <div className="grid grid-2" style={{ alignItems: "start" }}>
-        <Card title="班级快照" tag="组织">
-          <div className="section-sub">优先展示最近的班级结构与执行负载，便于快速进入治理页。</div>
-          <div className="grid" style={{ gap: 8, marginTop: 12 }}>
-            {classPreview.map((item) => (
-              <div className="card" key={item.id}>
-                <div className="section-title">{item.name}</div>
-                <div style={{ fontSize: 12, color: "var(--ink-1)" }}>
-                  {item.subject} · {item.grade} 年级 · {item.studentCount} 人 · {item.assignmentCount} 份作业
-                </div>
-                <div style={{ fontSize: 12, color: "var(--ink-1)", marginTop: 4 }}>
-                  班主任/任课：{item.teacherName ?? item.teacherId ?? "未绑定"}
-                </div>
-              </div>
-            ))}
-            {!classPreview.length ? <StatePanel title="暂无班级数据" description="当前学校还没有班级记录。" tone="empty" compact /> : null}
-          </div>
-          <div className="cta-row" style={{ marginTop: 12 }}>
-            <Link className="button secondary" href="/school/classes">
-              查看全部班级
-            </Link>
-            <Link className="button ghost" href="/school/schedules">
-              进入课程表管理
-            </Link>
-          </div>
-        </Card>
+        <SchoolClassSnapshotCard {...classSnapshotCardProps} />
 
-        <Card title="成员快照" tag="成员">
-          <div className="grid" style={{ gap: 10 }}>
-            <div className="card">
-              <div className="section-title">教师（前 6）</div>
-              <div className="grid" style={{ gap: 6, marginTop: 8 }}>
-                {teacherPreview.map((teacher) => (
-                  <div key={teacher.id} style={{ fontSize: 13, color: "var(--ink-1)" }}>
-                    {teacher.name} · {teacher.email}
-                  </div>
-                ))}
-                {!teacherPreview.length ? <div className="section-sub">暂无教师账号。</div> : null}
-              </div>
-            </div>
-            <div className="card">
-              <div className="section-title">学生（前 6）</div>
-              <div className="grid" style={{ gap: 6, marginTop: 8 }}>
-                {studentPreview.map((student) => (
-                  <div key={student.id} style={{ fontSize: 13, color: "var(--ink-1)" }}>
-                    {student.name} · {student.grade ? `${student.grade} 年级` : "未设置年级"}
-                  </div>
-                ))}
-                {!studentPreview.length ? <div className="section-sub">暂无学生账号。</div> : null}
-              </div>
-            </div>
-          </div>
-          <div className="cta-row" style={{ marginTop: 12 }}>
-            <Link className="button secondary" href="/school/teachers">
-              教师管理
-            </Link>
-            <Link className="button ghost" href="/school/students">
-              学生管理
-            </Link>
-          </div>
-        </Card>
+        <SchoolMemberSnapshotCard {...memberSnapshotCardProps} />
       </div>
     </WorkspacePage>
   );

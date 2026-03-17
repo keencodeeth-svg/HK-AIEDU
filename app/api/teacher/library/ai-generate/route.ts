@@ -69,7 +69,7 @@ export const POST = createLearningRoute({
 
     const classId = body.classId?.trim();
     const topic = body.topic?.trim();
-    const contentTypeInput = body.contentType?.trim();
+    const contentTypeInput = body.contentType?.trim().toLowerCase();
     const contentType =
       contentTypeInput === "lesson_plan" || contentTypeInput === "courseware"
         ? contentTypeInput

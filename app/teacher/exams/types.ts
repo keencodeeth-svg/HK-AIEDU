@@ -18,3 +18,10 @@ export type TeacherExamItem = {
 };
 
 export type TeacherExamStatusFilter = "all" | "published" | "closed";
+
+export type TeacherExamClassOption = {
+  id: string;
+  name: string;
+  subject: string;
+  grade: string;
+};

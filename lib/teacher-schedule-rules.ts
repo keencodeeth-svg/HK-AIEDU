@@ -2,6 +2,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { badRequest, notFound } from "./api/http";
+import { isDbEnabled, query, queryOne } from "./db";
 import { DEFAULT_SCHOOL_ID } from "./schools";
 import type { Weekday } from "./class-schedules";
 
@@ -29,6 +30,18 @@ const runtimeDir = path.resolve(process.cwd(), process.env.DATA_DIR ?? ".runtime
 const seedDir = path.resolve(process.cwd(), process.env.DATA_SEED_DIR ?? "data");
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const CONSECUTIVE_GAP_MINUTES = 15;
+let syncPromise: Promise<void> | null = null;
+
+type DbTeacherScheduleRule = {
+  id: string;
+  school_id: string | null;
+  teacher_id: string;
+  weekly_max_lessons: number | null;
+  max_consecutive_lessons: number | null;
+  min_campus_gap_minutes: number | null;
+  created_at: string;
+  updated_at: string;
+};
 
 function normalizeSchoolId(value?: string | null) {
   return value?.trim() || DEFAULT_SCHOOL_ID;
@@ -36,6 +49,12 @@ function normalizeSchoolId(value?: string | null) {
 
 function normalizeTeacherId(value?: string | null) {
   return value?.trim() || "";
+}
+
+function normalizeTimestamp(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value instanceof Date) return value.toISOString();
+  return "";
 }
 
 function normalizeOptionalInteger(value: unknown, options: { min: number; max: number; zeroAsUndefined?: boolean }) {
@@ -94,9 +113,55 @@ function readStore() {
     });
 }
 
+function mapDbRule(row: DbTeacherScheduleRule): TeacherScheduleRule {
+  return {
+    id: row.id,
+    schoolId: normalizeSchoolId(row.school_id),
+    teacherId: normalizeTeacherId(row.teacher_id),
+    weeklyMaxLessons: normalizeOptionalInteger(row.weekly_max_lessons, { min: 1, max: 60 }),
+    maxConsecutiveLessons: normalizeOptionalInteger(row.max_consecutive_lessons, { min: 1, max: 12 }),
+    minCampusGapMinutes: normalizeOptionalInteger(row.min_campus_gap_minutes, { min: 1, max: 240, zeroAsUndefined: true }),
+    createdAt: normalizeTimestamp(row.created_at),
+    updatedAt: normalizeTimestamp(row.updated_at)
+  };
+}
+
 function writeStore(items: TeacherScheduleRule[]) {
   fs.mkdirSync(runtimeDir, { recursive: true });
   fs.writeFileSync(path.join(runtimeDir, FILE), JSON.stringify(items, null, 2));
+}
+
+async function syncStoreFromFileIfNeeded() {
+  if (!isDbEnabled()) return;
+  if (syncPromise) return syncPromise;
+
+  syncPromise = (async () => {
+    const existing = await queryOne<{ id: string }>("SELECT id FROM teacher_schedule_rules LIMIT 1");
+    if (existing) return;
+    const fallback = readStore();
+    for (const item of fallback) {
+      await query(
+        `INSERT INTO teacher_schedule_rules
+         (id, school_id, teacher_id, weekly_max_lessons, max_consecutive_lessons, min_campus_gap_minutes, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          item.id,
+          item.schoolId,
+          item.teacherId,
+          item.weeklyMaxLessons ?? null,
+          item.maxConsecutiveLessons ?? null,
+          item.minCampusGapMinutes ?? null,
+          item.createdAt,
+          item.updatedAt
+        ]
+      );
+    }
+  })().finally(() => {
+    syncPromise = null;
+  });
+
+  return syncPromise;
 }
 
 function validateRuleInput(input: {
@@ -230,7 +295,17 @@ export function findTeacherScheduleRuleViolation(
 }
 
 export async function listTeacherScheduleRules(scope?: { schoolId?: string | null; teacherId?: string }) {
-  return readStore().filter((item) => {
+  if (!isDbEnabled()) {
+    return readStore().filter((item) => {
+      if (scope?.schoolId && normalizeSchoolId(item.schoolId) !== normalizeSchoolId(scope.schoolId)) return false;
+      if (scope?.teacherId && item.teacherId !== scope.teacherId) return false;
+      return true;
+    });
+  }
+
+  await syncStoreFromFileIfNeeded();
+  const rows = await query<DbTeacherScheduleRule>("SELECT * FROM teacher_schedule_rules ORDER BY updated_at DESC");
+  return rows.map(mapDbRule).filter((item) => {
     if (scope?.schoolId && normalizeSchoolId(item.schoolId) !== normalizeSchoolId(scope.schoolId)) return false;
     if (scope?.teacherId && item.teacherId !== scope.teacherId) return false;
     return true;
@@ -238,13 +313,21 @@ export async function listTeacherScheduleRules(scope?: { schoolId?: string | nul
 }
 
 export async function getTeacherScheduleRule(scope: { schoolId?: string | null; teacherId: string }) {
-  return (
-    readStore().find(
-      (item) =>
-        normalizeSchoolId(item.schoolId) === normalizeSchoolId(scope.schoolId) &&
-        item.teacherId === scope.teacherId
-    ) ?? null
+  if (!isDbEnabled()) {
+    return (
+      readStore().find(
+        (item) =>
+          normalizeSchoolId(item.schoolId) === normalizeSchoolId(scope.schoolId) &&
+          item.teacherId === scope.teacherId
+      ) ?? null
+    );
+  }
+  await syncStoreFromFileIfNeeded();
+  const row = await queryOne<DbTeacherScheduleRule>(
+    "SELECT * FROM teacher_schedule_rules WHERE school_id = $1 AND teacher_id = $2",
+    [normalizeSchoolId(scope.schoolId), scope.teacherId]
   );
+  return row ? mapDbRule(row) : null;
 }
 
 export async function saveTeacherScheduleRule(input: {
@@ -268,8 +351,50 @@ export async function saveTeacherScheduleRule(input: {
     minCampusGapMinutes
   });
 
-  const list = readStore();
   const now = new Date().toISOString();
+  if (isDbEnabled()) {
+    await syncStoreFromFileIfNeeded();
+    const previous = input.id
+      ? await queryOne<DbTeacherScheduleRule>("SELECT * FROM teacher_schedule_rules WHERE id = $1", [input.id])
+      : await queryOne<DbTeacherScheduleRule>(
+          "SELECT * FROM teacher_schedule_rules WHERE school_id = $1 AND teacher_id = $2",
+          [schoolId, teacherId]
+        );
+    const nextId = previous?.id ?? `trule-${crypto.randomBytes(6).toString("hex")}`;
+    const row = await queryOne<DbTeacherScheduleRule>(
+      `INSERT INTO teacher_schedule_rules
+       (id, school_id, teacher_id, weekly_max_lessons, max_consecutive_lessons, min_campus_gap_minutes, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (school_id, teacher_id) DO UPDATE
+       SET weekly_max_lessons = EXCLUDED.weekly_max_lessons,
+           max_consecutive_lessons = EXCLUDED.max_consecutive_lessons,
+           min_campus_gap_minutes = EXCLUDED.min_campus_gap_minutes,
+           updated_at = EXCLUDED.updated_at
+       RETURNING *`,
+      [
+        nextId,
+        schoolId,
+        teacherId,
+        weeklyMaxLessons ?? null,
+        maxConsecutiveLessons ?? null,
+        minCampusGapMinutes ?? null,
+        previous?.created_at ?? now,
+        now
+      ]
+    );
+    return row ? mapDbRule(row) : mapRule({
+      id: nextId,
+      schoolId,
+      teacherId,
+      weeklyMaxLessons,
+      maxConsecutiveLessons,
+      minCampusGapMinutes,
+      createdAt: previous?.created_at ?? now,
+      updatedAt: now
+    });
+  }
+
+  const list = readStore();
   const existingByIdIndex = input.id ? list.findIndex((item) => item.id === input.id) : -1;
   const duplicateTeacherIndex = list.findIndex(
     (item) => item.schoolId === schoolId && item.teacherId === teacherId && item.id !== input.id
@@ -303,16 +428,29 @@ export async function saveTeacherScheduleRule(input: {
 }
 
 export async function deleteTeacherScheduleRule(id: string, scope?: { schoolId?: string | null }) {
-  const list = readStore();
-  const index = list.findIndex((item) => item.id === id);
-  if (index === -1) {
+  if (!isDbEnabled()) {
+    const list = readStore();
+    const index = list.findIndex((item) => item.id === id);
+    if (index === -1) {
+      notFound("teacher schedule rule not found");
+    }
+    const current = list[index];
+    if (scope?.schoolId && normalizeSchoolId(current.schoolId) !== normalizeSchoolId(scope.schoolId)) {
+      notFound("teacher schedule rule not found");
+    }
+    list.splice(index, 1);
+    writeStore(list);
+    return current;
+  }
+
+  await syncStoreFromFileIfNeeded();
+  const current = await queryOne<DbTeacherScheduleRule>("SELECT * FROM teacher_schedule_rules WHERE id = $1", [id]);
+  if (!current) {
     notFound("teacher schedule rule not found");
   }
-  const current = list[index];
-  if (scope?.schoolId && normalizeSchoolId(current.schoolId) !== normalizeSchoolId(scope.schoolId)) {
+  if (scope?.schoolId && normalizeSchoolId(current.school_id) !== normalizeSchoolId(scope.schoolId)) {
     notFound("teacher schedule rule not found");
   }
-  list.splice(index, 1);
-  writeStore(list);
-  return current;
+  await query("DELETE FROM teacher_schedule_rules WHERE id = $1", [id]);
+  return mapDbRule(current);
 }

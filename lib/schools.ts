@@ -27,15 +27,22 @@ export const DEFAULT_SCHOOL_ID = "school-default";
 export const DEFAULT_SCHOOL_CODE = "DEFAULT";
 export const DEFAULT_SCHOOL_NAME = "默认学校";
 
-function mapSchool(row: DbSchool): School {
+function normalizeSchool(school: School): School {
   return {
+    ...school,
+    code: normalizeSchoolCode(school.code)
+  };
+}
+
+function mapSchool(row: DbSchool): School {
+  return normalizeSchool({
     id: row.id,
     name: row.name,
     code: row.code,
     status: (row.status as SchoolStatus) ?? "active",
     createdAt: row.created_at,
     updatedAt: row.updated_at
-  };
+  });
 }
 
 function nowIso() {
@@ -55,7 +62,7 @@ function buildSchoolCodeFromName(name: string) {
 
 export async function getSchools(): Promise<School[]> {
   if (!isDbEnabled()) {
-    return readJson<School[]>(SCHOOL_FILE, []);
+    return readJson<School[]>(SCHOOL_FILE, []).map(normalizeSchool);
   }
   const rows = await query<DbSchool>("SELECT * FROM schools ORDER BY created_at ASC");
   return rows.map(mapSchool);
@@ -88,22 +95,52 @@ export async function createSchool(input: { name: string; code?: string }): Prom
   const updatedAt = createdAt;
   const id = `school-${crypto.randomBytes(6).toString("hex")}`;
   const code = normalizeSchoolCode(input.code ?? buildSchoolCodeFromName(input.name));
+  const name = input.name.trim();
 
   if (!isDbEnabled()) {
     const schools = await getSchools();
-    const existing = schools.find((item) => normalizeSchoolCode(item.code) === code);
-    if (existing) return existing;
+    const existingIndex = schools.findIndex((item) => normalizeSchoolCode(item.code) === code);
+    if (existingIndex >= 0) {
+      const next = normalizeSchool({
+        ...schools[existingIndex],
+        name,
+        code,
+        updatedAt
+      });
+      schools[existingIndex] = next;
+      writeJson(SCHOOL_FILE, schools);
+      return next;
+    }
     const next: School = {
       id,
-      name: input.name,
+      name,
       code,
       status: "active",
       createdAt,
       updatedAt
     };
-    schools.push(next);
+    schools.push(normalizeSchool(next));
     writeJson(SCHOOL_FILE, schools);
-    return next;
+    return normalizeSchool(next);
+  }
+
+  const existing = await getSchoolByCode(code);
+  if (existing) {
+    if (existing.name === name && existing.code === code) {
+      return existing;
+    }
+
+    const updated = await queryOne<DbSchool>(
+      `UPDATE schools
+       SET name = $2,
+           code = $3,
+           updated_at = $4
+       WHERE id = $1
+       RETURNING *`,
+      [existing.id, name, code, updatedAt]
+    );
+
+    return updated ? mapSchool(updated) : { ...existing, name, code, updatedAt };
   }
 
   const row = await queryOne<DbSchool>(
@@ -113,7 +150,7 @@ export async function createSchool(input: { name: string; code?: string }): Prom
        name = EXCLUDED.name,
        updated_at = EXCLUDED.updated_at
      RETURNING *`,
-    [id, input.name, code, createdAt, updatedAt]
+    [id, name, code, createdAt, updatedAt]
   );
 
   if (row) return mapSchool(row);

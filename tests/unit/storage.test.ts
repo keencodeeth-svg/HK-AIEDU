@@ -124,28 +124,28 @@ test("database-backed high-frequency state cannot fall back to JSON even when ru
   }
 });
 
-test("guarded runtime still allows JSON fallback for migration-priority state that is not yet blocking", async () => {
+test("guarded runtime still allows JSON fallback for non-blocking local cache files", async () => {
   const { mod, root, seedDir } = await loadStorageModule();
 
   try {
-    await fs.writeFile(path.join(seedDir, "study-plans.json"), JSON.stringify([{ id: "plan-1" }], null, 2));
-    const plans = mod.readJson("study-plans.json", []);
-    assert.deepEqual(plans, [{ id: "plan-1" }]);
+    await fs.writeFile(path.join(seedDir, "local-cache.json"), JSON.stringify([{ id: "cache-1" }], null, 2));
+    const cache = mod.readJson("local-cache.json", []);
+    assert.deepEqual(cache, [{ id: "cache-1" }]);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
 
-test("database-backed runtime still allows JSON fallback for non-blocking migration-priority files", async () => {
+test("database-backed runtime still allows JSON fallback for non-promoted cache files", async () => {
   const { mod, root, seedDir } = await loadStorageModule({
     NODE_ENV: "development",
     RUNTIME_GUARDRAILS_ENFORCE: "false"
   });
 
   try {
-    await fs.writeFile(path.join(seedDir, "study-plans.json"), JSON.stringify([{ id: "plan-dev-1" }], null, 2));
-    const plans = mod.readJson("study-plans.json", []);
-    assert.deepEqual(plans, [{ id: "plan-dev-1" }]);
+    await fs.writeFile(path.join(seedDir, "local-cache.json"), JSON.stringify([{ id: "cache-dev-1" }], null, 2));
+    const cache = mod.readJson("local-cache.json", []);
+    assert.deepEqual(cache, [{ id: "cache-dev-1" }]);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

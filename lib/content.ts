@@ -34,6 +34,11 @@ type DbQuestion = {
   updated_at?: string | null;
 };
 
+export function normalizeQuestionType(value?: string | null) {
+  const normalized = value?.trim().toLowerCase();
+  return normalized || "choice";
+}
+
 function mapKnowledgePoint(row: DbKnowledgePoint): KnowledgePoint {
   return {
     id: row.id,
@@ -56,9 +61,16 @@ function mapQuestion(row: DbQuestion): Question {
     answer: row.answer,
     explanation: row.explanation,
     difficulty: (row.difficulty as Difficulty | null) ?? undefined,
-    questionType: row.question_type ?? undefined,
+    questionType: normalizeQuestionType(row.question_type),
     tags: row.tags ?? [],
     abilities: row.abilities ?? []
+  };
+}
+
+function normalizeStoredQuestion(question: Question): Question {
+  return {
+    ...question,
+    questionType: normalizeQuestionType(question.questionType)
   };
 }
 
@@ -78,7 +90,7 @@ export async function saveKnowledgePoints(list: KnowledgePoint[]) {
 
 export async function getQuestions(): Promise<Question[]> {
   if (!isDbEnabled()) {
-    return readJson<Question[]>(Q_FILE, []);
+    return readJson<Question[]>(Q_FILE, []).map(normalizeStoredQuestion);
   }
   const rows = await query<DbQuestion>("SELECT * FROM questions");
   return rows.map(mapQuestion);
@@ -86,7 +98,7 @@ export async function getQuestions(): Promise<Question[]> {
 
 export async function saveQuestions(list: Question[]) {
   if (!isDbEnabled()) {
-    writeJson(Q_FILE, list);
+    writeJson(Q_FILE, list.map(normalizeStoredQuestion));
   }
 }
 
@@ -149,15 +161,16 @@ export async function deleteKnowledgePoint(id: string) {
 }
 
 export async function createQuestion(input: Omit<Question, "id">) {
+  const questionType = normalizeQuestionType(input.questionType);
   if (!isDbEnabled()) {
     const list = await getQuestions();
     const next: Question = {
       id: `q-${crypto.randomBytes(6).toString("hex")}`,
       difficulty: input.difficulty ?? "medium",
-      questionType: input.questionType ?? "choice",
       tags: input.tags ?? [],
       abilities: input.abilities ?? [],
-      ...input
+      ...input,
+      questionType
     };
     list.push(next);
     await saveQuestions(list);
@@ -178,7 +191,7 @@ export async function createQuestion(input: Omit<Question, "id">) {
       input.answer,
       input.explanation,
       input.difficulty ?? "medium",
-      input.questionType ?? "choice",
+      questionType,
       input.tags ?? [],
       input.abilities ?? []
     ]
@@ -187,11 +200,18 @@ export async function createQuestion(input: Omit<Question, "id">) {
 }
 
 export async function updateQuestion(id: string, input: Partial<Question>) {
+  const normalizedQuestionType =
+    input.questionType === undefined ? undefined : normalizeQuestionType(input.questionType);
   if (!isDbEnabled()) {
     const list = await getQuestions();
     const index = list.findIndex((item) => item.id === id);
     if (index === -1) return null;
-    const next = { ...list[index], ...input, id } as Question;
+    const next = {
+      ...list[index],
+      ...input,
+      ...(normalizedQuestionType === undefined ? {} : { questionType: normalizedQuestionType }),
+      id
+    } as Question;
     list[index] = next;
     await saveQuestions(list);
     return next;
@@ -222,7 +242,7 @@ export async function updateQuestion(id: string, input: Partial<Question>) {
       input.answer ?? null,
       input.explanation ?? null,
       input.difficulty ?? null,
-      input.questionType ?? null,
+      normalizedQuestionType ?? null,
       input.tags ?? null,
       input.abilities ?? null
     ]

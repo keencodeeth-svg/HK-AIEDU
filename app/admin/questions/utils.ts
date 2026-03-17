@@ -41,6 +41,21 @@ export function parseListText(input: string) {
     .filter(Boolean);
 }
 
+export function resolveAdminQuestionKnowledgePointId(
+  knowledgePoints: Array<{ id: string; subject: string; grade: string }>,
+  subject: string,
+  grade: string,
+  knowledgePointId: string
+) {
+  if (!knowledgePointId) {
+    return "";
+  }
+
+  return knowledgePoints.some((item) => item.id === knowledgePointId && item.subject === subject && item.grade === grade)
+    ? knowledgePointId
+    : "";
+}
+
 export function downloadQuestionTemplate() {
   const header = [
     "subject",

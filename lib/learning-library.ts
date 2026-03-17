@@ -98,33 +98,54 @@ const ITEM_FILE = "learning-library-items.json";
 const ANNOTATION_FILE = "learning-library-annotations.json";
 
 function normalizeContentType(value?: string | null): LibraryContentType {
-  if (value === "courseware" || value === "lesson_plan" || value === "textbook") {
-    return value;
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "courseware" || normalized === "lesson_plan" || normalized === "textbook") {
+    return normalized;
   }
   return "textbook";
 }
 
 function normalizeAccessScope(value?: string | null): LibraryAccessScope {
-  return value === "class" ? "class" : "global";
+  return value?.trim().toLowerCase() === "class" ? "class" : "global";
 }
 
 function normalizeSourceType(value?: string | null): LibrarySourceType {
-  if (value === "file" || value === "link" || value === "text") {
-    return value;
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "file" || normalized === "link" || normalized === "text") {
+    return normalized;
   }
   return "text";
 }
 
 function normalizeOwnerRole(value?: string | null): LibraryOwnerRole {
-  return value === "teacher" ? "teacher" : "admin";
+  return value?.trim().toLowerCase() === "teacher" ? "teacher" : "admin";
 }
 
 function normalizeStatus(value?: string | null): LibraryItemStatus {
-  return value === "draft" ? "draft" : "published";
+  return value?.trim().toLowerCase() === "draft" ? "draft" : "published";
+}
+
+function normalizeShareToken(value?: string | null) {
+  const normalized = value?.trim().toLowerCase();
+  return normalized ? normalized : undefined;
 }
 
 function uniqueStrings(values?: string[]) {
   return Array.from(new Set((values ?? []).map((item) => item.trim()).filter(Boolean)));
+}
+
+function normalizeLibraryItem(item: LearningLibraryItem): LearningLibraryItem {
+  return {
+    ...item,
+    contentType: normalizeContentType(item.contentType),
+    accessScope: normalizeAccessScope(item.accessScope),
+    sourceType: normalizeSourceType(item.sourceType),
+    ownerRole: normalizeOwnerRole(item.ownerRole),
+    status: normalizeStatus(item.status),
+    shareToken: normalizeShareToken(item.shareToken),
+    knowledgePointIds: uniqueStrings(item.knowledgePointIds),
+    extractedKnowledgePoints: uniqueStrings(item.extractedKnowledgePoints)
+  };
 }
 
 function mapDbItem(row: DbLibraryItem): LearningLibraryItem {
@@ -152,7 +173,7 @@ function mapDbItem(row: DbLibraryItem): LearningLibraryItem {
     extractedKnowledgePoints: uniqueStrings(row.extracted_knowledge_points ?? []),
     generatedByAi: Boolean(row.generated_by_ai),
     status: normalizeStatus(row.status),
-    shareToken: row.share_token ?? undefined,
+    shareToken: normalizeShareToken(row.share_token),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -279,8 +300,10 @@ export async function listLearningLibraryItems(filters: {
   status?: LibraryItemStatus;
   shareToken?: string;
 } = {}) {
+  const shareToken = normalizeShareToken(filters.shareToken);
+
   if (!isDbEnabled()) {
-    const list = readJson<LearningLibraryItem[]>(ITEM_FILE, []);
+    const list = readJson<LearningLibraryItem[]>(ITEM_FILE, []).map(normalizeLibraryItem);
     return list
       .filter((item) => (filters.subject ? item.subject === filters.subject : true))
       .filter((item) => (filters.grade ? item.grade === filters.grade : true))
@@ -289,7 +312,7 @@ export async function listLearningLibraryItems(filters: {
       .filter((item) => (filters.classId ? item.classId === filters.classId : true))
       .filter((item) => (filters.ownerId ? item.ownerId === filters.ownerId : true))
       .filter((item) => (filters.status ? item.status === filters.status : true))
-      .filter((item) => (filters.shareToken ? item.shareToken === filters.shareToken : true))
+      .filter((item) => (shareToken ? item.shareToken === shareToken : true))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
@@ -323,9 +346,9 @@ export async function listLearningLibraryItems(filters: {
     values.push(filters.status);
     where.push(`status = $${values.length}`);
   }
-  if (filters.shareToken) {
-    values.push(filters.shareToken);
-    where.push(`share_token = $${values.length}`);
+  if (shareToken) {
+    values.push(shareToken);
+    where.push(`lower(btrim(share_token)) = $${values.length}`);
   }
 
   const sql = `
@@ -340,7 +363,7 @@ export async function listLearningLibraryItems(filters: {
 
 export async function getLearningLibraryItemById(id: string) {
   if (!isDbEnabled()) {
-    const list = readJson<LearningLibraryItem[]>(ITEM_FILE, []);
+    const list = readJson<LearningLibraryItem[]>(ITEM_FILE, []).map(normalizeLibraryItem);
     return list.find((item) => item.id === id) ?? null;
   }
   const row = await queryOne<DbLibraryItem>("SELECT * FROM learning_library_items WHERE id = $1", [id]);
@@ -348,13 +371,16 @@ export async function getLearningLibraryItemById(id: string) {
 }
 
 export async function getLearningLibraryItemByShareToken(shareToken: string) {
+  const normalizedShareToken = normalizeShareToken(shareToken);
+  if (!normalizedShareToken) return null;
+
   if (!isDbEnabled()) {
-    const list = readJson<LearningLibraryItem[]>(ITEM_FILE, []);
-    return list.find((item) => item.shareToken === shareToken) ?? null;
+    const list = readJson<LearningLibraryItem[]>(ITEM_FILE, []).map(normalizeLibraryItem);
+    return list.find((item) => item.shareToken === normalizedShareToken && item.status === "published") ?? null;
   }
   const row = await queryOne<DbLibraryItem>(
-    "SELECT * FROM learning_library_items WHERE share_token = $1 AND status = 'published'",
-    [shareToken]
+    "SELECT * FROM learning_library_items WHERE lower(btrim(share_token)) = $1 AND lower(btrim(status)) = 'published'",
+    [normalizedShareToken]
   );
   return row ? mapDbItem(row) : null;
 }

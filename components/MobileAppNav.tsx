@@ -125,7 +125,7 @@ export default function MobileAppNav({
         />
         <aside className="mobile-nav-panel" role="dialog" aria-modal="true" aria-label="移动端导航菜单">
           <div className="mobile-nav-panel-head">
-            <div className="mobile-nav-title">功能导航</div>
+            <div className="mobile-nav-title">主线导航</div>
             <button type="button" className="mobile-nav-close" onClick={() => setMenuOpen(false)}>
               关闭
             </button>
@@ -139,7 +139,7 @@ export default function MobileAppNav({
               aria-label="搜索功能"
             />
             <div className="mobile-nav-search-meta">
-              已显示 {visibleLinkCount} / {mergedLinks.length} 个功能
+              已显示 {visibleLinkCount} / {mergedLinks.length} 个入口
             </div>
             <div className="mobile-nav-search-actions">
               <button type="button" className="button ghost" onClick={emitOpenCommandPalette}>
@@ -149,7 +149,7 @@ export default function MobileAppNav({
           </div>
           <div className="mobile-nav-sections">
             <section className="mobile-nav-section">
-              <div className="mobile-nav-section-head">核心功能（{visiblePrimaryLinks.length}）</div>
+              <div className="mobile-nav-section-head">主线功能（{visiblePrimaryLinks.length}）</div>
               <div className="mobile-nav-links">{visiblePrimaryLinks.map((item) => renderSheetLink(item))}</div>
             </section>
 

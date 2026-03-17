@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 export const GET = createAdminRoute({
   cache: "private-realtime",
+  role: [],
   runtimeGuardrails: "off",
   handler: async ({ request, meta }) => {
     await assertReadinessProbeAccess(request);

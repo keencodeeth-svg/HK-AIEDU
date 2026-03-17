@@ -138,3 +138,10 @@ export type AssignmentReviewPayload = {
   reviewRubrics?: AssignmentReviewRubric[];
   aiReview?: AssignmentAiReview;
 };
+
+export type AssignmentLessonLink = NonNullable<AssignmentDetail["lessonLink"]>;
+
+export type AssignmentStageCopy = {
+  title: string;
+  description: string;
+};

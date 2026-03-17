@@ -1,4 +1,4 @@
-import { createQuestion, getKnowledgePoints, getQuestions } from "@/lib/content";
+import { createQuestion, getKnowledgePoints, getQuestions, normalizeQuestionType } from "@/lib/content";
 import { requireRole } from "@/lib/guard";
 import { addAdminLog } from "@/lib/admin-log";
 import { assertAdminStepUp } from "@/lib/admin-step-up";
@@ -144,12 +144,17 @@ const SORT_SQL_BY: Record<QuestionSortBy, string> = {
   grade: "q.grade",
   chapter: "COALESCE(kp.chapter, '未分章节')",
   difficulty: "COALESCE(q.difficulty, 'medium')",
-  questionType: "COALESCE(q.question_type, 'choice')"
+  questionType: "COALESCE(NULLIF(LOWER(BTRIM(q.question_type)), ''), 'choice')"
 };
 
 function normalizeQueryString(value?: string) {
   const next = value?.trim();
   return next ? next : undefined;
+}
+
+function normalizeQuestionTypeFilter(value?: string) {
+  const next = value?.trim();
+  return next ? normalizeQuestionType(next) : undefined;
 }
 
 function toNumber(value: string | number | null | undefined) {
@@ -166,7 +171,7 @@ function normalizeFilters(query: ParsedListQuery): ListQuestionsFilters {
     chapter: normalizeQueryString(query.chapter),
     knowledgePointId: normalizeQueryString(query.knowledgePointId),
     difficulty: normalizeQueryString(query.difficulty),
-    questionType: normalizeQueryString(query.questionType),
+    questionType: normalizeQuestionTypeFilter(query.questionType),
     search: normalizeQueryString(query.search),
     pool: query.pool ?? "all",
     riskLevel: query.riskLevel ?? "all",
@@ -207,7 +212,7 @@ function mapDbQuestion(row: DbQuestionListRow): Question {
     answer: row.answer,
     explanation: row.explanation,
     difficulty,
-    questionType: row.question_type ?? undefined,
+    questionType: normalizeQuestionType(row.question_type),
     tags: row.tags ?? [],
     abilities: row.abilities ?? []
   };
@@ -317,7 +322,9 @@ function buildDbWhere(filters: ListQuestionsFilters) {
   if (filters.grade) where.push(`q.grade = ${addValue(filters.grade)}`);
   if (filters.knowledgePointId) where.push(`q.knowledge_point_id = ${addValue(filters.knowledgePointId)}`);
   if (filters.difficulty) where.push(`COALESCE(q.difficulty, 'medium') = ${addValue(filters.difficulty)}`);
-  if (filters.questionType) where.push(`COALESCE(q.question_type, 'choice') = ${addValue(filters.questionType)}`);
+  if (filters.questionType) {
+    where.push(`COALESCE(NULLIF(LOWER(BTRIM(q.question_type)), ''), 'choice') = ${addValue(filters.questionType)}`);
+  }
   if (filters.chapter) where.push(`COALESCE(kp.chapter, '未分章节') = ${addValue(filters.chapter)}`);
   if (filters.search) {
     const searchValue = addValue(`%${filters.search}%`);
@@ -395,7 +402,7 @@ async function listQuestionsFromDb(filters: ListQuestionsFilters) {
         q.answer,
         q.explanation,
         q.difficulty,
-        q.question_type,
+        COALESCE(NULLIF(LOWER(BTRIM(q.question_type)), ''), 'choice') AS question_type,
         q.tags,
         q.abilities
       ${fromSql}
@@ -435,7 +442,7 @@ async function listQuestionsFromDb(filters: ListQuestionsFilters) {
         values
       ),
       runDbQuery<DbFacetRow>(
-        `SELECT COALESCE(q.question_type, 'choice') AS value, COUNT(*)::int AS count ${fromSql} ${whereSql} GROUP BY COALESCE(q.question_type, 'choice') ORDER BY 2 DESC, 1 ASC`,
+        `SELECT COALESCE(NULLIF(LOWER(BTRIM(q.question_type)), ''), 'choice') AS value, COUNT(*)::int AS count ${fromSql} ${whereSql} GROUP BY COALESCE(NULLIF(LOWER(BTRIM(q.question_type)), ''), 'choice') ORDER BY 2 DESC, 1 ASC`,
         values
       ),
       runDbQuery<DbTreeRow>(

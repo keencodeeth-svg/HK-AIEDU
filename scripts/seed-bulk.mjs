@@ -4,7 +4,8 @@ import pg from "pg";
 
 const { Pool } = pg;
 
-const dataDir = path.join(process.cwd(), "data");
+const runtimeDir = path.resolve(process.cwd(), process.env.DATA_DIR ?? ".runtime-data");
+const seedDir = path.resolve(process.cwd(), process.env.DATA_SEED_DIR ?? "data");
 
 const TEACHER_COUNT = Number(process.env.SEED_TEACHERS ?? 2);
 const STUDENT_COUNT = Number(process.env.SEED_STUDENTS ?? 24);
@@ -27,14 +28,18 @@ const makeId = (prefix, index) => `${prefix}-${String(index).padStart(3, "0")}`;
 const BASE64_TEXT = Buffer.from("示例作业内容").toString("base64");
 
 const readJson = (file, fallback) => {
-  const filePath = path.join(dataDir, file);
-  if (!fs.existsSync(filePath)) return fallback;
-  return JSON.parse(fs.readFileSync(filePath, "utf-8"));
+  const runtimePath = path.join(runtimeDir, file);
+  if (fs.existsSync(runtimePath)) {
+    return JSON.parse(fs.readFileSync(runtimePath, "utf-8"));
+  }
+  const seedPath = path.join(seedDir, file);
+  if (!fs.existsSync(seedPath)) return fallback;
+  return JSON.parse(fs.readFileSync(seedPath, "utf-8"));
 };
 
 const writeJson = (file, data) => {
-  fs.mkdirSync(dataDir, { recursive: true });
-  fs.writeFileSync(path.join(dataDir, file), JSON.stringify(data, null, 2));
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  fs.writeFileSync(path.join(runtimeDir, file), JSON.stringify(data, null, 2));
 };
 
 const upsert = (list, matcher, item) => {
@@ -563,7 +568,7 @@ async function seedJson() {
   notifications.forEach((n) => upsert(notifyList, (item) => item.id === n.id, n));
   writeJson("notifications.json", notifyList);
 
-  console.log("批量测试数据（JSON 模式）已生成。");
+  console.log("批量测试数据（JSON/runtime 模式）已生成。");
   printSummary({ teachers, students, parents, classes });
 }
 

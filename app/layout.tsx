@@ -24,22 +24,27 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const roleNavConfig: Record<"student" | "teacher" | "parent" | "admin" | "school_admin", RoleNavConfig> = {
     student: {
       primary: [
-        { href: "/dashboard", label: "学习看板" },
-        { href: "/student", label: "学生端" },
-        { href: "/practice", label: "练习" },
-        { href: "/plan", label: "学习计划" },
+        { href: "/student", label: "学习控制台" },
+        { href: "/student/assignments", label: "作业中心" },
         { href: "/student/exams", label: "在线考试" },
-        { href: "/wrong-book", label: "错题本" },
-        { href: "/coach", label: "学习陪练" }
+        { href: "/wrong-book", label: "错题复练" },
+        { href: "/tutor", label: "AI 辅导" }
       ],
       groups: [
         {
-          title: "学习任务",
+          title: "学习节奏",
           links: [
-            { href: "/student/assignments", label: "作业中心" },
+            { href: "/dashboard", label: "学习总看板" },
+            { href: "/plan", label: "学习计划" },
+            { href: "/practice", label: "练习" },
+            { href: "/coach", label: "学习陪练" }
+          ]
+        },
+        {
+          title: "专项能力",
+          links: [
             { href: "/student/modules", label: "课程模块" },
             { href: "/diagnostic", label: "诊断测评" },
-            { href: "/tutor", label: "AI 辅导" },
             { href: "/reading", label: "朗读评分" },
             { href: "/writing", label: "写作批改" }
           ]
@@ -70,21 +75,25 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     },
     teacher: {
       primary: [
-        { href: "/dashboard", label: "教学看板" },
-        { href: "/teacher", label: "教师端" },
-        { href: "/teacher/exams", label: "在线考试" },
-        { href: "/teacher/modules", label: "课程模块" },
+        { href: "/teacher", label: "教师工作台" },
+        { href: "/teacher/analysis", label: "学情分析" },
         { href: "/teacher/gradebook", label: "成绩册" },
-        { href: "/teacher/seating", label: "学期排座" },
-        { href: "/teacher/analysis", label: "学情分析" }
+        { href: "/teacher/submissions", label: "提交箱" },
+        { href: "/teacher/exams", label: "在线考试" }
       ],
       groups: [
         {
+          title: "教学总览",
+          links: [
+            { href: "/dashboard", label: "教学总看板" },
+            { href: "/teacher/modules", label: "课程模块" },
+            { href: "/teacher/seating", label: "学期排座" }
+          ]
+        },
+        {
           title: "教学执行",
           links: [
-            { href: "/teacher/submissions", label: "提交箱" },
             { href: "/teacher/notifications", label: "通知规则" },
-            { href: "/teacher/seating", label: "学期排座" },
             { href: "/teacher/ai-tools", label: "教师 AI 工具" }
           ]
         },
@@ -109,12 +118,17 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     },
     parent: {
       primary: [
-        { href: "/dashboard", label: "家长看板" },
         { href: "/parent", label: "家长端" },
         { href: "/calendar", label: "课程表" },
         { href: "/notifications", label: "通知中心" }
       ],
       groups: [
+        {
+          title: "补充总览",
+          links: [
+            { href: "/dashboard", label: "家长总看板" }
+          ]
+        },
         {
           title: "家校协同",
           links: [

@@ -44,7 +44,7 @@ export const POST = createAdminRoute({
     assertAdminStepUp(user);
 
     const body = await parseJson(request, updateFlagBodySchema);
-    const key = body.key?.trim();
+    const key = body.key?.trim().toLowerCase();
     if (!key) {
       badRequest("missing key");
     }

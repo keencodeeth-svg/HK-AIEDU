@@ -26,6 +26,19 @@ type DbProfile = {
   updated_at: string;
 };
 
+function normalizeObserverCode(value: string | null | undefined) {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toUpperCase();
+  return normalized.length ? normalized : undefined;
+}
+
+function normalizeProfile(profile: StudentProfile): StudentProfile {
+  return {
+    ...profile,
+    observerCode: normalizeObserverCode(profile.observerCode)
+  };
+}
+
 function mapProfile(row: DbProfile): StudentProfile {
   return {
     id: row.id,
@@ -34,7 +47,7 @@ function mapProfile(row: DbProfile): StudentProfile {
     subjects: row.subjects,
     target: row.target ?? "",
     school: row.school ?? "",
-    observerCode: row.observer_code ?? undefined,
+    observerCode: normalizeObserverCode(row.observer_code),
     updatedAt: row.updated_at
   };
 }
@@ -44,11 +57,16 @@ function generateObserverCode() {
 }
 
 async function isObserverCodeAvailable(code: string, userId?: string) {
+  const normalizedCode = normalizeObserverCode(code);
+  if (!normalizedCode) return false;
+
   if (!isDbEnabled()) {
     const list = await getStudentProfiles();
-    return !list.some((item) => item.observerCode === code && item.userId !== userId);
+    return !list.some((item) => item.observerCode === normalizedCode && item.userId !== userId);
   }
-  const row = await queryOne<{ id: string }>("SELECT id FROM student_profiles WHERE observer_code = $1", [code]);
+  const row = await queryOne<{ id: string }>("SELECT id FROM student_profiles WHERE UPPER(observer_code) = $1", [
+    normalizedCode
+  ]);
   if (!row) return true;
   if (!userId) return false;
   const profile = await getStudentProfile(userId);
@@ -66,7 +84,7 @@ async function createUniqueObserverCode(userId?: string) {
 
 export async function getStudentProfiles(): Promise<StudentProfile[]> {
   if (!isDbEnabled()) {
-    return readJson<StudentProfile[]>(PROFILE_FILE, []);
+    return readJson<StudentProfile[]>(PROFILE_FILE, []).map(normalizeProfile);
   }
   const rows = await query<DbProfile>("SELECT * FROM student_profiles");
   return rows.map(mapProfile);
@@ -74,7 +92,7 @@ export async function getStudentProfiles(): Promise<StudentProfile[]> {
 
 export async function saveStudentProfiles(list: StudentProfile[]) {
   if (!isDbEnabled()) {
-    writeJson(PROFILE_FILE, list);
+    writeJson(PROFILE_FILE, list.map(normalizeProfile));
   }
 }
 
@@ -88,12 +106,16 @@ export async function getStudentProfile(userId: string) {
 }
 
 export async function getStudentProfileByObserverCode(code: string) {
-  if (!code) return null;
+  const normalizedCode = normalizeObserverCode(code);
+  if (!normalizedCode) return null;
+
   if (!isDbEnabled()) {
     const list = await getStudentProfiles();
-    return list.find((item) => item.observerCode === code) ?? null;
+    return list.find((item) => item.observerCode === normalizedCode) ?? null;
   }
-  const row = await queryOne<DbProfile>("SELECT * FROM student_profiles WHERE observer_code = $1", [code]);
+  const row = await queryOne<DbProfile>("SELECT * FROM student_profiles WHERE UPPER(observer_code) = $1", [
+    normalizedCode
+  ]);
   return row ? mapProfile(row) : null;
 }
 
@@ -140,29 +162,32 @@ export async function rotateObserverCode(userId: string) {
 
 export async function upsertStudentProfile(input: Omit<StudentProfile, "id" | "updatedAt">) {
   const updatedAt = new Date().toISOString();
+  const current = await getStudentProfile(input.userId);
+  const observerCode =
+    normalizeObserverCode(input.observerCode) ??
+    current?.observerCode ??
+    (await createUniqueObserverCode(input.userId));
 
   if (!isDbEnabled()) {
-    const observerCode = input.observerCode ?? (await createUniqueObserverCode(input.userId));
     return updateJson<StudentProfile[]>(PROFILE_FILE, [], (list) => {
       const existingIndex = list.findIndex((item) => item.userId === input.userId);
       if (existingIndex >= 0) {
-        const next = { ...list[existingIndex], ...input, updatedAt };
+        const next = normalizeProfile({ ...list[existingIndex], ...input, observerCode, updatedAt });
         list[existingIndex] = next;
         return list;
       }
-      const next: StudentProfile = {
+      const next = normalizeProfile({
         id: `sp-${crypto.randomBytes(6).toString("hex")}`,
         updatedAt,
         observerCode,
         ...input
-      };
+      });
       list.push(next);
       return list;
     }).then((list) => list.find((item) => item.userId === input.userId) ?? null);
   }
 
   const id = `sp-${crypto.randomBytes(6).toString("hex")}`;
-  const observerCode = input.observerCode ?? (await createUniqueObserverCode(input.userId));
   const row = await queryOne<DbProfile>(
     `INSERT INTO student_profiles (id, user_id, grade, subjects, target, school, observer_code, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -171,7 +196,7 @@ export async function upsertStudentProfile(input: Omit<StudentProfile, "id" | "u
        subjects = EXCLUDED.subjects,
        target = EXCLUDED.target,
        school = EXCLUDED.school,
-       observer_code = COALESCE(student_profiles.observer_code, EXCLUDED.observer_code),
+       observer_code = EXCLUDED.observer_code,
        updated_at = EXCLUDED.updated_at
      RETURNING *`,
     [id, input.userId, input.grade, input.subjects, input.target ?? "", input.school ?? "", observerCode, updatedAt]

@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
+import StatePanel from "@/components/StatePanel";
+import { isAuthError, requestJson } from "@/lib/client-request";
+import { getFocusSessionSaveRequestMessage, getFocusSummaryRequestMessage } from "./utils";
 
 type FocusSummary = {
   summary: {
@@ -17,46 +20,116 @@ type FocusSummary = {
 };
 
 export default function FocusPage() {
+  const loadRequestIdRef = useRef(0);
+  const hasSummarySnapshotRef = useRef(false);
   const [mode, setMode] = useState<"focus" | "break">("focus");
   const [duration, setDuration] = useState(25);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [running, setRunning] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [summary, setSummary] = useState<FocusSummary | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
   const startedAtRef = useRef<string | null>(null);
 
-  const loadSummary = useCallback(async () => {
-    const res = await fetch("/api/focus/summary");
-    const data = await res.json();
-    setSummary(data?.data ?? null);
+  const resetSessionState = useCallback(() => {
+    startedAtRef.current = null;
+    setRunning(false);
+    setSecondsLeft(0);
   }, []);
 
+  const clearSummaryState = useCallback(() => {
+    hasSummarySnapshotRef.current = false;
+    setSummary(null);
+  }, []);
+
+  const clearFocusPageState = useCallback(() => {
+    clearSummaryState();
+    resetSessionState();
+    setPageError(null);
+  }, [clearSummaryState, resetSessionState]);
+
+  const handleAuthRequired = useCallback(() => {
+    loadRequestIdRef.current += 1;
+    clearFocusPageState();
+    setAuthRequired(true);
+  }, [clearFocusPageState]);
+
+  const loadSummary = useCallback(async (options?: { preserveSnapshot?: boolean }) => {
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
+    setPageError(null);
+
+    try {
+      const payload = await requestJson<{ data?: FocusSummary }>("/api/focus/summary");
+      if (loadRequestIdRef.current !== requestId) {
+        return false;
+      }
+
+      hasSummarySnapshotRef.current = true;
+      setSummary(payload.data ?? null);
+      setAuthRequired(false);
+      return true;
+    } catch (error) {
+      if (loadRequestIdRef.current !== requestId) {
+        return false;
+      }
+      if (isAuthError(error)) {
+        handleAuthRequired();
+      } else {
+        if (!hasSummarySnapshotRef.current || options?.preserveSnapshot === false) {
+          clearSummaryState();
+        }
+        setAuthRequired(false);
+        setPageError(getFocusSummaryRequestMessage(error, "加载专注统计失败"));
+      }
+      return false;
+    }
+  }, [clearSummaryState, handleAuthRequired]);
+
   useEffect(() => {
-    loadSummary();
+    void loadSummary();
   }, [loadSummary]);
 
   const completeSession = useCallback(async () => {
-    await fetch("/api/focus/session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mode,
-        durationMinutes: duration,
-        startedAt: startedAtRef.current,
-        endedAt: new Date().toISOString()
-      })
-    });
-    startedAtRef.current = null;
-    loadSummary();
-  }, [duration, loadSummary, mode]);
+    setSaving(true);
+    setPageError(null);
+
+    try {
+      await requestJson("/api/focus/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode,
+          durationMinutes: duration,
+          startedAt: startedAtRef.current,
+          endedAt: new Date().toISOString()
+        })
+      });
+      resetSessionState();
+      await loadSummary({ preserveSnapshot: true });
+    } catch (error) {
+      if (isAuthError(error)) {
+        handleAuthRequired();
+      } else {
+        setPageError(getFocusSessionSaveRequestMessage(error, "记录专注时长失败"));
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [duration, handleAuthRequired, loadSummary, mode, resetSessionState]);
 
   useEffect(() => {
-    if (!running) return;
+    if (!running) {
+      return;
+    }
+
     const timer = setInterval(() => {
       setSecondsLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
           setRunning(false);
-          completeSession();
+          void completeSession();
           return 0;
         }
         return prev - 1;
@@ -66,18 +139,27 @@ export default function FocusPage() {
   }, [completeSession, running]);
 
   function startTimer() {
+    setPageError(null);
     setSecondsLeft(duration * 60);
     setRunning(true);
     startedAtRef.current = new Date().toISOString();
   }
 
   function stopTimer() {
-    setRunning(false);
-    setSecondsLeft(0);
-    startedAtRef.current = null;
+    resetSessionState();
   }
 
   const presets = mode === "focus" ? [15, 25, 40] : [5, 10, 15];
+
+  if (authRequired) {
+    return (
+      <StatePanel
+        title="请先登录学生账号"
+        description="登录后即可记录专注时长并查看专注统计。"
+        tone="info"
+      />
+    );
+  }
 
   return (
     <div className="grid" style={{ gap: 18 }}>
@@ -88,6 +170,20 @@ export default function FocusPage() {
         </div>
         <span className="chip">专注计时</span>
       </div>
+
+      {pageError ? (
+        <StatePanel
+          compact
+          tone="error"
+          title="本次操作失败"
+          description={pageError}
+          action={
+            <button className="button secondary" type="button" onClick={() => void loadSummary()} disabled={saving}>
+              重试统计加载
+            </button>
+          }
+        />
+      ) : null}
 
       <Card title="番茄钟" tag={mode === "focus" ? "专注" : "休息"}>
         <div className="feature-card">
@@ -103,8 +199,8 @@ export default function FocusPage() {
                 const next = event.target.value as "focus" | "break";
                 setMode(next);
                 setDuration(next === "focus" ? 25 : 5);
-                setSecondsLeft(0);
-                setRunning(false);
+                resetSessionState();
+                setPageError(null);
               }}
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             >
@@ -116,7 +212,11 @@ export default function FocusPage() {
             <div className="section-title">时长（分钟）</div>
             <select
               value={duration}
-              onChange={(event) => setDuration(Number(event.target.value))}
+              onChange={(event) => {
+                setDuration(Number(event.target.value));
+                resetSessionState();
+                setPageError(null);
+              }}
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             >
               {presets.map((item) => (
@@ -134,14 +234,14 @@ export default function FocusPage() {
           </div>
         </div>
         <div className="cta-row">
-          <button className="button primary" onClick={startTimer} disabled={running}>
+          <button className="button primary" onClick={startTimer} disabled={running || saving}>
             开始计时
           </button>
-          <button className="button secondary" onClick={stopTimer} disabled={!running}>
+          <button className="button secondary" onClick={stopTimer} disabled={!running || saving}>
             停止
           </button>
-          <button className="button secondary" onClick={completeSession} disabled={running}>
-            手动记录完成
+          <button className="button secondary" onClick={() => void completeSession()} disabled={running || saving}>
+            {saving ? "记录中..." : "手动记录完成"}
           </button>
         </div>
       </Card>

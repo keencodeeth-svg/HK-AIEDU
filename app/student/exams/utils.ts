@@ -1,3 +1,4 @@
+import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
 import type {
   StudentExamGroupedItems,
   StudentExamItem,
@@ -54,4 +55,34 @@ export function buildSelfAssessmentSummary(tasks: StudentSelfAssessmentTask[]): 
     mustDo: tasks.filter((item) => item.group === "must_do").length,
     highPriority: tasks.filter((item) => item.priority >= SELF_ASSESSMENT_HIGH_PRIORITY_THRESHOLD).length
   };
+}
+
+export function getStudentExamListRequestMessage(error: unknown, fallback: string) {
+  const status = getRequestStatus(error) ?? 0;
+  const requestMessage = getRequestErrorMessage(error, "").trim();
+  const lower = requestMessage.toLowerCase();
+
+  if (status === 401 || status === 403) {
+    return "学生登录状态已失效，请重新登录后继续查看在线考试。";
+  }
+  if (lower === "class not found" || (status === 404 && lower === "not found")) {
+    return "当前班级信息已失效，考试列表会在重新加入班级后恢复。";
+  }
+
+  return getRequestErrorMessage(error, fallback);
+}
+
+export function getStudentSelfAssessmentRequestMessage(error: unknown, fallback: string) {
+  const status = getRequestStatus(error) ?? 0;
+  const requestMessage = getRequestErrorMessage(error, "").trim();
+  const lower = requestMessage.toLowerCase();
+
+  if (status === 401 || status === 403) {
+    return "学生登录状态已失效，请重新登录后继续查看自主测评任务。";
+  }
+  if (lower === "class not found" || (status === 404 && lower === "not found")) {
+    return "当前班级信息已失效，自主测评任务会在重新加入班级后恢复。";
+  }
+
+  return getStudentExamListRequestMessage(error, fallback);
 }

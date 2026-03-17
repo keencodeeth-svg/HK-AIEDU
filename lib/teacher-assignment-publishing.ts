@@ -2,7 +2,13 @@ import { getParentsByStudentId } from "./auth";
 import { generateQuestionDraft, hasConfiguredLlmProvider } from "./ai";
 import { createAssignment, type Assignment } from "./assignments";
 import { getClassById, getClassStudentIds } from "./classes";
-import { createKnowledgePoint, createQuestion, getKnowledgePoints, getQuestions } from "./content";
+import {
+  createKnowledgePoint,
+  createQuestion,
+  getKnowledgePoints,
+  getQuestions,
+  normalizeQuestionType
+} from "./content";
 import { createNotification } from "./notifications";
 import type { Difficulty, KnowledgePoint } from "./types";
 import { getModuleById } from "./modules";
@@ -112,7 +118,7 @@ export async function publishTeacherAssignment(
 
   const dueDate = normalizeAssignmentDueDate(input.dueDate);
   const mode = input.mode === "ai" ? "ai" : "bank";
-  const questionType = input.questionType?.trim();
+  const questionType = input.questionType?.trim() ? normalizeQuestionType(input.questionType) : undefined;
   const difficulty = input.difficulty;
 
   let questionIds: string[] = [];
@@ -204,7 +210,7 @@ export async function publishTeacherAssignment(
       pool = pool.filter((item) => item.difficulty === difficulty);
     }
     if (questionType) {
-      pool = pool.filter((item) => (item.questionType ?? "choice") === questionType);
+      pool = pool.filter((item) => normalizeQuestionType(item.questionType) === questionType);
     }
 
     if (pool.length < questionCount) {

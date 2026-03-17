@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { createUser, getUserByEmail, getUserById, hashPassword } from "@/lib/auth";
+import { createUser, getUserByEmail, getUserById, hashPassword, normalizeAuthEmail } from "@/lib/auth";
 import { SUBJECT_OPTIONS } from "@/lib/constants";
 import { getStudentProfileByObserverCode, upsertStudentProfile } from "@/lib/profiles";
 import { validatePasswordPolicy } from "@/lib/password";
@@ -35,6 +35,11 @@ export const POST = createAuthRoute({
   cache: "private-realtime",
   handler: async ({ request, meta }) => {
     const body = await parseJson(request, registerBodySchema);
+    const email = normalizeAuthEmail(body.email);
+    const name = body.name.trim();
+    const grade = body.grade?.trim();
+    const schoolCode = body.schoolCode?.trim();
+    const observerCode = body.observerCode?.trim();
     const passwordValidation = validatePasswordPolicy(body.password);
     if (!passwordValidation.ok) {
       badRequest(passwordValidation.errors[0], {
@@ -43,20 +48,20 @@ export const POST = createAuthRoute({
       });
     }
 
-    const existing = await getUserByEmail(body.email);
+    const existing = await getUserByEmail(email);
     if (existing) {
       conflict("email exists");
     }
 
     if (body.role === "student") {
-      if (!body.grade) {
+      if (!grade) {
         badRequest("grade required");
       }
       const schoolId = await resolveSchoolIdByCodeOrDefault({
-        schoolCode: body.schoolCode,
+        schoolCode,
         fallbackToDefault: true
       });
-      if (body.schoolCode && !schoolId) {
+      if (schoolCode && !schoolId) {
         notFound("school code invalid");
       }
       const school = schoolId ? await getSchoolById(schoolId) : null;
@@ -64,17 +69,17 @@ export const POST = createAuthRoute({
       const id = `u-${crypto.randomBytes(6).toString("hex")}`;
       await createUser({
         id,
-        email: body.email,
-        name: body.name,
+        email,
+        name,
         role: "student",
-        grade: body.grade,
+        grade,
         schoolId: schoolId ?? undefined,
         password: hashPassword(body.password)
       });
 
       await upsertStudentProfile({
         userId: id,
-        grade: body.grade,
+        grade,
         subjects: SUBJECT_OPTIONS.map((item) => item.value),
         target: "",
         school: school?.name ?? ""
@@ -90,7 +95,6 @@ export const POST = createAuthRoute({
       );
     }
 
-    const observerCode = body.observerCode?.trim();
     if (!observerCode) {
       if (body.studentEmail?.trim()) {
         badRequest("studentEmail binding disabled, use observerCode from student profile");
@@ -111,8 +115,8 @@ export const POST = createAuthRoute({
     const id = `u-${crypto.randomBytes(6).toString("hex")}`;
     await createUser({
       id,
-      email: body.email,
-      name: body.name,
+      email,
+      name,
       role: "parent",
       schoolId: student.schoolId,
       studentId: student.id,

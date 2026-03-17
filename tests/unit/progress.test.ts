@@ -44,8 +44,9 @@ function loadProgressModule(stubs: Record<string, Record<string, unknown>> = {})
     getQuestions: async () => []
   });
   Object.assign(db, {
-    isDbEnabled: () => false,
+    isDbEnabled: () => true,
     assertDatabaseEnabled: () => {},
+    requireDatabaseEnabled: () => {},
     query: async () => [],
     queryOne: async () => null
   });

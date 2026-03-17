@@ -62,6 +62,22 @@ function normalizeInteger(value, fallback = null) {
   return Math.round(parsed);
 }
 
+function clampInteger(value, min, max, fallback = min) {
+  const normalized = normalizeInteger(value, fallback);
+  if (normalized === null) return fallback;
+  return Math.max(min, Math.min(max, normalized));
+}
+
+function normalizeBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") return true;
+    if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") return false;
+  }
+  return fallback;
+}
+
 function normalizeStringRecord(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
@@ -88,8 +104,45 @@ function normalizeNullableForeignKey(id, knownIds) {
   return knownIds.has(normalized) ? normalized : null;
 }
 
+function normalizeJsonValue(value) {
+  if (value === undefined) return null;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
+
 function summarizeResult(result) {
   return `${result.label}: imported=${result.imported}, skipped=${result.skipped}, source=${result.sourcePath ?? "missing"}`;
+}
+
+function normalizeReviewTaskSourceType(value) {
+  return normalizeString(value, 32) === "memory" ? "memory" : "wrong";
+}
+
+function normalizeReviewTaskStatus(value) {
+  return normalizeString(value, 32) === "completed" ? "completed" : "active";
+}
+
+function normalizeReviewTaskResult(value) {
+  const normalized = normalizeString(value, 32);
+  if (normalized === "correct" || normalized === "wrong") return normalized;
+  return null;
+}
+
+function normalizeReviewOriginType(value) {
+  const normalized = normalizeString(value, 32);
+  if (
+    normalized === "practice" ||
+    normalized === "diagnostic" ||
+    normalized === "assignment" ||
+    normalized === "exam" ||
+    normalized === "wrong_book_review"
+  ) {
+    return normalized;
+  }
+  return null;
 }
 
 async function loadIdSet(client, tableName) {
@@ -367,6 +420,143 @@ async function migrateAssignmentSubmissions(client, references) {
   return { label: fileName, sourcePath, imported, skipped };
 }
 
+async function migrateQuestionAttempts(client, references) {
+  const fileName = "question-attempts.json";
+  const { sourcePath, records } = readStateFile(fileName);
+  let imported = 0;
+  let skipped = 0;
+
+  for (const record of records) {
+    const id = normalizeString(record.id, 128);
+    const userId = normalizeString(record.userId, 128);
+    const questionId = normalizeString(record.questionId, 128);
+    const subject = normalizeString(record.subject, 32);
+    const knowledgePointId = normalizeString(record.knowledgePointId, 128);
+    const correct = normalizeBoolean(record.correct, false);
+    const answer = normalizeString(record.answer, 2000);
+    const reason = normalizeString(record.reason, 512);
+    const createdAt = normalizeIso(record.createdAt);
+
+    if (
+      !id ||
+      !userId ||
+      !questionId ||
+      !subject ||
+      !knowledgePointId ||
+      !answer ||
+      !createdAt ||
+      !references.users.has(userId) ||
+      !references.questions.has(questionId)
+    ) {
+      skipped += 1;
+      continue;
+    }
+
+    await client.query(
+      `INSERT INTO question_attempts
+        (id, user_id, question_id, subject, knowledge_point_id, correct, answer, reason, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (id) DO UPDATE SET
+         user_id = EXCLUDED.user_id,
+         question_id = EXCLUDED.question_id,
+         subject = EXCLUDED.subject,
+         knowledge_point_id = EXCLUDED.knowledge_point_id,
+         correct = EXCLUDED.correct,
+         answer = EXCLUDED.answer,
+         reason = EXCLUDED.reason,
+         created_at = EXCLUDED.created_at`,
+      [id, userId, questionId, subject, knowledgePointId, correct, answer, reason, createdAt]
+    );
+    imported += 1;
+  }
+
+  return { label: fileName, sourcePath, imported, skipped };
+}
+
+async function migrateStudyPlans(client, references) {
+  const fileName = "study-plans.json";
+  const { sourcePath, records } = readStateFile(fileName);
+  let imported = 0;
+  let skipped = 0;
+  const latestPlans = new Map();
+
+  for (const record of records) {
+    const userId = normalizeString(record.userId, 128);
+    const subject = normalizeString(record.subject, 32);
+    const createdAt = normalizeIso(record.createdAt);
+    const rawItems = Array.isArray(record.items) ? record.items : [];
+
+    if (!userId || !subject || !createdAt || !references.users.has(userId) || !rawItems.length) {
+      skipped += 1;
+      continue;
+    }
+
+    const items = rawItems
+      .map((item, index) => {
+        const knowledgePointId = normalizeString(item?.knowledgePointId, 128);
+        const targetCount = clampInteger(item?.targetCount, 1, 20, 5);
+        const dueDate = normalizeIso(item?.dueDate, createdAt);
+        if (!knowledgePointId || !dueDate) {
+          return null;
+        }
+        return {
+          id: normalizeString(item?.id, 128) ?? `plan-item-${userId}-${subject}-${index + 1}`,
+          knowledgePointId,
+          targetCount,
+          dueDate
+        };
+      })
+      .filter(Boolean);
+
+    if (!items.length) {
+      skipped += 1;
+      continue;
+    }
+
+    const key = `${userId}::${subject}`;
+    const existing = latestPlans.get(key);
+    if (!existing || new Date(existing.createdAt).getTime() <= new Date(createdAt).getTime()) {
+      latestPlans.set(key, {
+        id: normalizeString(record.id, 128) ?? `plan-${userId}-${subject}`,
+        userId,
+        subject,
+        createdAt,
+        items
+      });
+    }
+  }
+
+  for (const plan of latestPlans.values()) {
+    await client.query(
+      "DELETE FROM study_plan_items WHERE plan_id IN (SELECT id FROM study_plans WHERE user_id = $1 AND subject = $2)",
+      [plan.userId, plan.subject]
+    );
+    await client.query("DELETE FROM study_plans WHERE user_id = $1 AND subject = $2", [plan.userId, plan.subject]);
+    await client.query(
+      `INSERT INTO study_plans (id, user_id, subject, created_at)
+       VALUES ($1, $2, $3, $4)`,
+      [plan.id, plan.userId, plan.subject, plan.createdAt]
+    );
+
+    for (const item of plan.items) {
+      await client.query(
+        `INSERT INTO study_plan_items (id, plan_id, knowledge_point_id, target_count, due_date)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (id) DO UPDATE SET
+           plan_id = EXCLUDED.plan_id,
+           knowledge_point_id = EXCLUDED.knowledge_point_id,
+           target_count = EXCLUDED.target_count,
+           due_date = EXCLUDED.due_date`,
+        [item.id, plan.id, item.knowledgePointId, item.targetCount, item.dueDate]
+      );
+    }
+
+    imported += 1;
+  }
+
+  return { label: fileName, sourcePath, imported, skipped };
+}
+
 async function migrateExamAssignments(client, references) {
   const fileName = "exam-assignments.json";
   const { sourcePath, records } = readStateFile(fileName);
@@ -478,6 +668,346 @@ async function migrateExamSubmissions(client, references) {
   return { label: fileName, sourcePath, imported, skipped };
 }
 
+async function migrateMasteryRecords(client, references) {
+  const fileName = "mastery-records.json";
+  const { sourcePath, records } = readStateFile(fileName);
+  let imported = 0;
+  let skipped = 0;
+
+  for (const record of records) {
+    const id = normalizeString(record.id, 128);
+    const userId = normalizeString(record.userId, 128);
+    const subject = normalizeString(record.subject, 32);
+    const knowledgePointId = normalizeString(record.knowledgePointId, 128);
+    const correctCount = Math.max(0, normalizeInteger(record.correct, 0) ?? 0);
+    const totalCount = Math.max(correctCount, normalizeInteger(record.total, 0) ?? 0);
+    const masteryScore = clampInteger(record.masteryScore, 0, 100, 0);
+    const confidenceScore = clampInteger(record.confidenceScore, 0, 100, 0);
+    const recencyWeight = clampInteger(record.recencyWeight, 0, 100, 0);
+    const masteryTrend7d = clampInteger(record.masteryTrend7d, -100, 100, 0);
+    const lastAttemptAt = normalizeIso(record.lastAttemptAt, null);
+    const updatedAt = normalizeIso(record.updatedAt, lastAttemptAt ?? new Date().toISOString());
+
+    if (!id || !userId || !subject || !knowledgePointId || !updatedAt || !references.users.has(userId)) {
+      skipped += 1;
+      continue;
+    }
+
+    await client.query(
+      `INSERT INTO mastery_records
+        (id, user_id, subject, knowledge_point_id, correct_count, total_count, mastery_score, confidence_score, recency_weight, mastery_trend_7d, last_attempt_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       ON CONFLICT (user_id, knowledge_point_id) DO UPDATE SET
+         id = EXCLUDED.id,
+         subject = EXCLUDED.subject,
+         correct_count = EXCLUDED.correct_count,
+         total_count = EXCLUDED.total_count,
+         mastery_score = EXCLUDED.mastery_score,
+         confidence_score = EXCLUDED.confidence_score,
+         recency_weight = EXCLUDED.recency_weight,
+         mastery_trend_7d = EXCLUDED.mastery_trend_7d,
+         last_attempt_at = EXCLUDED.last_attempt_at,
+         updated_at = EXCLUDED.updated_at`,
+      [
+        id,
+        userId,
+        subject,
+        knowledgePointId,
+        correctCount,
+        totalCount,
+        masteryScore,
+        confidenceScore,
+        recencyWeight,
+        masteryTrend7d,
+        lastAttemptAt,
+        updatedAt
+      ]
+    );
+    imported += 1;
+  }
+
+  return { label: fileName, sourcePath, imported, skipped };
+}
+
+async function migrateCorrectionTasks(client, references) {
+  const fileName = "correction-tasks.json";
+  const { sourcePath, records } = readStateFile(fileName);
+  let imported = 0;
+  let skipped = 0;
+
+  for (const record of records) {
+    const id = normalizeString(record.id, 128);
+    const userId = normalizeString(record.userId, 128);
+    const questionId = normalizeString(record.questionId, 128);
+    const subject = normalizeString(record.subject, 32);
+    const knowledgePointId = normalizeString(record.knowledgePointId, 128);
+    const status = normalizeString(record.status, 32) === "completed" ? "completed" : "pending";
+    const dueDate = normalizeIso(record.dueDate);
+    const createdAt = normalizeIso(record.createdAt, dueDate);
+    const completedAt = normalizeIso(record.completedAt, null);
+
+    if (
+      !id ||
+      !userId ||
+      !questionId ||
+      !subject ||
+      !knowledgePointId ||
+      !dueDate ||
+      !createdAt ||
+      !references.users.has(userId) ||
+      !references.questions.has(questionId)
+    ) {
+      skipped += 1;
+      continue;
+    }
+
+    await client.query(
+      `INSERT INTO correction_tasks
+        (id, user_id, question_id, subject, knowledge_point_id, status, due_date, created_at, completed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (id) DO UPDATE SET
+         user_id = EXCLUDED.user_id,
+         question_id = EXCLUDED.question_id,
+         subject = EXCLUDED.subject,
+         knowledge_point_id = EXCLUDED.knowledge_point_id,
+         status = EXCLUDED.status,
+         due_date = EXCLUDED.due_date,
+         created_at = EXCLUDED.created_at,
+         completed_at = EXCLUDED.completed_at`,
+      [id, userId, questionId, subject, knowledgePointId, status, dueDate, createdAt, completedAt]
+    );
+    imported += 1;
+  }
+
+  return { label: fileName, sourcePath, imported, skipped };
+}
+
+async function migrateWrongReviewItems(client, references) {
+  const fileName = "wrong-review-items.json";
+  const { sourcePath, records } = readStateFile(fileName);
+  let imported = 0;
+  let skipped = 0;
+
+  for (const record of records) {
+    const id = normalizeString(record.id, 128);
+    const userId = normalizeString(record.userId, 128);
+    const questionId = normalizeString(record.questionId, 128);
+    const subject = normalizeString(record.subject, 32);
+    const knowledgePointId = normalizeString(record.knowledgePointId, 128);
+    const intervalLevel = clampInteger(record.intervalLevel, 1, 3, 1);
+    const nextReviewAt = normalizeIso(record.nextReviewAt, null);
+    const lastReviewResult = normalizeReviewTaskResult(record.lastReviewResult);
+    const lastReviewAt = normalizeIso(record.lastReviewAt, null);
+    const reviewCount = Math.max(0, normalizeInteger(record.reviewCount, 0) ?? 0);
+    const status = normalizeReviewTaskStatus(record.status);
+    const firstWrongAt = normalizeIso(record.firstWrongAt, null);
+    const createdAt = normalizeIso(record.createdAt, firstWrongAt);
+    const updatedAt = normalizeIso(record.updatedAt, lastReviewAt ?? createdAt);
+    const sourceType = normalizeReviewOriginType(record.sourceType) ?? "practice";
+    const sourcePaperId = normalizeString(record.sourcePaperId, 128);
+    const sourceSubmittedAt = normalizeIso(record.sourceSubmittedAt, null);
+
+    if (
+      !id ||
+      !userId ||
+      !questionId ||
+      !subject ||
+      !knowledgePointId ||
+      !firstWrongAt ||
+      !createdAt ||
+      !updatedAt ||
+      !references.users.has(userId) ||
+      !references.questions.has(questionId)
+    ) {
+      skipped += 1;
+      continue;
+    }
+
+    await client.query(
+      `INSERT INTO wrong_review_items
+        (id, user_id, question_id, subject, knowledge_point_id, interval_level, next_review_at, last_review_result, last_review_at, review_count, status, first_wrong_at, created_at, updated_at, source_type, source_paper_id, source_submitted_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+       ON CONFLICT (user_id, question_id) DO UPDATE SET
+         id = EXCLUDED.id,
+         subject = EXCLUDED.subject,
+         knowledge_point_id = EXCLUDED.knowledge_point_id,
+         interval_level = EXCLUDED.interval_level,
+         next_review_at = EXCLUDED.next_review_at,
+         last_review_result = EXCLUDED.last_review_result,
+         last_review_at = EXCLUDED.last_review_at,
+         review_count = EXCLUDED.review_count,
+         status = EXCLUDED.status,
+         first_wrong_at = EXCLUDED.first_wrong_at,
+         created_at = EXCLUDED.created_at,
+         updated_at = EXCLUDED.updated_at,
+         source_type = EXCLUDED.source_type,
+         source_paper_id = EXCLUDED.source_paper_id,
+         source_submitted_at = EXCLUDED.source_submitted_at`,
+      [
+        id,
+        userId,
+        questionId,
+        subject,
+        knowledgePointId,
+        intervalLevel,
+        nextReviewAt,
+        lastReviewResult,
+        lastReviewAt,
+        reviewCount,
+        status,
+        firstWrongAt,
+        createdAt,
+        updatedAt,
+        sourceType,
+        sourcePaperId,
+        sourceSubmittedAt
+      ]
+    );
+    imported += 1;
+  }
+
+  return { label: fileName, sourcePath, imported, skipped };
+}
+
+async function migrateReviewTasks(client, references) {
+  const fileName = "review-tasks.json";
+  const { sourcePath, records } = readStateFile(fileName);
+  let imported = 0;
+  let skipped = 0;
+
+  for (const record of records) {
+    const id = normalizeString(record.id, 128);
+    const userId = normalizeString(record.userId, 128);
+    const questionId = normalizeString(record.questionId, 128);
+    const sourceType = normalizeReviewTaskSourceType(record.sourceType);
+    const subject = normalizeString(record.subject, 32);
+    const knowledgePointId = normalizeString(record.knowledgePointId, 128);
+    const status = normalizeReviewTaskStatus(record.status);
+    const intervalLevel = Math.max(0, normalizeInteger(record.intervalLevel, 0) ?? 0);
+    const dueAt = normalizeIso(record.nextReviewAt, normalizeIso(record.completedAt, normalizeIso(record.lastReviewAt, null)));
+    const completedAt = normalizeIso(record.completedAt, status === "completed" ? dueAt : null);
+    const lastReviewResult = normalizeReviewTaskResult(record.lastReviewResult);
+    const lastReviewAt = normalizeIso(record.lastReviewAt, null);
+    const reviewCount = Math.max(0, normalizeInteger(record.reviewCount, 0) ?? 0);
+    const originType = normalizeReviewOriginType(record.originType);
+    const originPaperId = normalizeString(record.originPaperId, 128);
+    const originSubmittedAt = normalizeIso(record.originSubmittedAt, null);
+    const payload = normalizeJsonValue(record.payload);
+    const createdAt = normalizeIso(record.createdAt, dueAt ?? lastReviewAt);
+    const updatedAt = normalizeIso(record.updatedAt, completedAt ?? lastReviewAt ?? createdAt);
+
+    if (
+      !id ||
+      !userId ||
+      !questionId ||
+      !dueAt ||
+      !createdAt ||
+      !updatedAt ||
+      !references.users.has(userId) ||
+      !references.questions.has(questionId)
+    ) {
+      skipped += 1;
+      continue;
+    }
+
+    await client.query(
+      `INSERT INTO review_tasks
+        (id, user_id, question_id, source_type, subject, knowledge_point_id, status, interval_level, due_at, completed_at, last_review_result, last_review_at, review_count, origin_type, origin_paper_id, origin_submitted_at, payload, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18, $19)
+       ON CONFLICT (user_id, question_id, source_type) DO UPDATE SET
+         id = EXCLUDED.id,
+         subject = EXCLUDED.subject,
+         knowledge_point_id = EXCLUDED.knowledge_point_id,
+         status = EXCLUDED.status,
+         interval_level = EXCLUDED.interval_level,
+         due_at = EXCLUDED.due_at,
+         completed_at = EXCLUDED.completed_at,
+         last_review_result = EXCLUDED.last_review_result,
+         last_review_at = EXCLUDED.last_review_at,
+         review_count = EXCLUDED.review_count,
+         origin_type = EXCLUDED.origin_type,
+         origin_paper_id = EXCLUDED.origin_paper_id,
+         origin_submitted_at = EXCLUDED.origin_submitted_at,
+         payload = EXCLUDED.payload,
+         created_at = EXCLUDED.created_at,
+         updated_at = EXCLUDED.updated_at`,
+      [
+        id,
+        userId,
+        questionId,
+        sourceType,
+        subject,
+        knowledgePointId,
+        status,
+        intervalLevel,
+        dueAt,
+        completedAt,
+        lastReviewResult,
+        lastReviewAt,
+        reviewCount,
+        originType,
+        originPaperId,
+        originSubmittedAt,
+        JSON.stringify(payload),
+        createdAt,
+        updatedAt
+      ]
+    );
+    imported += 1;
+  }
+
+  return { label: fileName, sourcePath, imported, skipped };
+}
+
+async function migrateMemoryReviews(client, references) {
+  const fileName = "memory-reviews.json";
+  const { sourcePath, records } = readStateFile(fileName);
+  let imported = 0;
+  let skipped = 0;
+
+  for (const record of records) {
+    const id = normalizeString(record.id, 128);
+    const userId = normalizeString(record.userId, 128);
+    const questionId = normalizeString(record.questionId, 128);
+    const stage = clampInteger(record.stage, 0, 4, 0);
+    const nextReviewAt = normalizeIso(record.nextReviewAt);
+    const lastReviewedAt = normalizeIso(record.lastReviewedAt, null);
+    const createdAt = normalizeIso(record.createdAt, lastReviewedAt ?? nextReviewAt);
+    const updatedAt = normalizeIso(record.updatedAt, lastReviewedAt ?? createdAt);
+
+    if (
+      !id ||
+      !userId ||
+      !questionId ||
+      !nextReviewAt ||
+      !createdAt ||
+      !updatedAt ||
+      !references.users.has(userId) ||
+      !references.questions.has(questionId)
+    ) {
+      skipped += 1;
+      continue;
+    }
+
+    await client.query(
+      `INSERT INTO memory_reviews
+        (id, user_id, question_id, stage, next_review_at, last_reviewed_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (user_id, question_id) DO UPDATE SET
+         id = EXCLUDED.id,
+         stage = EXCLUDED.stage,
+         next_review_at = EXCLUDED.next_review_at,
+         last_reviewed_at = EXCLUDED.last_reviewed_at,
+         created_at = EXCLUDED.created_at,
+         updated_at = EXCLUDED.updated_at`,
+      [id, userId, questionId, stage, nextReviewAt, lastReviewedAt, createdAt, updatedAt]
+    );
+    imported += 1;
+  }
+
+  return { label: fileName, sourcePath, imported, skipped };
+}
+
 async function migrateNotifications(client, references) {
   const fileName = "notifications.json";
   const { sourcePath, records } = readStateFile(fileName);
@@ -509,6 +1039,80 @@ async function migrateNotifications(client, references) {
          created_at = EXCLUDED.created_at,
          read_at = EXCLUDED.read_at`,
       [id, userId, title, content, type, createdAt, readAt]
+    );
+    imported += 1;
+  }
+
+  return { label: fileName, sourcePath, imported, skipped };
+}
+
+async function migrateAnalyticsEvents(client, references) {
+  const fileName = "analytics-events.json";
+  const { sourcePath, records } = readStateFile(fileName);
+  let imported = 0;
+  let skipped = 0;
+
+  for (const record of records) {
+    const id = normalizeString(record.id, 128);
+    const eventName = normalizeString(record.eventName, 80);
+    const eventTime = normalizeIso(record.eventTime);
+    const receivedAt = normalizeIso(record.receivedAt, eventTime);
+    const userId = normalizeNullableForeignKey(record.userId, references.users);
+    const role = normalizeString(record.role, 32);
+    const subject = normalizeString(record.subject, 32);
+    const grade = normalizeString(record.grade, 16);
+    const page = normalizeString(record.page, 256);
+    const sessionId = normalizeString(record.sessionId, 128);
+    const traceId = normalizeString(record.traceId, 128);
+    const entityId = normalizeString(record.entityId, 128);
+    const props = normalizeJsonValue(record.props);
+    const propsTruncated = normalizeBoolean(record.propsTruncated, false);
+    const userAgent = normalizeString(record.userAgent, 512);
+    const ip = normalizeString(record.ip, 128);
+
+    if (!id || !eventName || !eventTime || !receivedAt) {
+      skipped += 1;
+      continue;
+    }
+
+    await client.query(
+      `INSERT INTO analytics_events
+        (id, event_name, event_time, received_at, user_id, role, subject, grade, page, session_id, trace_id, entity_id, props, props_truncated, user_agent, ip)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16)
+       ON CONFLICT (id) DO UPDATE SET
+         event_name = EXCLUDED.event_name,
+         event_time = EXCLUDED.event_time,
+         received_at = EXCLUDED.received_at,
+         user_id = EXCLUDED.user_id,
+         role = EXCLUDED.role,
+         subject = EXCLUDED.subject,
+         grade = EXCLUDED.grade,
+         page = EXCLUDED.page,
+         session_id = EXCLUDED.session_id,
+         trace_id = EXCLUDED.trace_id,
+         entity_id = EXCLUDED.entity_id,
+         props = EXCLUDED.props,
+         props_truncated = EXCLUDED.props_truncated,
+         user_agent = EXCLUDED.user_agent,
+         ip = EXCLUDED.ip`,
+      [
+        id,
+        eventName,
+        eventTime,
+        receivedAt,
+        userId,
+        role,
+        subject,
+        grade,
+        page,
+        sessionId,
+        traceId,
+        entityId,
+        JSON.stringify(props),
+        propsTruncated,
+        userAgent,
+        ip
+      ]
     );
     imported += 1;
   }
@@ -633,7 +1237,8 @@ try {
   const references = {
     users: await loadIdSet(client, "users"),
     assignments: await loadIdSet(client, "assignments"),
-    examPapers: await loadIdSet(client, "exam_papers")
+    examPapers: await loadIdSet(client, "exam_papers"),
+    questions: await loadIdSet(client, "questions")
   };
 
   await client.query("BEGIN");
@@ -646,10 +1251,18 @@ try {
   results.push(await migrateAdminLogs(client, references));
   results.push(await migrateAssignmentProgress(client, references));
   results.push(await migrateAssignmentSubmissions(client, references));
+  results.push(await migrateQuestionAttempts(client, references));
+  results.push(await migrateStudyPlans(client, references));
   results.push(await migrateExamAssignments(client, references));
   results.push(await migrateExamAnswers(client, references));
   results.push(await migrateExamSubmissions(client, references));
+  results.push(await migrateMasteryRecords(client, references));
+  results.push(await migrateCorrectionTasks(client, references));
+  results.push(await migrateWrongReviewItems(client, references));
+  results.push(await migrateReviewTasks(client, references));
+  results.push(await migrateMemoryReviews(client, references));
   results.push(await migrateNotifications(client, references));
+  results.push(await migrateAnalyticsEvents(client, references));
   results.push(await migrateParentActionReceipts(client, references));
   results.push(await migrateFocusSessions(client, references));
 

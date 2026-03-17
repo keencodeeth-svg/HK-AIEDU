@@ -20,7 +20,7 @@ const TASK_TYPES = new Set(listAiTaskOptions().map((item) => item.taskType));
 
 function asTaskType(value: string | undefined): AiTaskType | null {
   if (!value) return null;
-  const token = value.trim();
+  const token = value.trim().toLowerCase();
   if (!token || !TASK_TYPES.has(token as AiTaskType)) {
     return null;
   }

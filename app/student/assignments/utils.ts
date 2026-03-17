@@ -1,3 +1,4 @@
+import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
 import { SUBJECT_LABELS } from "@/lib/constants";
 import type {
   StudentAssignmentItem,
@@ -126,4 +127,34 @@ export function getStudentAssignmentUrgencyLabel(item: StudentAssignmentItem, no
   if (diff <= DAY_MS) return "今日截止";
   if (diff <= 2 * DAY_MS) return "2 天内截止";
   return null;
+}
+
+export function getStudentAssignmentsRequestMessage(error: unknown, fallback: string) {
+  const status = getRequestStatus(error) ?? 0;
+  const requestMessage = getRequestErrorMessage(error, "").trim();
+  const lower = requestMessage.toLowerCase();
+
+  if (status === 401 || status === 403) {
+    return "学生登录状态已失效，请重新登录后继续查看作业中心。";
+  }
+  if (lower === "class not found" || (status === 404 && lower === "not found")) {
+    return "当前班级信息已失效，作业列表会在重新加入班级后恢复。";
+  }
+
+  return getRequestErrorMessage(error, fallback);
+}
+
+export function isMissingStudentAssignmentsClassError(error: unknown) {
+  const status = getRequestStatus(error) ?? 0;
+  const lower = getRequestErrorMessage(error, "").trim().toLowerCase();
+  return lower === "class not found" || (status === 404 && lower === "not found");
+}
+
+export function resolveStudentAssignmentsSubjectFilter(assignments: StudentAssignmentItem[], subjectFilter: string) {
+  if (subjectFilter === "all") {
+    return "all";
+  }
+
+  const subjects = new Set(assignments.map((item) => item.classSubject));
+  return subjects.has(subjectFilter) ? subjectFilter : "all";
 }

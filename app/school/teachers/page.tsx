@@ -5,8 +5,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@/components/Card";
 import StatePanel from "@/components/StatePanel";
 import Stat from "@/components/Stat";
-import { formatLoadedTime, getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
+import { formatLoadedTime, requestJson } from "@/lib/client-request";
 import type { SchoolClassRecord, SchoolUserRecord } from "@/lib/school-admin-types";
+import { getSchoolAdminRequestMessage, isSchoolAdminAuthRequiredError } from "../utils";
 
 type SchoolUsersResponse = { data?: SchoolUserRecord[] };
 type SchoolClassesResponse = { data?: SchoolClassRecord[] };
@@ -50,12 +51,12 @@ export default function SchoolTeachersPage() {
       setAuthRequired(false);
       setLastLoadedAt(new Date().toISOString());
     } catch (nextError) {
-      if (isAuthError(nextError)) {
+      if (isSchoolAdminAuthRequiredError(nextError)) {
         setAuthRequired(true);
         setTeachers([]);
         setClasses([]);
       } else {
-        setError(getRequestErrorMessage(nextError, "加载教师管理失败"));
+        setError(getSchoolAdminRequestMessage(nextError, "加载教师管理失败"));
       }
     } finally {
       setLoading(false);

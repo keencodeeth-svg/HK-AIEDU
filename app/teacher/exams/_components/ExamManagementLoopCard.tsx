@@ -5,39 +5,7 @@ import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
 import { SUBJECT_LABELS, getGradeLabel } from "@/lib/constants";
 import type { TeacherExamItem } from "../types";
-
-type ExamManagementLoopCardProps = {
-  exams: TeacherExamItem[];
-  now: number;
-};
-
-function getSubmissionRate(exam: TeacherExamItem) {
-  if (!exam.assignedCount) return 0;
-  return Math.round((exam.submittedCount / exam.assignedCount) * 100);
-}
-
-function getDueRelativeLabel(endAt: string, now: number) {
-  const diffMs = new Date(endAt).getTime() - now;
-  const diffHours = Math.ceil(diffMs / (60 * 60 * 1000));
-  if (diffHours < 0) return `已结束 ${Math.abs(diffHours)} 小时`;
-  if (diffHours <= 1) return "1 小时内结束";
-  if (diffHours < 24) return `${diffHours} 小时后结束`;
-  return `${Math.ceil(diffHours / 24)} 天后结束`;
-}
-
-function getAttentionScore(exam: TeacherExamItem, now: number) {
-  if (exam.status !== "published") {
-    return -new Date(exam.createdAt).getTime();
-  }
-
-  const pendingCount = Math.max(0, exam.assignedCount - exam.submittedCount);
-  const submissionRate = getSubmissionRate(exam);
-  const endAtTs = new Date(exam.endAt).getTime();
-  const hoursUntilEnd = Math.max(0, Math.ceil((endAtTs - now) / (60 * 60 * 1000)));
-  const dueSoonBoost = hoursUntilEnd <= 24 ? 240 - hoursUntilEnd : 0;
-
-  return pendingCount * 100 + (100 - submissionRate) * 10 + dueSoonBoost;
-}
+import { getAttentionScore, getDueRelativeLabel, getSubmissionRate } from "../utils";
 
 function getPriorityExam(exams: TeacherExamItem[], now: number) {
   return exams
@@ -49,6 +17,11 @@ function getPriorityExam(exams: TeacherExamItem[], now: number) {
       return new Date(left.endAt).getTime() - new Date(right.endAt).getTime();
     })[0] ?? null;
 }
+
+type ExamManagementLoopCardProps = {
+  exams: TeacherExamItem[];
+  now: number;
+};
 
 export default function ExamManagementLoopCard({ exams, now }: ExamManagementLoopCardProps) {
   const activeExams = exams.filter((exam) => exam.status === "published");

@@ -62,7 +62,7 @@ function mergeLinks(primaryLinks: NavLink[], navGroups: NavGroup[]) {
   primaryLinks.forEach((item) => {
     if (seen.has(item.href)) return;
     seen.add(item.href);
-    merged.push({ ...item, group: "核心功能", groupType: "primary", aliases: buildAliases(item) });
+    merged.push({ ...item, group: "主线功能", groupType: "primary", aliases: buildAliases(item) });
   });
 
   navGroups.forEach((group) => {
@@ -224,7 +224,7 @@ export default function GlobalCommandPalette({
         (item) =>
           mergedLinks.find((candidate) => candidate.href === item.href) ?? {
             ...item,
-            group: "常用入口",
+            group: "主线入口",
             groupType: "primary" as const,
             aliases: buildAliases(item)
           }
@@ -363,9 +363,9 @@ export default function GlobalCommandPalette({
 
           {!keyword.trim() ? (
             <div className="command-palette-summary">
-              <span className="pill">常用入口 {featuredLinks.length}</span>
+              <span className="pill">主线入口 {featuredLinks.length}</span>
               <span className="pill">最近访问 {recentLinks.length}</span>
-              <span className="pill">全部功能 {mergedLinks.length}</span>
+              <span className="pill">全部入口 {mergedLinks.length}</span>
             </div>
           ) : (
             <div className="command-palette-summary">
@@ -412,7 +412,7 @@ export default function GlobalCommandPalette({
           ) : (
             <StatePanel
               title="没有找到匹配页面"
-              description="试试更短的关键词，或从下方返回常用入口。"
+              description="试试更短的关键词，或从下方返回主线入口。"
               tone="empty"
               compact
               action={

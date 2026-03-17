@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  getRequestErrorMessage,
+  isAuthError,
+  requestJson
+} from "@/lib/client-request";
 
 type RouteMetric = {
   key: string;
@@ -36,25 +41,41 @@ type Payload = {
   routes: RouteMetric[];
 };
 
+type MetricsResponse = {
+  data?: Payload;
+};
+
 export default function ObservabilityMetricsCard() {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/admin/observability/metrics?limit=8")
-      .then(async (res) => {
-        const json = await res.json();
-        if (!res.ok) {
-          throw new Error(json?.error ?? "加载失败");
+    let cancelled = false;
+
+    async function loadMetrics() {
+      try {
+        const json = await requestJson<MetricsResponse>("/api/admin/observability/metrics?limit=8");
+        if (cancelled) {
+          return;
         }
-        return json;
-      })
-      .then((json) => {
         setData(json?.data ?? null);
-      })
-      .catch((err) => {
-        setError((err as Error).message);
-      });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setError(
+          isAuthError(error)
+            ? "请先使用管理员账号登录"
+            : getRequestErrorMessage(error, "加载失败")
+        );
+      }
+    }
+
+    void loadMetrics();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (error) {

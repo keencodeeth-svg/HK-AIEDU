@@ -21,12 +21,7 @@ export type KnowledgePointTreeNode = {
 
 export type KnowledgePointListPayload = {
   data?: KnowledgePoint[];
-  meta?: {
-    total: number;
-    page: number;
-    pageSize: number;
-    totalPages: number;
-  };
+  meta?: KnowledgePointListMeta;
   facets?: {
     subjects?: FacetItem[];
     grades?: FacetItem[];
@@ -42,6 +37,13 @@ export type KnowledgePointQuery = {
   unit: string;
   chapter: string;
   search: string;
+};
+
+export type KnowledgePointListMeta = {
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 };
 
 export type KnowledgePointForm = {

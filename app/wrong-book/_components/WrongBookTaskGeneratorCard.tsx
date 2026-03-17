@@ -9,6 +9,7 @@ type WrongBookTaskGeneratorCardProps = {
   selected: Record<string, boolean>;
   message: string | null;
   errors: string[];
+  submitting: boolean;
   onDueDateChange: (value: string) => void;
   onToggleSelect: (id: string) => void;
   onCreateTasks: () => void | Promise<void>;
@@ -20,6 +21,7 @@ export default function WrongBookTaskGeneratorCard({
   selected,
   message,
   errors,
+  submitting,
   onDueDateChange,
   onToggleSelect,
   onCreateTasks
@@ -62,8 +64,8 @@ export default function WrongBookTaskGeneratorCard({
             </div>
           ))}
         </div>
-        <button className="button primary" type="button" onClick={onCreateTasks}>
-          创建订正任务
+        <button className="button primary" type="button" onClick={onCreateTasks} disabled={submitting}>
+          {submitting ? "创建中..." : "创建订正任务"}
         </button>
         {message ? <div>{message}</div> : null}
         {errors.length ? (

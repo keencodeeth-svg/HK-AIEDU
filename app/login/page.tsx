@@ -5,6 +5,12 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import Card from "@/components/Card";
 import { trackEvent } from "@/lib/analytics-client";
+import {
+  getRequestErrorMessage,
+  getRequestErrorPayload,
+  getRequestStatus,
+  requestJson
+} from "@/lib/client-request";
 
 type LoginRole = "student" | "teacher" | "parent" | "admin" | "school_admin";
 
@@ -17,6 +23,12 @@ type LoginErrorPayload = {
     lockUntil?: string | null;
   };
   role?: LoginRole;
+};
+
+type LoginSuccessPayload = {
+  role?: LoginRole;
+  name?: string;
+  message?: string;
 };
 
 function formatLockUntil(lockUntil?: string | null) {
@@ -101,51 +113,50 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/auth/login", {
+      const normalizedEmail = email.trim();
+      const payload = await requestJson<LoginSuccessPayload>("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, role })
+        body: JSON.stringify({ email: normalizedEmail, password, role })
       });
-      const data = (await res.json()) as LoginErrorPayload;
-      if (!res.ok) {
-        trackEvent({
-          eventName: "login_failed",
-          page: "/login",
-          entityId: role,
-          props: {
-            selectedRole: role,
-            status: res.status,
-            error: data?.error ?? "登录失败",
-            remainingAttempts: data?.details?.remainingAttempts ?? null,
-            lockUntil: data?.details?.lockUntil ?? null
-          }
-        });
-        throw new Error(resolveLoginErrorMessage(data, res.status));
-      }
 
       trackEvent({
         eventName: "login_success",
         page: "/login",
-        entityId: data.role ?? role,
+        entityId: payload.role ?? role,
         props: {
           selectedRole: role,
-          actualRole: data.role ?? role
+          actualRole: payload.role ?? role
         }
       });
 
       const target =
-        data.role === "admin"
+        payload.role === "admin"
           ? "/admin"
-          : data.role === "teacher"
+          : payload.role === "teacher"
             ? "/teacher"
-            : data.role === "parent"
+            : payload.role === "parent"
               ? "/parent"
-              : data.role === "school_admin"
+              : payload.role === "school_admin"
                 ? "/school"
                 : "/student";
       window.location.assign(target);
     } catch (err) {
-      setError((err as Error).message);
+      const payload = getRequestErrorPayload<LoginErrorPayload>(err);
+      const status = getRequestStatus(err) ?? 0;
+      trackEvent({
+        eventName: "login_failed",
+        page: "/login",
+        entityId: role,
+        props: {
+          selectedRole: role,
+          status,
+          error: payload?.error ?? getRequestErrorMessage(err, "登录失败"),
+          remainingAttempts: payload?.details?.remainingAttempts ?? null,
+          lockUntil: payload?.details?.lockUntil ?? null
+        }
+      });
+      setError(resolveLoginErrorMessage(payload ?? {}, status));
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { readJson, updateJson } from "./storage";
-import { isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 
 export type Notification = {
   id: string;
@@ -43,11 +43,20 @@ function mapNotification(row: DbNotification): Notification {
   };
 }
 
+function canUseApiTestNotificationFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireNotificationsDatabase() {
+  requireDatabaseEnabled("notifications");
+}
+
 export async function getNotificationsByUser(userId: string): Promise<Notification[]> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestNotificationFallback()) {
     const list = readJson<Notification[]>(NOTIFY_FILE, []);
     return list.filter((item) => item.userId === userId).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   }
+  requireNotificationsDatabase();
   const rows = await query<DbNotification>(
     "SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC",
     [userId]
@@ -61,7 +70,7 @@ export async function createNotificationsBulk(input: NotificationInput[]): Promi
   }
 
   const createdAt = new Date().toISOString();
-  if (!isDbEnabled()) {
+  if (canUseApiTestNotificationFallback()) {
     const next = input.map<Notification>((item) => ({
       id: `notice-${crypto.randomBytes(6).toString("hex")}`,
       userId: item.userId,
@@ -76,6 +85,7 @@ export async function createNotificationsBulk(input: NotificationInput[]): Promi
     return next;
   }
 
+  requireNotificationsDatabase();
   const ids: string[] = [];
   const params: Array<string | null> = [];
   const values = input.map((item, index) => {
@@ -115,7 +125,7 @@ export async function createNotification(input: NotificationInput): Promise<Noti
 
 export async function markNotificationRead(id: string): Promise<Notification | null> {
   const readAt = new Date().toISOString();
-  if (!isDbEnabled()) {
+  if (canUseApiTestNotificationFallback()) {
     return updateJson<Notification[]>(NOTIFY_FILE, [], (list) => {
       const index = list.findIndex((item) => item.id === id);
       if (index === -1) return list;
@@ -124,6 +134,7 @@ export async function markNotificationRead(id: string): Promise<Notification | n
       return list;
     }).then((list) => list.find((item) => item.id === id) ?? null);
   }
+  requireNotificationsDatabase();
   const row = await queryOne<DbNotification>(
     "UPDATE notifications SET read_at = $2 WHERE id = $1 RETURNING *",
     [id, readAt]

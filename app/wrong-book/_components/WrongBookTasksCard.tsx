@@ -6,10 +6,11 @@ import { formatDate } from "../utils";
 type WrongBookTasksCardProps = {
   summary: Summary | null;
   tasks: CorrectionTask[];
+  completingTaskIds: Record<string, boolean>;
   onCompleteTask: (id: string) => void | Promise<void>;
 };
 
-export default function WrongBookTasksCard({ summary, tasks, onCompleteTask }: WrongBookTasksCardProps) {
+export default function WrongBookTasksCard({ summary, tasks, completingTaskIds, onCompleteTask }: WrongBookTasksCardProps) {
   return (
     <Card title="订正任务" tag="订正">
       <div className="grid grid-2">
@@ -45,8 +46,8 @@ export default function WrongBookTasksCard({ summary, tasks, onCompleteTask }: W
                 {task.status === "completed" ? (
                   <div className="badge">完成时间：{formatDate(task.completedAt)}</div>
                 ) : (
-                  <button className="button secondary" onClick={() => onCompleteTask(task.id)}>
-                    标记完成
+                  <button className="button secondary" onClick={() => onCompleteTask(task.id)} disabled={Boolean(completingTaskIds[task.id])}>
+                    {completingTaskIds[task.id] ? "处理中..." : "标记完成"}
                   </button>
                 )}
               </div>

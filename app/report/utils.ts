@@ -1,3 +1,4 @@
+import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
 import type {
   ReportProfileData,
   ReportProfileKnowledgeItem,
@@ -7,6 +8,26 @@ import type {
 
 export function isErrorResponse(value: unknown): value is { error: string } {
   return typeof value === "object" && value !== null && "error" in value && typeof value.error === "string";
+}
+
+export function getWeeklyReportRequestMessage(error: unknown, fallback: string) {
+  const status = getRequestStatus(error) ?? 0;
+
+  if (status === 401 || status === 403) {
+    return "学生登录状态已失效，请重新登录后继续查看学习周报。";
+  }
+
+  return getRequestErrorMessage(error, fallback);
+}
+
+export function getReportProfileRequestMessage(error: unknown, fallback: string) {
+  const status = getRequestStatus(error) ?? 0;
+
+  if (status === 401 || status === 403) {
+    return "学生登录状态已失效，请重新登录后继续查看学习画像。";
+  }
+
+  return getRequestErrorMessage(error, fallback);
 }
 
 export function getRatioColor(ratio: number) {
@@ -29,12 +50,28 @@ export function getDisplaySubjectGroups(
   return profile.subjects.filter((group) => group.subject === subjectFilter);
 }
 
+export function resolveReportSubjectFilter(profile: ReportProfileData | null, subjectFilter: string) {
+  if (subjectFilter === "all") {
+    return "all";
+  }
+
+  return profile?.subjects.some((group) => group.subject === subjectFilter) ? subjectFilter : "all";
+}
+
 export function getChapterOptions(groups: ReportProfileSubjectGroup[]): string[] {
   const chapters = groups
     .flatMap((group) => group.items.map((item) => item.chapter))
     .filter((item): item is string => typeof item === "string" && item.length > 0);
 
   return Array.from(new Set(chapters));
+}
+
+export function resolveReportChapterFilter(groups: ReportProfileSubjectGroup[], chapterFilter: string) {
+  if (chapterFilter === "all") {
+    return "all";
+  }
+
+  return getChapterOptions(groups).includes(chapterFilter) ? chapterFilter : "all";
 }
 
 export function getVisibleKnowledgeItems(

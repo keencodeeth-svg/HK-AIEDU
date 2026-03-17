@@ -24,7 +24,7 @@
 
 - 新增 `docs/project-readiness-index.md` 作为项目状态、P0 阻断项、测试与发布入口的统一索引
 - 学校排课栈、AI 质量校准、AI eval gate 与 student personas 均已具备 DB canonical path；当前工作树 `data/` 目录下可见的 `23` 个 JSON 文件都已完成 DB 对应关系梳理
-- 单测基线扩到 `78` 个测试文件、`201` 条用例，新增 `API_TEST_SUITE=school-schedules` 的独立深排课回归与 production-like 本地入口
+- 单测基线扩到 `90` 个测试文件、`235` 条用例，新增 `API_TEST_SUITE=school-schedules` 的独立深排课回归与 production-like 本地入口
 - 主干 CI 的 production-like 回归作业已顺序执行 `test:smoke:production-like`、`test:browser:production-like` 与 `test:school-schedules:production-like`
 - 浏览器 smoke 新增账号恢复请求、登录锁定、管理员异常登录安全告警通知、学生考试提交、学生作业附件上传并由教师批改页读取 / 下载、恢复工单后台处理、资料库文件上传 / 下载 / 分享、学校管理员排课 AI 预演 / 应用 / 回滚与学校组织边界回归，当前整套关键流程 smoke 为 `14` 条；最新 production-like 浏览器回归里的 runtime fallback 告警已清零
 

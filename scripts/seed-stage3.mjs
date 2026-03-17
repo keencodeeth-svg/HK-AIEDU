@@ -4,10 +4,13 @@ import pg from "pg";
 
 const { Pool } = pg;
 
-const dataDir = path.join(process.cwd(), "data");
+const runtimeDir = path.resolve(process.cwd(), process.env.DATA_DIR ?? ".runtime-data");
+const seedDir = path.resolve(process.cwd(), process.env.DATA_SEED_DIR ?? "data");
 
+const SCHOOL_ID = "school-default";
 const CLASS_A_ID = "class-stage3-a";
 const CLASS_B_ID = "class-stage3-b";
+const CLASS_C_ID = "class-stage3-c";
 const ASSIGNMENT_ID = "assign-stage3-001";
 const REVIEW_ID = "review-stage3-001";
 const SUBMISSION_ID = "assign-sub-stage3-001";
@@ -17,57 +20,96 @@ const iso = (date) => new Date(date).toISOString();
 const daysAgo = (n) => iso(Date.now() - n * 24 * 60 * 60 * 1000);
 const daysAhead = (n) => iso(Date.now() + n * 24 * 60 * 60 * 1000);
 
+const PRIMARY_TEACHER = {
+  id: "u-teacher-001",
+  email: "teacher@demo.com",
+  name: "刘老师",
+  role: "teacher",
+  schoolId: SCHOOL_ID,
+  password: "plain:Teacher123"
+};
+
+const SCHEDULE_TEACHER_2 = {
+  id: "u-teacher-stage3-002",
+  email: "teacher2@demo.com",
+  name: "周老师",
+  role: "teacher",
+  schoolId: SCHOOL_ID,
+  password: "plain:Teacher123"
+};
+
+const SCHEDULE_TEACHER_3 = {
+  id: "u-teacher-stage3-003",
+  email: "teacher3@demo.com",
+  name: "吴老师",
+  role: "teacher",
+  schoolId: SCHOOL_ID,
+  password: "plain:Teacher123"
+};
+
+const PRIMARY_STUDENT = {
+  id: "u-student-001",
+  email: "student@demo.com",
+  name: "小星",
+  role: "student",
+  grade: "4",
+  schoolId: SCHOOL_ID,
+  password: "plain:Student123"
+};
+
+const SECOND_STUDENT = {
+  id: "u-student-002",
+  email: "student2@demo.com",
+  name: "小芽",
+  role: "student",
+  grade: "4",
+  schoolId: SCHOOL_ID,
+  password: "plain:Student123"
+};
+
+const THIRD_STUDENT = {
+  id: "u-student-003",
+  email: "student3@demo.com",
+  name: "小澄",
+  role: "student",
+  grade: "4",
+  schoolId: SCHOOL_ID,
+  password: "plain:Student123"
+};
+
+const PRIMARY_PARENT = {
+  id: "u-parent-001",
+  email: "parent@demo.com",
+  name: "星妈",
+  role: "parent",
+  schoolId: SCHOOL_ID,
+  studentId: PRIMARY_STUDENT.id,
+  password: "plain:Parent123"
+};
+
 const usersSeed = [
-  {
-    id: "u-teacher-001",
-    email: "teacher@demo.com",
-    name: "刘老师",
-    role: "teacher",
-    password: "plain:Teacher123"
-  },
-  {
-    id: "u-student-001",
-    email: "student@demo.com",
-    name: "小星",
-    role: "student",
-    grade: "4",
-    password: "plain:Student123"
-  },
-  {
-    id: "u-student-002",
-    email: "student2@demo.com",
-    name: "小芽",
-    role: "student",
-    grade: "4",
-    password: "plain:Student123"
-  },
-  {
-    id: "u-student-003",
-    email: "student3@demo.com",
-    name: "小澄",
-    role: "student",
-    grade: "4",
-    password: "plain:Student123"
-  },
-  {
-    id: "u-parent-001",
-    email: "parent@demo.com",
-    name: "星妈",
-    role: "parent",
-    studentId: "u-student-001",
-    password: "plain:Parent123"
-  }
+  PRIMARY_TEACHER,
+  SCHEDULE_TEACHER_2,
+  SCHEDULE_TEACHER_3,
+  PRIMARY_STUDENT,
+  SECOND_STUDENT,
+  THIRD_STUDENT,
+  PRIMARY_PARENT
 ];
 
 const readJson = (file, fallback) => {
-  const filePath = path.join(dataDir, file);
-  if (!fs.existsSync(filePath)) return fallback;
-  return JSON.parse(fs.readFileSync(filePath, "utf-8"));
+  const runtimePath = path.join(runtimeDir, file);
+  if (fs.existsSync(runtimePath)) {
+    return JSON.parse(fs.readFileSync(runtimePath, "utf-8"));
+  }
+  const seedPath = path.join(seedDir, file);
+  if (!fs.existsSync(seedPath)) return fallback;
+  return JSON.parse(fs.readFileSync(seedPath, "utf-8"));
 };
 
 const writeJson = (file, data) => {
-  fs.mkdirSync(dataDir, { recursive: true });
-  fs.writeFileSync(path.join(dataDir, file), JSON.stringify(data, null, 2));
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  fs.writeFileSync(path.join(runtimeDir, file), JSON.stringify(data, null, 2));
 };
 
 const upsert = (list, matcher, item) => {
@@ -99,10 +141,12 @@ async function seedJson() {
     return;
   }
 
-  const teacher = users.find((u) => u.role === "teacher") ?? usersSeed[0];
-  const student = users.find((u) => u.email === "student@demo.com") ?? usersSeed[1];
-  const student2 = users.find((u) => u.email === "student2@demo.com") ?? usersSeed[2];
-  const student3 = users.find((u) => u.email === "student3@demo.com") ?? usersSeed[3];
+  const teacher = users.find((u) => u.email === PRIMARY_TEACHER.email) ?? PRIMARY_TEACHER;
+  const teacher2 = users.find((u) => u.email === SCHEDULE_TEACHER_2.email) ?? SCHEDULE_TEACHER_2;
+  const teacher3 = users.find((u) => u.email === SCHEDULE_TEACHER_3.email) ?? SCHEDULE_TEACHER_3;
+  const student = users.find((u) => u.email === PRIMARY_STUDENT.email) ?? PRIMARY_STUDENT;
+  const student2 = users.find((u) => u.email === SECOND_STUDENT.email) ?? SECOND_STUDENT;
+  const student3 = users.find((u) => u.email === THIRD_STUDENT.email) ?? THIRD_STUDENT;
 
   const classes = readJson("classes.json", []);
   upsert(
@@ -114,7 +158,8 @@ async function seedJson() {
       subject: "math",
       grade: "4",
       teacherId: teacher.id,
-      createdAt: iso(now),
+      schoolId: SCHOOL_ID,
+      createdAt: daysAgo(2),
       joinCode: "JOINA",
       joinMode: "approval"
     }
@@ -127,10 +172,26 @@ async function seedJson() {
       name: "四年级二班",
       subject: "math",
       grade: "4",
-      teacherId: teacher.id,
-      createdAt: iso(now),
+      teacherId: teacher2.id,
+      schoolId: SCHOOL_ID,
+      createdAt: daysAgo(1),
       joinCode: "JOINB",
       joinMode: "auto"
+    }
+  );
+  upsert(
+    classes,
+    (item) => item.id === CLASS_C_ID,
+    {
+      id: CLASS_C_ID,
+      name: "四年级三班",
+      subject: "math",
+      grade: "4",
+      teacherId: teacher3.id,
+      schoolId: SCHOOL_ID,
+      createdAt: iso(now),
+      joinCode: "JOINC",
+      joinMode: "approval"
     }
   );
   writeJson("classes.json", classes);
@@ -319,21 +380,31 @@ async function seedJson() {
   );
   writeJson("notifications.json", notifications);
 
-  console.log("Stage3 测试数据（JSON 模式）已生成。");
+  console.log("Stage3 测试数据（JSON/runtime 模式）已生成。");
 }
 
 async function ensureUser(client, user) {
   const result = await client.query(
-    `INSERT INTO users (id, email, name, role, password, grade, student_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO users (id, email, name, role, password, grade, school_id, student_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (email) DO UPDATE SET
        name = EXCLUDED.name,
        role = EXCLUDED.role,
        password = EXCLUDED.password,
        grade = EXCLUDED.grade,
+       school_id = EXCLUDED.school_id,
        student_id = EXCLUDED.student_id
      RETURNING id`,
-    [user.id, user.email, user.name, user.role, user.password, user.grade ?? null, user.studentId ?? null]
+    [
+      user.id,
+      user.email,
+      user.name,
+      user.role,
+      user.password,
+      user.grade ?? null,
+      user.schoolId ?? null,
+      user.studentId ?? null
+    ]
   );
   return result.rows[0].id;
 }
@@ -348,36 +419,54 @@ async function seedDb() {
   try {
     await client.query("BEGIN");
 
-    const teacherId = await ensureUser(client, usersSeed[0]);
-    const studentId = await ensureUser(client, usersSeed[1]);
-    const student2Id = await ensureUser(client, usersSeed[2]);
-    const student3Id = await ensureUser(client, usersSeed[3]);
-    await ensureUser(client, { ...usersSeed[4], studentId });
+    const teacherId = await ensureUser(client, PRIMARY_TEACHER);
+    const teacher2Id = await ensureUser(client, SCHEDULE_TEACHER_2);
+    const teacher3Id = await ensureUser(client, SCHEDULE_TEACHER_3);
+    const studentId = await ensureUser(client, PRIMARY_STUDENT);
+    const student2Id = await ensureUser(client, SECOND_STUDENT);
+    const student3Id = await ensureUser(client, THIRD_STUDENT);
+    await ensureUser(client, { ...PRIMARY_PARENT, studentId });
 
     await client.query(
-      `INSERT INTO classes (id, name, subject, grade, teacher_id, created_at, join_code, join_mode)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO classes (id, name, subject, grade, school_id, teacher_id, created_at, join_code, join_mode)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (id) DO UPDATE SET
          name = EXCLUDED.name,
          subject = EXCLUDED.subject,
          grade = EXCLUDED.grade,
+         school_id = EXCLUDED.school_id,
          teacher_id = EXCLUDED.teacher_id,
          join_code = EXCLUDED.join_code,
          join_mode = EXCLUDED.join_mode`,
-      [CLASS_A_ID, "四年级一班", "math", "4", teacherId, iso(now), "JOINA", "approval"]
+      [CLASS_A_ID, "四年级一班", "math", "4", SCHOOL_ID, teacherId, daysAgo(2), "JOINA", "approval"]
     );
 
     await client.query(
-      `INSERT INTO classes (id, name, subject, grade, teacher_id, created_at, join_code, join_mode)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO classes (id, name, subject, grade, school_id, teacher_id, created_at, join_code, join_mode)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (id) DO UPDATE SET
          name = EXCLUDED.name,
          subject = EXCLUDED.subject,
          grade = EXCLUDED.grade,
+         school_id = EXCLUDED.school_id,
          teacher_id = EXCLUDED.teacher_id,
          join_code = EXCLUDED.join_code,
          join_mode = EXCLUDED.join_mode`,
-      [CLASS_B_ID, "四年级二班", "math", "4", teacherId, iso(now), "JOINB", "auto"]
+      [CLASS_B_ID, "四年级二班", "math", "4", SCHOOL_ID, teacher2Id, daysAgo(1), "JOINB", "auto"]
+    );
+
+    await client.query(
+      `INSERT INTO classes (id, name, subject, grade, school_id, teacher_id, created_at, join_code, join_mode)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name,
+         subject = EXCLUDED.subject,
+         grade = EXCLUDED.grade,
+         school_id = EXCLUDED.school_id,
+         teacher_id = EXCLUDED.teacher_id,
+         join_code = EXCLUDED.join_code,
+         join_mode = EXCLUDED.join_mode`,
+      [CLASS_C_ID, "四年级三班", "math", "4", SCHOOL_ID, teacher3Id, iso(now), "JOINC", "approval"]
     );
 
     await client.query(

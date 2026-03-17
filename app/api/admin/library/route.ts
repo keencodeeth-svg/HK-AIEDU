@@ -46,15 +46,17 @@ const bodySchema = v.object<{
 );
 
 function normalizeSourceType(value?: string) {
-  if (value === "file" || value === "link" || value === "text") {
-    return value;
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "file" || normalized === "link" || normalized === "text") {
+    return normalized;
   }
   return "text";
 }
 
 function normalizeContentType(value?: string) {
-  if (value === "textbook" || value === "courseware" || value === "lesson_plan") {
-    return value;
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "textbook" || normalized === "courseware" || normalized === "lesson_plan") {
+    return normalized;
   }
   return "textbook";
 }

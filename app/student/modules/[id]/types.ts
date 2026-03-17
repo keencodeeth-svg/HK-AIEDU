@@ -53,3 +53,13 @@ export type StudentModuleDetailResponse = {
   data?: StudentModuleDetailData;
   error?: string;
 };
+
+export type StudentModuleStageCopy = {
+  title: string;
+  description: string;
+};
+
+export type StudentModuleAssignmentStatusMeta = {
+  label: string;
+  tone: "done" | "overdue" | "pending";
+};

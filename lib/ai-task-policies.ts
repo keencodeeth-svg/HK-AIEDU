@@ -117,6 +117,8 @@ const TASK_OPTIONS: Array<{
   { taskType: "probe", label: "模型探测", description: "模型链连通性探测。" }
 ];
 
+const TASK_TYPE_SET = new Set<AiTaskType>(TASK_OPTIONS.map((item) => item.taskType));
+
 const TASK_DEFAULTS: Record<
   AiTaskType,
   {
@@ -202,16 +204,46 @@ function findTaskOption(taskType: AiTaskType) {
   return TASK_OPTIONS.find((item) => item.taskType === taskType) ?? TASK_OPTIONS[0];
 }
 
+function normalizeTaskTypeToken(value: string | null | undefined): AiTaskType | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!TASK_TYPE_SET.has(normalized as AiTaskType)) {
+    return null;
+  }
+  return normalized as AiTaskType;
+}
+
 function isKnownTaskType(value: string): value is AiTaskType {
-  return TASK_OPTIONS.some((item) => item.taskType === value);
+  return normalizeTaskTypeToken(value) !== null;
+}
+
+function normalizePolicyRecord(taskType: AiTaskType, record?: AiTaskPolicyRecord | null): AiTaskPolicyRecord {
+  return {
+    providerChain: record?.providerChain === undefined ? undefined : normalizeProviderChain(record.providerChain),
+    timeoutMs: record?.timeoutMs === undefined ? undefined : clampInt(record.timeoutMs, 500, 30000),
+    maxRetries: record?.maxRetries === undefined ? undefined : clampInt(record.maxRetries, 0, 5),
+    budgetLimit: record?.budgetLimit === undefined ? undefined : clampInt(record.budgetLimit, 100, 100000),
+    minQualityScore: record?.minQualityScore === undefined ? undefined : clampInt(record.minQualityScore, 0, 100),
+    updatedAt: typeof record?.updatedAt === "string" && record.updatedAt.trim() ? record.updatedAt : undefined,
+    updatedBy: typeof record?.updatedBy === "string" && record.updatedBy.trim() ? record.updatedBy.trim() : undefined
+  };
 }
 
 function readPolicyStoreFromFile() {
   const saved = readJson<AiTaskPolicyStore | null>(AI_TASK_POLICIES_FILE, null);
-  if (!saved || typeof saved !== "object") {
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) {
     return {} as AiTaskPolicyStore;
   }
-  return saved;
+
+  const normalizedStore: AiTaskPolicyStore = {};
+  Object.entries(saved).forEach(([taskTypeToken, record]) => {
+    const taskType = normalizeTaskTypeToken(taskTypeToken);
+    if (!taskType || !record || typeof record !== "object" || Array.isArray(record)) {
+      return;
+    }
+    normalizedStore[taskType] = normalizePolicyRecord(taskType, record as AiTaskPolicyRecord);
+  });
+  return normalizedStore;
 }
 
 function persistPolicyStoreToFile(store: AiTaskPolicyStore) {
@@ -264,16 +296,12 @@ async function syncPolicyStoreFromDb(force = false) {
           : ({} as AiTaskPolicyStore);
         const entries = Object.entries(fileStore) as Array<[AiTaskType, AiTaskPolicyRecord]>;
         await Promise.all(
-          entries.map(async ([taskType, record]) => {
-            if (!isKnownTaskType(taskType)) return;
+          entries.map(async ([taskTypeToken, record]) => {
+            const taskType = normalizeTaskTypeToken(taskTypeToken);
+            if (!taskType) return;
             const normalized: AiTaskPolicyRecord = {
-              providerChain: normalizeProviderChain(record.providerChain ?? []),
-              timeoutMs: clampInt(record.timeoutMs ?? TASK_DEFAULTS[taskType].timeoutMs, 500, 30000),
-              maxRetries: clampInt(record.maxRetries ?? TASK_DEFAULTS[taskType].maxRetries, 0, 5),
-              budgetLimit: clampInt(record.budgetLimit ?? TASK_DEFAULTS[taskType].budgetLimit, 100, 100000),
-              minQualityScore: clampInt(record.minQualityScore ?? TASK_DEFAULTS[taskType].minQualityScore, 0, 100),
-              updatedAt: record.updatedAt ?? new Date().toISOString(),
-              updatedBy: record.updatedBy
+              ...normalizePolicyRecord(taskType, record),
+              updatedAt: record.updatedAt ?? new Date().toISOString()
             };
             nextStore[taskType] = normalized;
             await query(
@@ -296,17 +324,20 @@ async function syncPolicyStoreFromDb(force = false) {
         );
       } else {
         rows.forEach((row) => {
-          if (!isKnownTaskType(row.task_type)) {
+          const taskType = normalizeTaskTypeToken(row.task_type);
+          if (!taskType) {
             return;
           }
-          nextStore[row.task_type] = {
-            providerChain: normalizeProviderChain(row.provider_chain ?? []),
-            timeoutMs: row.timeout_ms ?? undefined,
-            maxRetries: row.max_retries ?? undefined,
-            budgetLimit: row.budget_limit ?? undefined,
-            minQualityScore: row.min_quality_score ?? undefined,
+          nextStore[taskType] = {
+            ...normalizePolicyRecord(taskType, {
+              providerChain: row.provider_chain ?? undefined,
+              timeoutMs: row.timeout_ms ?? undefined,
+              maxRetries: row.max_retries ?? undefined,
+              budgetLimit: row.budget_limit ?? undefined,
+              minQualityScore: row.min_quality_score ?? undefined,
+              updatedBy: row.updated_by ?? undefined
+            }),
             updatedAt: row.updated_at,
-            updatedBy: row.updated_by ?? undefined
           };
         });
       }
@@ -357,8 +388,9 @@ export async function saveAiTaskPolicy(input: {
   minQualityScore?: number;
   updatedBy?: string;
 }) {
-  const previous = policyStoreCache[input.taskType] ?? {};
-  const defaults = TASK_DEFAULTS[input.taskType];
+  const taskType = normalizeTaskTypeToken(input.taskType) ?? "assist";
+  const previous = policyStoreCache[taskType] ?? {};
+  const defaults = TASK_DEFAULTS[taskType];
   const next: AiTaskPolicyRecord = {
     providerChain:
       input.providerChain !== undefined ? normalizeProviderChain(input.providerChain) : previous.providerChain,
@@ -374,12 +406,12 @@ export async function saveAiTaskPolicy(input: {
     updatedBy: input.updatedBy?.trim() || undefined
   };
 
-  policyStoreCache[input.taskType] = next;
+  policyStoreCache[taskType] = next;
   policyStoreCacheSyncedAt = Date.now();
 
   if (!isDbEnabled()) {
     persistPolicyStoreToFile(policyStoreCache);
-    return toPolicy(input.taskType, next);
+    return toPolicy(taskType, next);
   }
 
   await query(
@@ -395,18 +427,18 @@ export async function saveAiTaskPolicy(input: {
          updated_at = EXCLUDED.updated_at,
          updated_by = EXCLUDED.updated_by`,
     [
-      input.taskType,
+      taskType,
       next.providerChain ?? [],
-      next.timeoutMs ?? TASK_DEFAULTS[input.taskType].timeoutMs,
-      next.maxRetries ?? TASK_DEFAULTS[input.taskType].maxRetries,
-      next.budgetLimit ?? TASK_DEFAULTS[input.taskType].budgetLimit,
-      next.minQualityScore ?? TASK_DEFAULTS[input.taskType].minQualityScore,
+      next.timeoutMs ?? TASK_DEFAULTS[taskType].timeoutMs,
+      next.maxRetries ?? TASK_DEFAULTS[taskType].maxRetries,
+      next.budgetLimit ?? TASK_DEFAULTS[taskType].budgetLimit,
+      next.minQualityScore ?? TASK_DEFAULTS[taskType].minQualityScore,
       next.updatedAt ?? new Date().toISOString(),
       next.updatedBy ?? null
     ]
   );
 
-  return toPolicy(input.taskType, next);
+  return toPolicy(taskType, next);
 }
 
 export async function saveAiTaskPolicies(
@@ -422,7 +454,12 @@ export async function saveAiTaskPolicies(
 ) {
   const now = new Date().toISOString();
 
-  items.forEach((item) => {
+  const normalizedItems = items.map((item) => ({
+    ...item,
+    taskType: normalizeTaskTypeToken(item.taskType) ?? "assist"
+  }));
+
+  normalizedItems.forEach((item) => {
     const previous = policyStoreCache[item.taskType] ?? {};
     const defaults = TASK_DEFAULTS[item.taskType];
     policyStoreCache[item.taskType] = {
@@ -444,7 +481,7 @@ export async function saveAiTaskPolicies(
   }
 
   await Promise.all(
-    items.map(async (item) => {
+    normalizedItems.map(async (item) => {
       const record = policyStoreCache[item.taskType] ?? {};
       await query(
         `INSERT INTO ai_task_policies
@@ -487,22 +524,25 @@ export async function resetAiTaskPolicy(taskType?: AiTaskType) {
     return getAiTaskPolicies();
   }
 
-  delete policyStoreCache[taskType];
+  const normalizedTaskType = normalizeTaskTypeToken(taskType) ?? "assist";
+
+  delete policyStoreCache[normalizedTaskType];
   policyStoreCacheSyncedAt = Date.now();
 
   if (!isDbEnabled()) {
     persistPolicyStoreToFile(policyStoreCache);
-    return toPolicy(taskType, undefined);
+    return toPolicy(normalizedTaskType, undefined);
   }
 
-  await query("DELETE FROM ai_task_policies WHERE task_type = $1", [taskType]);
-  return toPolicy(taskType, undefined);
+  await query("DELETE FROM ai_task_policies WHERE task_type = $1", [normalizedTaskType]);
+  return toPolicy(normalizedTaskType, undefined);
 }
 
 export function recordAiCallLog(input: Omit<AiCallLog, "id" | "createdAt">) {
+  const taskType = normalizeTaskTypeToken(input.taskType) ?? "assist";
   const item: AiCallLog = {
     id: `ai-call-log-${crypto.randomBytes(8).toString("hex")}`,
-    taskType: input.taskType,
+    taskType,
     provider: input.provider,
     capability: input.capability,
     ok: Boolean(input.ok),
@@ -590,7 +630,7 @@ function numberFrom(value: unknown, fallback = 0) {
 }
 
 function mapDbCallLogRow(row: DbAiCallLogRow): AiCallLog {
-  const taskType = isKnownTaskType(row.task_type) ? row.task_type : "assist";
+  const taskType = normalizeTaskTypeToken(row.task_type) ?? "assist";
   const meta = row.meta ?? {};
   const capability = meta.capability === "vision" ? "vision" : "chat";
   const policyHitRaw = meta.policyHit;

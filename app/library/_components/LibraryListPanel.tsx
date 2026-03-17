@@ -175,6 +175,9 @@ export default function LibraryListPanel({
   onDownloadItem,
   onRemoveItem
 }: LibraryListPanelProps) {
+  const showInitialLoading = loading && itemsCount === 0;
+  const showRefreshing = loading && itemsCount > 0;
+
   return (
     <Card title="资料管理列表" tag="管理">
       <div className="cta-row" style={{ marginTop: 0 }}>
@@ -199,91 +202,97 @@ export default function LibraryListPanel({
         </button>
       </div>
 
-      {loading ? (
+      {showInitialLoading ? (
         <div style={{ marginTop: 10 }}>
           <StatePanel tone="loading" title="正在读取资料列表" description="教材、课件与资源分组加载中，请稍候。" />
         </div>
       ) : null}
 
-      {!loading ? (
+      {showRefreshing ? (
+        <div className="status-note info" style={{ marginTop: 10 }}>
+          资料列表刷新中，当前先展示最近一次成功数据。
+        </div>
+      ) : null}
+
+      {!showInitialLoading ? (
         <div className="grid" style={{ gap: 12, marginTop: 10 }}>
-          {groupedBySubject.map((group) => (
-            <details key={group.subject} className="card full-span" open={expandedSubjects.includes(group.subject)}>
-              <summary
-                onClick={(event) => {
-                  event.preventDefault();
-                  onToggleExpandedSubject(group.subject);
-                }}
-                style={{ cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}
-              >
-                <span className="section-title" style={{ margin: 0 }}>
-                  {group.label}
-                </span>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <span className="badge">{group.list.length} 条</span>
-                  <span className="badge">{group.contentGroups.length} 类</span>
-                </div>
-              </summary>
-
-              <div className="grid" style={{ gap: 10, marginTop: 10 }}>
-                {group.contentGroups.map((contentGroup) => {
-                  const typeKey = `${group.subject}:${contentGroup.contentType}`;
-                  return (
-                    <details key={typeKey} className="card" open={expandedTypeKeys.includes(typeKey)}>
-                      <summary
-                        onClick={(event) => {
-                          event.preventDefault();
-                          onToggleExpandedType(typeKey);
-                        }}
-                        style={{ cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}
-                      >
-                        <span className="section-title" style={{ margin: 0 }}>
-                          {contentGroup.label}
-                        </span>
-                        <span className="badge">{contentGroup.list.length} 条</span>
-                      </summary>
-
-                      {libraryViewMode === "compact" ? (
-                        <div className="grid" style={{ gap: 8, marginTop: 10 }}>
-                          {contentGroup.list.map((item) => (
-                            <CompactLibraryItemCard
-                              key={item.id}
-                              item={item}
-                              userRole={userRole}
-                              deletingId={deletingId}
-                              onDownloadItem={onDownloadItem}
-                              onRemoveItem={onRemoveItem}
-                            />
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="grid" style={{ gap: 10, marginTop: 10 }}>
-                          {contentGroup.list.map((item) => (
-                            <DetailedLibraryItemCard
-                              key={item.id}
-                              item={item}
-                              userRole={userRole}
-                              deletingId={deletingId}
-                              onDownloadItem={onDownloadItem}
-                              onRemoveItem={onRemoveItem}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </details>
-                  );
-                })}
-              </div>
-            </details>
-          ))}
-
           {!groupedBySubject.length ? (
             <StatePanel
               tone="empty"
               title="暂无资料"
               description="当前筛选条件下没有可展示内容，请调整学科、类型或关键词。"
             />
-          ) : null}
+          ) : (
+            groupedBySubject.map((group) => (
+              <details key={group.subject} className="card full-span" open={expandedSubjects.includes(group.subject)}>
+                <summary
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onToggleExpandedSubject(group.subject);
+                  }}
+                  style={{ cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}
+                >
+                  <span className="section-title" style={{ margin: 0 }}>
+                    {group.label}
+                  </span>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <span className="badge">{group.list.length} 条</span>
+                    <span className="badge">{group.contentGroups.length} 类</span>
+                  </div>
+                </summary>
+
+                <div className="grid" style={{ gap: 10, marginTop: 10 }}>
+                  {group.contentGroups.map((contentGroup) => {
+                    const typeKey = `${group.subject}:${contentGroup.contentType}`;
+                    return (
+                      <details key={typeKey} className="card" open={expandedTypeKeys.includes(typeKey)}>
+                        <summary
+                          onClick={(event) => {
+                            event.preventDefault();
+                            onToggleExpandedType(typeKey);
+                          }}
+                          style={{ cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}
+                        >
+                          <span className="section-title" style={{ margin: 0 }}>
+                            {contentGroup.label}
+                          </span>
+                          <span className="badge">{contentGroup.list.length} 条</span>
+                        </summary>
+
+                        {libraryViewMode === "compact" ? (
+                          <div className="grid" style={{ gap: 8, marginTop: 10 }}>
+                            {contentGroup.list.map((item) => (
+                              <CompactLibraryItemCard
+                                key={item.id}
+                                item={item}
+                                userRole={userRole}
+                                deletingId={deletingId}
+                                onDownloadItem={onDownloadItem}
+                                onRemoveItem={onRemoveItem}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="grid" style={{ gap: 10, marginTop: 10 }}>
+                            {contentGroup.list.map((item) => (
+                              <DetailedLibraryItemCard
+                                key={item.id}
+                                item={item}
+                                userRole={userRole}
+                                deletingId={deletingId}
+                                onDownloadItem={onDownloadItem}
+                                onRemoveItem={onRemoveItem}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </details>
+                    );
+                  })}
+                </div>
+              </details>
+            ))
+          )}
           {groupedBySubject.length ? <div style={{ fontSize: 12, color: "var(--ink-1)" }}>当前页展示 {itemsCount} 条，筛选总量 {totalCount} 条。</div> : null}
         </div>
       ) : null}

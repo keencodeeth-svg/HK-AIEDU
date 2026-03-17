@@ -7,8 +7,8 @@
 ## 1. 当前快照
 
 - 项目阶段：已超过 MVP，更接近“可试点 beta 产品”，但还不是可规模复制的 release candidate。
-- 当前规模：`68` 个页面、`191` 个 API 路由、`78` 个单测文件。
-- 当前自动化：`test:unit` 当前为 `201` 条用例；`1` 个浏览器 smoke 文件，内含 `14` 条关键流程 smoke。
+- 当前规模：`68` 个页面、`191` 个 API 路由、`90` 个单测文件。
+- 当前自动化：`test:unit` 当前为 `235` 条用例；`1` 个浏览器 smoke 文件，内含 `14` 条关键流程 smoke。
 - 当前剩余文件态：当前工作树 `data/` 目录下还有 `23` 个 JSON 文件，`23` 个均已具备 DB canonical path，当前可见文件中已无 JSON-only 项。
 - 当前前端收口重点：大页拆层和 latest-request-wins 加固已经覆盖 `files`、`library detail`、`school`、`practice`、`notifications`、`teacher notifications`、`admin questions` 等高频工作台。
 
@@ -111,6 +111,7 @@
 ## 5. 文档维护约定
 
 - 只要页面、API、单测、smoke、`data/*.json` 数量发生明显变化，就同步更新本页快照。
+- 提交前执行 `npm run check:project-snapshot`，先确认当前快照文档与仓库事实一致。
 - 只要 P0 阻断项状态变化，就同步更新 `docs/p0-productization-checklist.md`。
 - 只要发布路径、质量门、远端 smoke 发生变化，就同步更新 `docs/strict-testing-baseline.md` 与 `docs/staging-production-release-runbook.md`。
 - 若新增周度 checklist 或专项 runbook，务必把入口补到 README 的“运营与治理文档索引”里。

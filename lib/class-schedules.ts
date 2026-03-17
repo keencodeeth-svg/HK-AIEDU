@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { getClassById } from "./classes";
 import { badRequest, conflict, notFound } from "./api/http";
+import { isDbEnabled, query, queryOne } from "./db";
 import { DEFAULT_SCHOOL_ID } from "./schools";
 import { listTeacherUnavailableSlots } from "./teacher-unavailability";
 import { findTeacherScheduleRuleViolation, getTeacherScheduleRule, type TeacherRuleSession } from "./teacher-schedule-rules";
@@ -121,6 +122,25 @@ const FILE = "class-schedules.json";
 const runtimeDir = path.resolve(process.cwd(), process.env.DATA_DIR ?? ".runtime-data");
 const seedDir = path.resolve(process.cwd(), process.env.DATA_SEED_DIR ?? "data");
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+let syncPromise: Promise<void> | null = null;
+
+type DbClassScheduleSession = {
+  id: string;
+  school_id: string | null;
+  class_id: string;
+  weekday: number;
+  start_time: string;
+  end_time: string;
+  slot_label: string | null;
+  room: string | null;
+  campus: string | null;
+  note: string | null;
+  focus_summary: string | null;
+  locked: boolean;
+  locked_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 function normalizeSchoolId(value?: string | null) {
   return value?.trim() || DEFAULT_SCHOOL_ID;
@@ -133,6 +153,12 @@ function normalizeText(value?: string | null) {
 
 function normalizeBoolean(value: unknown) {
   return value === true;
+}
+
+function normalizeTimestamp(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value instanceof Date) return value.toISOString();
+  return "";
 }
 
 function readFileIfExists<T>(filePath: string): T | null {
@@ -152,6 +178,7 @@ function compareSessions(left: ClassScheduleSession, right: ClassScheduleSession
 }
 
 function mapSession(input: ClassScheduleSession): ClassScheduleSession {
+  const locked = normalizeBoolean(input.locked);
   return {
     ...input,
     schoolId: normalizeSchoolId(input.schoolId),
@@ -160,22 +187,113 @@ function mapSession(input: ClassScheduleSession): ClassScheduleSession {
     campus: normalizeText(input.campus),
     note: normalizeText(input.note),
     focusSummary: normalizeText(input.focusSummary),
-    locked: normalizeBoolean(input.locked),
-    lockedAt: input.locked ? normalizeText(input.lockedAt) : undefined
+    locked,
+    lockedAt: locked ? normalizeText(input.lockedAt) : undefined
   };
 }
 
-function readStore() {
+function mapDbSession(row: DbClassScheduleSession): ClassScheduleSession {
+  return mapSession({
+    id: row.id,
+    schoolId: normalizeSchoolId(row.school_id),
+    classId: row.class_id,
+    weekday: row.weekday as Weekday,
+    startTime: row.start_time,
+    endTime: row.end_time,
+    slotLabel: row.slot_label ?? undefined,
+    room: row.room ?? undefined,
+    campus: row.campus ?? undefined,
+    note: row.note ?? undefined,
+    focusSummary: row.focus_summary ?? undefined,
+    locked: row.locked === true,
+    lockedAt: row.locked_at ? normalizeTimestamp(row.locked_at) : undefined,
+    createdAt: normalizeTimestamp(row.created_at),
+    updatedAt: normalizeTimestamp(row.updated_at)
+  });
+}
+
+function readFileStore() {
   const runtimePath = path.join(runtimeDir, FILE);
   const seedPath = path.join(seedDir, FILE);
   const list = readFileIfExists<ClassScheduleSession[]>(runtimePath) ?? readFileIfExists<ClassScheduleSession[]>(seedPath) ?? [];
   return list.map(mapSession).sort(compareSessions);
 }
 
-function writeStore(items: ClassScheduleSession[]) {
+function writeFileStore(items: ClassScheduleSession[]) {
   fs.mkdirSync(runtimeDir, { recursive: true });
   const filePath = path.join(runtimeDir, FILE);
   fs.writeFileSync(filePath, JSON.stringify(items.sort(compareSessions), null, 2));
+}
+
+async function persistSessionToDb(item: ClassScheduleSession) {
+  await query(
+    `INSERT INTO class_schedule_sessions
+     (id, school_id, class_id, weekday, start_time, end_time, slot_label, room, campus, note, focus_summary, locked, locked_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+     ON CONFLICT (id) DO UPDATE
+     SET school_id = EXCLUDED.school_id,
+         class_id = EXCLUDED.class_id,
+         weekday = EXCLUDED.weekday,
+         start_time = EXCLUDED.start_time,
+         end_time = EXCLUDED.end_time,
+         slot_label = EXCLUDED.slot_label,
+         room = EXCLUDED.room,
+         campus = EXCLUDED.campus,
+         note = EXCLUDED.note,
+         focus_summary = EXCLUDED.focus_summary,
+         locked = EXCLUDED.locked,
+         locked_at = EXCLUDED.locked_at,
+         created_at = EXCLUDED.created_at,
+         updated_at = EXCLUDED.updated_at`,
+    [
+      item.id,
+      item.schoolId,
+      item.classId,
+      item.weekday,
+      item.startTime,
+      item.endTime,
+      item.slotLabel ?? null,
+      item.room ?? null,
+      item.campus ?? null,
+      item.note ?? null,
+      item.focusSummary ?? null,
+      item.locked === true,
+      item.lockedAt ?? null,
+      item.createdAt,
+      item.updatedAt
+    ]
+  );
+}
+
+async function syncStoreFromFileIfNeeded() {
+  if (!isDbEnabled()) return;
+  if (syncPromise) return syncPromise;
+
+  syncPromise = (async () => {
+    const existing = await queryOne<{ id: string }>("SELECT id FROM class_schedule_sessions LIMIT 1");
+    if (existing) return;
+    const fallback = readFileStore();
+    for (const item of fallback) {
+      await persistSessionToDb(item);
+    }
+  })().finally(() => {
+    syncPromise = null;
+  });
+
+  return syncPromise;
+}
+
+async function readStore() {
+  if (!isDbEnabled()) {
+    return readFileStore();
+  }
+
+  await syncStoreFromFileIfNeeded();
+  const rows = await query<DbClassScheduleSession>(
+    `SELECT * FROM class_schedule_sessions
+     ORDER BY weekday ASC, start_time ASC, end_time ASC, class_id ASC`
+  );
+  return rows.map(mapDbSession).sort(compareSessions);
 }
 
 function assertTimeValue(value: string, pathLabel: string) {
@@ -411,7 +529,7 @@ export async function listClassScheduleSessions(scope?: {
   classIds?: string[];
 }) {
   const classIds = Array.isArray(scope?.classIds) ? new Set(scope?.classIds) : null;
-  return readStore().filter((item) => {
+  return (await readStore()).filter((item) => {
     if (scope?.schoolId && normalizeSchoolId(item.schoolId) !== normalizeSchoolId(scope.schoolId)) {
       return false;
     }
@@ -426,7 +544,7 @@ export async function listClassScheduleSessions(scope?: {
 }
 
 export async function getClassScheduleSessionById(id: string) {
-  return readStore().find((item) => item.id === id) ?? null;
+  return (await readStore()).find((item) => item.id === id) ?? null;
 }
 
 export async function createClassScheduleSession(input: ClassScheduleSessionInput) {
@@ -457,10 +575,14 @@ export async function createClassScheduleSession(input: ClassScheduleSessionInpu
     updatedAt: now
   };
 
-  const list = readStore();
+  const list = await readStore();
   await assertScheduleConstraints(list, next, { teacherId: klass.teacherId ?? null });
-  list.push(next);
-  writeStore(list);
+  if (!isDbEnabled()) {
+    list.push(next);
+    writeFileStore(list);
+    return next;
+  }
+  await persistSessionToDb(next);
   return next;
 }
 
@@ -478,7 +600,7 @@ export async function updateClassScheduleSession(
     locked?: boolean;
   }
 ) {
-  const list = readStore();
+  const list = await readStore();
   const index = list.findIndex((item) => item.id === id);
   if (index === -1) {
     return null;
@@ -516,8 +638,12 @@ export async function updateClassScheduleSession(
     notFound("class not found");
   }
   await assertScheduleConstraints(list, next, { ignoreId: id, teacherId: klass.teacherId ?? null });
-  list[index] = next;
-  writeStore(list);
+  if (!isDbEnabled()) {
+    list[index] = next;
+    writeFileStore(list);
+    return next;
+  }
+  await persistSessionToDb(next);
   return next;
 }
 
@@ -527,8 +653,9 @@ export async function applyClassSchedulePlan(input: {
   schoolId?: string | null;
   preserveLocked?: boolean;
 }) {
+  const list = await readStore();
   const replaceSet = new Set((input.replaceClassIds ?? []).filter(Boolean));
-  const nextList = readStore().filter((item) => {
+  const nextList = list.filter((item) => {
     if (input.schoolId && normalizeSchoolId(item.schoolId) !== normalizeSchoolId(input.schoolId)) {
       return true;
     }
@@ -571,7 +698,19 @@ export async function applyClassSchedulePlan(input: {
     created.push(next);
   }
 
-  writeStore([...nextList, ...created]);
+  if (!isDbEnabled()) {
+    writeFileStore([...nextList, ...created]);
+    return created.sort(compareSessions);
+  }
+
+  const keptIds = new Set(nextList.map((item) => item.id));
+  const removedIds = list.filter((item) => !keptIds.has(item.id)).map((item) => item.id);
+  if (removedIds.length) {
+    await query("DELETE FROM class_schedule_sessions WHERE id = ANY($1)", [removedIds]);
+  }
+  for (const item of created) {
+    await persistSessionToDb(item);
+  }
   return created.sort(compareSessions);
 }
 
@@ -583,7 +722,8 @@ export async function replaceClassScheduleSessions(input: {
   ignoreTeacherRules?: boolean;
 }) {
   const classIdSet = new Set(input.classIds.filter(Boolean));
-  const nextList = readStore().filter((item) => {
+  const list = await readStore();
+  const nextList = list.filter((item) => {
     if (input.schoolId && normalizeSchoolId(item.schoolId) !== normalizeSchoolId(input.schoolId)) {
       return true;
     }
@@ -618,12 +758,24 @@ export async function replaceClassScheduleSessions(input: {
     restored.push(next);
   }
 
-  writeStore([...nextList, ...restored]);
+  if (!isDbEnabled()) {
+    writeFileStore([...nextList, ...restored]);
+    return restored.sort(compareSessions);
+  }
+
+  const keptIds = new Set(nextList.map((item) => item.id));
+  const removedIds = list.filter((item) => !keptIds.has(item.id)).map((item) => item.id);
+  if (removedIds.length) {
+    await query("DELETE FROM class_schedule_sessions WHERE id = ANY($1)", [removedIds]);
+  }
+  for (const item of restored) {
+    await persistSessionToDb(item);
+  }
   return restored.sort(compareSessions);
 }
 
 export async function deleteClassScheduleSession(id: string, scope?: { schoolId?: string | null }) {
-  const list = readStore();
+  const list = await readStore();
   const index = list.findIndex((item) => item.id === id);
   if (index === -1) {
     return null;
@@ -637,7 +789,11 @@ export async function deleteClassScheduleSession(id: string, scope?: { schoolId?
     conflict("节次已锁定，请先解锁后再删除");
   }
 
-  list.splice(index, 1);
-  writeStore(list);
+  if (!isDbEnabled()) {
+    list.splice(index, 1);
+    writeFileStore(list);
+    return current;
+  }
+  await query("DELETE FROM class_schedule_sessions WHERE id = $1", [id]);
   return current;
 }

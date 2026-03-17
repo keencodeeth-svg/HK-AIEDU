@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
+import StatePanel from "@/components/StatePanel";
+import { formatLoadedTime, isAuthError, requestJson } from "@/lib/client-request";
 import { SUBJECT_LABELS } from "@/lib/constants";
+import { getStudentModulesRequestMessage, resolveStudentModulesSubjectFilter } from "./utils";
 
 type StudentModule = {
   id: string;
@@ -22,18 +25,85 @@ type StudentClassModules = {
   modules: StudentModule[];
 };
 
+type StudentModulesResponse = {
+  data?: StudentClassModules[];
+};
+
 export default function StudentModulesPage() {
+  const requestIdRef = useRef(0);
+  const hasSnapshotRef = useRef(false);
   const [data, setData] = useState<StudentClassModules[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
   const [subjectFilter, setSubjectFilter] = useState("all");
   const [viewMode, setViewMode] = useState<"compact" | "detailed">("compact");
   const [showAllClasses, setShowAllClasses] = useState(false);
   const [expandedClassIds, setExpandedClassIds] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    fetch("/api/student/modules")
-      .then((res) => res.json())
-      .then((payload) => setData(payload.data ?? []));
+  const clearModulesState = useCallback(() => {
+    hasSnapshotRef.current = false;
+    setData([]);
+    setLastLoadedAt(null);
   }, []);
+
+  const handleAuthRequired = useCallback(() => {
+    clearModulesState();
+    setPageError(null);
+    setAuthRequired(true);
+  }, [clearModulesState]);
+
+  const loadModules = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+
+    if (mode === "refresh") {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+      if (!hasSnapshotRef.current) {
+        setData([]);
+      }
+    }
+    setPageError(null);
+
+    try {
+      const payload = await requestJson<StudentModulesResponse>("/api/student/modules");
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+      const nextData = payload.data ?? [];
+      hasSnapshotRef.current = true;
+      setData(nextData);
+      setAuthRequired(false);
+      setSubjectFilter((prev) => resolveStudentModulesSubjectFilter(nextData, prev));
+      setLastLoadedAt(new Date().toISOString());
+    } catch (error) {
+      if (requestId !== requestIdRef.current) {
+        return;
+      }
+      if (isAuthError(error)) {
+        handleAuthRequired();
+      } else {
+        if (!hasSnapshotRef.current) {
+          clearModulesState();
+        }
+        setAuthRequired(false);
+        setPageError(getStudentModulesRequestMessage(error, "加载课程模块失败"));
+      }
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
+  }, [clearModulesState, handleAuthRequired]);
+
+  useEffect(() => {
+    void loadModules();
+  }, [loadModules]);
 
   const subjectOptions = useMemo(() => {
     return Array.from(new Set(data.map((klass) => klass.subject))).sort((a, b) =>
@@ -62,6 +132,8 @@ export default function StudentModulesPage() {
   function toggleClass(classId: string) {
     setExpandedClassIds((prev) => ({ ...prev, [classId]: !prev[classId] }));
   }
+
+  const hasModulesData = data.length > 0;
 
   function renderModuleCompact(module: StudentModule) {
     const progress = module.assignmentCount ? Math.round((module.completedCount / module.assignmentCount) * 100) : 0;
@@ -122,6 +194,40 @@ export default function StudentModulesPage() {
     );
   }
 
+  if (loading && !hasModulesData && !authRequired) {
+    return <StatePanel title="课程模块加载中" description="正在同步班级模块、任务进度与学科分布。" tone="loading" />;
+  }
+
+  if (authRequired) {
+    return (
+      <StatePanel
+        title="请先登录学生账号"
+        description="登录后即可查看当前加入班级的课程模块与作业进度。"
+        tone="info"
+        action={
+          <Link className="button secondary" href="/login">
+            前往登录
+          </Link>
+        }
+      />
+    );
+  }
+
+  if (pageError && !hasModulesData) {
+    return (
+      <StatePanel
+        title="课程模块加载失败"
+        description={pageError}
+        tone="error"
+        action={
+          <button className="button secondary" type="button" onClick={() => void loadModules()}>
+            重试
+          </button>
+        }
+      />
+    );
+  }
+
   return (
     <div className="grid" style={{ gap: 18 }}>
       <div className="section-head">
@@ -129,10 +235,30 @@ export default function StudentModulesPage() {
           <h2>课程模块</h2>
           <div className="section-sub">按单元查看学习内容与作业进度。</div>
         </div>
-        <span className="chip">
-          模块 {totalModules} · 任务 {totalCompleted}/{totalAssignments}
-        </span>
+        <div className="cta-row no-margin" style={{ justifyContent: "flex-end", flexWrap: "wrap" }}>
+          <span className="chip">
+            模块 {totalModules} · 任务 {totalCompleted}/{totalAssignments}
+          </span>
+          {lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(lastLoadedAt)}</span> : null}
+          <button className="button secondary" type="button" onClick={() => void loadModules("refresh")} disabled={loading || refreshing}>
+            {refreshing ? "刷新中..." : "刷新"}
+          </button>
+        </div>
       </div>
+
+      {pageError ? (
+        <StatePanel
+          title="已展示最近一次成功数据"
+          description={`最新刷新失败：${pageError}`}
+          tone="error"
+          compact
+          action={
+            <button className="button secondary" type="button" onClick={() => void loadModules("refresh")}>
+              再试一次
+            </button>
+          }
+        />
+      ) : null}
 
       <div className="toolbar-wrap">
         <select
@@ -207,7 +333,7 @@ export default function StudentModulesPage() {
           ) : null}
         </>
       ) : (
-        <Card title="课程模块">暂无班级模块。</Card>
+        <StatePanel title="暂无班级模块" description="加入班级并分配模块后，这里会展示单元与作业进度。" tone="empty" />
       )}
     </div>
   );

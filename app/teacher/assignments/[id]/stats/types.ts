@@ -1,3 +1,7 @@
+export type AssignmentStatsRouteParams = {
+  id: string;
+};
+
 export type AssignmentStatsData = {
   assignment: {
     id: string;

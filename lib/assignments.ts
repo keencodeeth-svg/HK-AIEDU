@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { readJson, transactJsonFiles, updateJson, writeJson } from "./storage";
-import { isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 import { getClassStudentIds } from "./classes";
 
 export type Assignment = {
@@ -146,6 +146,18 @@ function mapAssignmentSubmission(row: DbAssignmentSubmission): AssignmentSubmiss
   };
 }
 
+function canUseApiTestAssignmentExecutionFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireAssignmentProgressDatabase() {
+  requireDatabaseEnabled("assignment_progress");
+}
+
+function requireAssignmentSubmissionsDatabase() {
+  requireDatabaseEnabled("assignment_submissions");
+}
+
 export async function getAssignments(): Promise<Assignment[]> {
   if (!isDbEnabled()) {
     return readJson<Assignment[]>(ASSIGNMENT_FILE, []);
@@ -198,10 +210,11 @@ export async function getAssignmentItems(assignmentId: string): Promise<Assignme
 }
 
 export async function getAssignmentProgress(assignmentId: string): Promise<AssignmentProgress[]> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestAssignmentExecutionFallback()) {
     const progress = readJson<AssignmentProgress[]>(ASSIGNMENT_PROGRESS_FILE, []);
     return progress.filter((item) => item.assignmentId === assignmentId);
   }
+  requireAssignmentProgressDatabase();
   const rows = await query<DbAssignmentProgress>("SELECT * FROM assignment_progress WHERE assignment_id = $1", [
     assignmentId
   ]);
@@ -209,10 +222,11 @@ export async function getAssignmentProgress(assignmentId: string): Promise<Assig
 }
 
 export async function getAssignmentProgressByStudent(studentId: string): Promise<AssignmentProgress[]> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestAssignmentExecutionFallback()) {
     const progress = readJson<AssignmentProgress[]>(ASSIGNMENT_PROGRESS_FILE, []);
     return progress.filter((item) => item.studentId === studentId);
   }
+  requireAssignmentProgressDatabase();
   const rows = await query<DbAssignmentProgress>("SELECT * FROM assignment_progress WHERE student_id = $1", [
     studentId
   ]);
@@ -223,10 +237,11 @@ export async function getAssignmentSubmission(
   assignmentId: string,
   studentId: string
 ): Promise<AssignmentSubmission | null> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestAssignmentExecutionFallback()) {
     const list = readJson<AssignmentSubmission[]>(ASSIGNMENT_SUBMISSION_FILE, []);
     return list.find((item) => item.assignmentId === assignmentId && item.studentId === studentId) ?? null;
   }
+  requireAssignmentSubmissionsDatabase();
   const row = await queryOne<DbAssignmentSubmission>(
     "SELECT * FROM assignment_submissions WHERE assignment_id = $1 AND student_id = $2",
     [assignmentId, studentId]
@@ -237,10 +252,11 @@ export async function getAssignmentSubmission(
 export async function getAssignmentSubmissionsByAssignment(
   assignmentId: string
 ): Promise<AssignmentSubmission[]> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestAssignmentExecutionFallback()) {
     const list = readJson<AssignmentSubmission[]>(ASSIGNMENT_SUBMISSION_FILE, []);
     return list.filter((item) => item.assignmentId === assignmentId);
   }
+  requireAssignmentSubmissionsDatabase();
   const rows = await query<DbAssignmentSubmission>(
     "SELECT * FROM assignment_submissions WHERE assignment_id = $1",
     [assignmentId]
@@ -257,7 +273,7 @@ export async function upsertAssignmentSubmission(input: {
   submissionText?: string;
 }): Promise<AssignmentSubmission> {
   const submittedAt = new Date().toISOString();
-  if (!isDbEnabled()) {
+  if (canUseApiTestAssignmentExecutionFallback()) {
     const next: AssignmentSubmission = {
       id: `assign-sub-${crypto.randomBytes(6).toString("hex")}`,
       assignmentId: input.assignmentId,
@@ -285,6 +301,7 @@ export async function upsertAssignmentSubmission(input: {
     );
   }
 
+  requireAssignmentSubmissionsDatabase();
   const id = `assign-sub-${crypto.randomBytes(6).toString("hex")}`;
   const row = await queryOne<DbAssignmentSubmission>(
     `INSERT INTO assignment_submissions (id, assignment_id, student_id, answers, score, total, submitted_at, submission_text)
@@ -322,10 +339,11 @@ export async function upsertAssignmentSubmission(input: {
 }
 
 export async function getAssignmentSubmissionsByStudent(studentId: string): Promise<AssignmentSubmission[]> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestAssignmentExecutionFallback()) {
     const list = readJson<AssignmentSubmission[]>(ASSIGNMENT_SUBMISSION_FILE, []);
     return list.filter((item) => item.studentId === studentId);
   }
+  requireAssignmentSubmissionsDatabase();
   const rows = await query<DbAssignmentSubmission>("SELECT * FROM assignment_submissions WHERE student_id = $1", [
     studentId
   ]);
@@ -336,10 +354,11 @@ export async function getAssignmentProgressForStudent(
   assignmentId: string,
   studentId: string
 ): Promise<AssignmentProgress | null> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestAssignmentExecutionFallback()) {
     const progress = readJson<AssignmentProgress[]>(ASSIGNMENT_PROGRESS_FILE, []);
     return progress.find((item) => item.assignmentId === assignmentId && item.studentId === studentId) ?? null;
   }
+  requireAssignmentProgressDatabase();
   const row = await queryOne<DbAssignmentProgress>(
     "SELECT * FROM assignment_progress WHERE assignment_id = $1 AND student_id = $2",
     [assignmentId, studentId]
@@ -351,7 +370,7 @@ export async function createAssignmentProgress(assignmentId: string, studentId: 
   const existing = await getAssignmentProgressForStudent(assignmentId, studentId);
   if (existing) return existing;
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestAssignmentExecutionFallback()) {
     const list = readJson<AssignmentProgress[]>(ASSIGNMENT_PROGRESS_FILE, []);
     const next: AssignmentProgress = {
       id: `assign-progress-${crypto.randomBytes(6).toString("hex")}`,
@@ -373,6 +392,7 @@ export async function createAssignmentProgress(assignmentId: string, studentId: 
     );
   }
 
+  requireAssignmentProgressDatabase();
   const id = `assign-progress-${crypto.randomBytes(6).toString("hex")}`;
   const row = await queryOne<DbAssignmentProgress>(
     `INSERT INTO assignment_progress (id, assignment_id, student_id, status)
@@ -400,6 +420,9 @@ export async function createAssignment(input: {
   const maxUploads = Math.max(1, Math.min(input.maxUploads ?? 3, 10));
 
   if (!isDbEnabled()) {
+    if (!canUseApiTestAssignmentExecutionFallback()) {
+      requireAssignmentProgressDatabase();
+    }
     const assignment: Assignment = {
       id: `assign-${crypto.randomBytes(6).toString("hex")}`,
       classId: input.classId,
@@ -499,7 +522,7 @@ export async function completeAssignmentProgress(input: {
   const completedAt = new Date().toISOString();
   // Completion update is idempotent and can be safely retried after submission write.
 
-  if (!isDbEnabled()) {
+  if (canUseApiTestAssignmentExecutionFallback()) {
     const updated: AssignmentProgress = {
       id: `assign-progress-${crypto.randomBytes(6).toString("hex")}`,
       assignmentId: input.assignmentId,
@@ -526,6 +549,7 @@ export async function completeAssignmentProgress(input: {
     );
   }
 
+  requireAssignmentProgressDatabase();
   const existing = await getAssignmentProgressForStudent(input.assignmentId, input.studentId);
   if (!existing) {
     const id = `assign-progress-${crypto.randomBytes(6).toString("hex")}`;

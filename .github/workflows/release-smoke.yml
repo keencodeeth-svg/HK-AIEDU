@@ -49,9 +49,13 @@ jobs:
         env:
           API_TEST_BASE_URL: ${{ inputs.base_url }}
           API_TEST_SCOPE: ${{ inputs.scope }}
+          API_TEST_ALLOW_CUSTOM_ORIGIN_HEADER: "true"
           API_TEST_SERVER_MODE: remote
           API_TEST_FALLBACK_TO_DEV: "0"
           API_TEST_READINESS_TOKEN: ${{ secrets.READINESS_PROBE_TOKEN }}
+          API_TEST_ADMIN_EMAIL: ${{ vars.API_TEST_ADMIN_EMAIL }}
+          API_TEST_ADMIN_PASSWORD: ${{ secrets.API_TEST_ADMIN_PASSWORD }}
+          API_TEST_SMOKE_SCHOOL_ID: ${{ vars.API_TEST_SMOKE_SCHOOL_ID }}
         run: node scripts/test-api-routes.mjs
 
       - name: Publish summary
@@ -62,5 +66,6 @@ jobs:
             echo "- target: \`${{ inputs.target }}\`"
             echo "- scope: \`${{ inputs.scope }}\`"
             echo "- base_url: \`${{ inputs.base_url }}\`"
+            echo "- smoke_school_id: \`${{ vars.API_TEST_SMOKE_SCHOOL_ID || 'school-default' }}\`"
             echo "- result: passed"
           } >> "$GITHUB_STEP_SUMMARY"

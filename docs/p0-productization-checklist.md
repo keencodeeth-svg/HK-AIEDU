@@ -13,9 +13,10 @@
 ## 1. 当前基线
 
 - 工程基线已通过：`npm run verify:strict`、`npm run test:smoke:remote`
-- 当前规模：`68` 个页面、`191` 个 API 路由、`78` 个单测文件
+- 快照文档校验：提交前执行 `npm run check:project-snapshot`
+- 当前规模：`68` 个页面、`191` 个 API 路由、`90` 个单测文件
 - 当前浏览器回归：`1` 个 smoke 文件、`14` 条关键流程 smoke
-- 当前单测基线：`test:unit` 为 `201` 条用例
+- 当前单测基线：`test:unit` 为 `235` 条用例
 - 当前剩余文件态：当前工作树 `data/` 目录下还有 `23` 个 JSON 文件；`23` 个均已具备 DB canonical path，当前可见文件中已无 JSON-only 项
 - 运行时仍存在 `data/*.json` 种子与 fallback 状态文件，但 P0 高频执行态已经收口为 DB-only，生产基线从“能跑”提升到“有明确硬失败边界”
 - 关键前端工作台已成型：学生、家长、教师、学校、管理端均可单独进入

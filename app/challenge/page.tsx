@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
+import StatePanel from "@/components/StatePanel";
+import { isAuthError, requestJson } from "@/lib/client-request";
+import { getChallengeClaimRequestMessage, getChallengeLoadRequestMessage } from "./utils";
 
 type ChallengeTask = {
   id: string;
@@ -40,43 +43,149 @@ type ChallengeExperiment = {
   rollout: number;
 };
 
+type ChallengesPayload = {
+  data?: {
+    tasks?: ChallengeTask[];
+    points?: number;
+    experiment?: ChallengeExperiment | null;
+    result?: {
+      ok?: boolean;
+      message?: string;
+    };
+  };
+};
+
 export default function ChallengePage() {
+  const loadRequestIdRef = useRef(0);
+  const hasChallengeSnapshotRef = useRef(false);
   const [tasks, setTasks] = useState<ChallengeTask[]>([]);
   const [points, setPoints] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
   const [experiment, setExperiment] = useState<ChallengeExperiment | null>(null);
 
-  async function load() {
-    const res = await fetch("/api/challenges");
-    const data = await res.json();
-    setTasks(data?.data?.tasks ?? []);
-    setPoints(data?.data?.points ?? 0);
-    setExperiment(data?.data?.experiment ?? null);
-  }
+  const clearChallengeState = useCallback(() => {
+    hasChallengeSnapshotRef.current = false;
+    setTasks([]);
+    setPoints(0);
+    setExperiment(null);
+    setPageError(null);
+    setActionError(null);
+    setActionMessage(null);
+    setLoadingId(null);
+  }, []);
+
+  const handleAuthRequired = useCallback(() => {
+    clearChallengeState();
+    setAuthRequired(true);
+  }, [clearChallengeState]);
+
+  const load = useCallback(async () => {
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
+    setLoading(true);
+    setPageError(null);
+
+    try {
+      const payload = await requestJson<ChallengesPayload>("/api/challenges");
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+
+      hasChallengeSnapshotRef.current = true;
+      setTasks(payload.data?.tasks ?? []);
+      setPoints(payload.data?.points ?? 0);
+      setExperiment(payload.data?.experiment ?? null);
+      setAuthRequired(false);
+    } catch (error) {
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+
+      if (isAuthError(error)) {
+        handleAuthRequired();
+      } else {
+        if (!hasChallengeSnapshotRef.current) {
+          clearChallengeState();
+        }
+        setAuthRequired(false);
+        setPageError(getChallengeLoadRequestMessage(error, "加载挑战任务失败"));
+      }
+    } finally {
+      if (requestId === loadRequestIdRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [clearChallengeState, handleAuthRequired]);
 
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+  }, [load]);
 
   async function claim(taskId: string) {
     setLoadingId(taskId);
     setActionMessage(null);
-    const res = await fetch("/api/challenges/claim", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ taskId })
-    });
-    const data = await res.json();
-    setTasks(data?.data?.tasks ?? []);
-    setPoints(data?.data?.points ?? 0);
-    setExperiment(data?.data?.experiment ?? null);
-    if (data?.data?.result?.ok === false) {
-      setActionMessage(data?.data?.result?.message ?? "领取失败");
-    } else if (data?.data?.result?.ok === true) {
-      setActionMessage("奖励领取成功");
+    setActionError(null);
+    try {
+      const payload = await requestJson<ChallengesPayload>("/api/challenges/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId })
+      });
+      hasChallengeSnapshotRef.current = true;
+      setTasks(payload.data?.tasks ?? []);
+      setPoints(payload.data?.points ?? 0);
+      setExperiment(payload.data?.experiment ?? null);
+      setAuthRequired(false);
+      setPageError(null);
+      if (payload.data?.result?.ok === false) {
+        setActionError(payload.data.result.message ?? "领取失败");
+      } else if (payload.data?.result?.ok === true) {
+        setActionMessage(payload.data.result.message ?? "奖励领取成功");
+      }
+    } catch (error) {
+      if (isAuthError(error)) {
+        handleAuthRequired();
+      } else {
+        setAuthRequired(false);
+        setActionError(getChallengeClaimRequestMessage(error, "领取奖励失败"));
+      }
+    } finally {
+      setLoadingId(null);
     }
-    setLoadingId(null);
+  }
+
+  if (loading && !tasks.length && !authRequired) {
+    return <StatePanel title="挑战任务加载中" description="正在同步当前积分、挑战任务与奖励状态。" tone="loading" />;
+  }
+
+  if (authRequired) {
+    return (
+      <StatePanel
+        title="请先登录学生账号"
+        description="登录后即可查看挑战任务、积分与奖励领取状态。"
+        tone="info"
+      />
+    );
+  }
+
+  if (pageError && !tasks.length) {
+    return (
+      <StatePanel
+        title="挑战任务暂时不可用"
+        description={pageError}
+        tone="error"
+        action={
+          <button className="button secondary" type="button" onClick={() => void load()}>
+            重新加载
+          </button>
+        }
+      />
+    );
   }
 
   return (
@@ -88,6 +197,20 @@ export default function ChallengePage() {
         </div>
         <span className="chip">挑战系统</span>
       </div>
+
+      {pageError ? (
+        <StatePanel
+          compact
+          tone="error"
+          title="本次刷新存在异常"
+          description={pageError}
+          action={
+            <button className="button secondary" type="button" onClick={() => void load()}>
+              再试一次
+            </button>
+          }
+        />
+      ) : null}
 
       <Card title="闯关式任务系统" tag="激励">
         <div className="feature-card">
@@ -112,6 +235,7 @@ export default function ChallengePage() {
 
       <Card title="挑战任务" tag="清单">
         {actionMessage ? <div style={{ marginBottom: 10 }}>{actionMessage}</div> : null}
+        {actionError ? <div style={{ marginBottom: 10, color: "#b42318" }}>{actionError}</div> : null}
         <div className="grid" style={{ gap: 12 }}>
           {tasks.map((task) => (
             <div className="card" key={task.id}>

@@ -5,6 +5,7 @@ import {
   getSchoolAdminCount,
   getUserByEmail,
   hashPassword,
+  normalizeAuthEmail,
   setSessionCookie
 } from "@/lib/auth";
 import { createSchool, getSchoolByCode, resolveSchoolIdByCodeOrDefault } from "@/lib/schools";
@@ -37,6 +38,11 @@ export const POST = createAuthRoute({
   cache: "private-realtime",
   handler: async ({ request, meta }) => {
     const body = await parseJson(request, schoolRegisterSchema);
+    const email = normalizeAuthEmail(body.email);
+    const name = body.name.trim();
+    const schoolName = body.schoolName?.trim();
+    const schoolCode = body.schoolCode?.trim();
+    const inviteCode = body.inviteCode?.trim();
     const passwordValidation = validatePasswordPolicy(body.password);
     if (!passwordValidation.ok) {
       badRequest(passwordValidation.errors[0], {
@@ -50,7 +56,7 @@ export const POST = createAuthRoute({
     const schoolAdminCount = await getSchoolAdminCount();
     const decision = decideSelfRegisterAccess({
       existingCount: schoolAdminCount,
-      inputInviteCode: body.inviteCode,
+      inputInviteCode: inviteCode,
       configuredInviteCodes: [expectedInvite, ...(inviteList ? inviteList.split(/[,;\s]+/) : [])],
       bootstrapEnabled: isInitialSelfRegisterEnabled(process.env.SCHOOL_ADMIN_ALLOW_INITIAL_SELF_REGISTER)
     });
@@ -58,22 +64,22 @@ export const POST = createAuthRoute({
       forbidden(decision.error ?? "invite code required");
     }
 
-    const existing = await getUserByEmail(body.email);
+    const existing = await getUserByEmail(email);
     if (existing) {
       conflict("email exists");
     }
 
     let schoolId = await resolveSchoolIdByCodeOrDefault({
-      schoolCode: body.schoolCode,
-      fallbackToDefault: !body.schoolName
+      schoolCode,
+      fallbackToDefault: !schoolName
     });
-    if (!schoolId && body.schoolCode && !body.schoolName) {
+    if (!schoolId && schoolCode && !schoolName) {
       badRequest("invalid school code");
     }
 
-    if (!schoolId && body.schoolName) {
-      const existingSchool = body.schoolCode ? await getSchoolByCode(body.schoolCode) : null;
-      const school = existingSchool ?? (await createSchool({ name: body.schoolName, code: body.schoolCode }));
+    if (!schoolId && schoolName) {
+      const existingSchool = schoolCode ? await getSchoolByCode(schoolCode) : null;
+      const school = existingSchool ?? (await createSchool({ name: schoolName, code: schoolCode }));
       schoolId = school.id;
     }
 
@@ -84,8 +90,8 @@ export const POST = createAuthRoute({
     const id = `u-school-admin-${crypto.randomBytes(6).toString("hex")}`;
     const user = {
       id,
-      email: body.email,
-      name: body.name,
+      email,
+      name,
       role: "school_admin" as const,
       schoolId,
       password: hashPassword(body.password)
@@ -97,7 +103,7 @@ export const POST = createAuthRoute({
       {
         ok: true,
         role: "school_admin",
-        name: body.name
+        name
       },
       {
         requestId: meta.requestId,

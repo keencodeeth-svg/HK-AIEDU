@@ -1,3 +1,4 @@
+import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
 import { buildSeatPairs, getAssignedStudentIds, getFrontRowCount } from "@/lib/seat-plan-utils";
 import {
   STUDENT_GENDER_LABELS
@@ -11,6 +12,66 @@ export const DEFAULT_AI_OPTIONS: AiOptions = {
 };
 
 export const LAYOUT_OPTIONS = [2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+export function getTeacherSeatingRequestMessage(error: unknown, fallback: string) {
+  const status = getRequestStatus(error) ?? 0;
+  const requestMessage = getRequestErrorMessage(error, "").trim();
+  const lower = requestMessage.toLowerCase();
+
+  if (status === 401 || status === 403) {
+    return "教师登录状态已失效，请重新登录后继续配置学期排座。";
+  }
+  if (lower === "class not found" || (status === 404 && lower === "not found")) {
+    return "当前班级不存在，或你已失去该班级的排座权限。";
+  }
+  if (lower === "locked seat studentid is required" || /^body\.lockedseats\[\d+\]\.studentid (must be at least 1 chars|cannot be empty)$/.test(lower)) {
+    return "锁定座位时必须保留学生信息。";
+  }
+  if (lower === "locked seat student must belong to class") {
+    return "锁定的学生已不在当前班级中，请刷新后重试。";
+  }
+  if (lower === "duplicate locked seat position") {
+    return "锁定座位中存在重复位置，请检查后重试。";
+  }
+  if (lower === "duplicate locked seat student" || lower === "duplicate student assignment") {
+    return "同一名学生不能被分配到多个座位。";
+  }
+  if (lower === "duplicate seat position") {
+    return "座位表中存在重复位置，请检查后重试。";
+  }
+  if (
+    lower === "rows must be between 1 and 12" ||
+    lower === "columns must be between 1 and 12" ||
+    /^body\.(rows|columns) must be (>= 1|<= 12)$/.test(lower)
+  ) {
+    return "排座行列数需在 1 到 12 之间。";
+  }
+  if (
+    lower === "locked seat position out of range" ||
+    lower === "seat position out of range" ||
+    /^body\.(lockedseats|seats)\[\d+\]\.(row|column) must be (>= 1|<= 12)$/.test(lower)
+  ) {
+    return "座位位置超出当前排座网格，请重新调整。";
+  }
+  if (
+    lower === "seat position must be integer" ||
+    /^body\.(rows|columns) must be an integer$/.test(lower) ||
+    /^body\.(lockedseats|seats)\[\d+\]\.(row|column) must be an integer$/.test(lower)
+  ) {
+    return "排座的行列位置必须使用整数。";
+  }
+  if (lower === "body.classid must be at least 1 chars" || lower === "body.classid cannot be empty") {
+    return "请先选择班级后再操作排座。";
+  }
+
+  return getRequestErrorMessage(error, fallback);
+}
+
+export function isMissingTeacherSeatingClassError(error: unknown) {
+  const status = getRequestStatus(error) ?? 0;
+  const requestMessage = getRequestErrorMessage(error, "").trim().toLowerCase();
+  return requestMessage === "class not found" || (status === 404 && requestMessage === "not found");
+}
 
 export function getStudentDisplayName(student: TeacherSeatingStudent | null | undefined) {
   if (!student) return "未安排";

@@ -28,18 +28,19 @@ export const POST = createAuthRoute({
   cache: "private-realtime",
   handler: async ({ request, meta }) => {
     const body = await parseJson(request, recoveryRequestSchema);
-    if (!body.email.trim()) {
+    const email = body.email.trim();
+    if (!email) {
       badRequest("email required");
     }
 
     const result = await createAccountRecoveryRequest({
       role: body.role,
-      email: body.email,
-      name: body.name,
+      email,
+      name: body.name?.trim(),
       issueType: body.issueType,
-      note: body.note,
-      studentEmail: body.studentEmail,
-      schoolName: body.schoolName,
+      note: body.note?.trim(),
+      studentEmail: body.studentEmail?.trim(),
+      schoolName: body.schoolName?.trim(),
       requesterIp: request.headers.get("x-forwarded-for"),
       userAgent: request.headers.get("user-agent")
     });

@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   formatLoadedTime,
-  getRequestErrorMessage,
   isAuthError,
   requestJson
 } from "@/lib/client-request";
@@ -23,9 +22,19 @@ import type {
   TeacherClassItem,
   TeacherSeatingStudent
 } from "./types";
-import { DEFAULT_AI_OPTIONS, buildFollowUpChecklist, isFocusPriorityStudent, isFrontPriorityStudent, summarizePlan } from "./utils";
+import {
+  DEFAULT_AI_OPTIONS,
+  buildFollowUpChecklist,
+  getTeacherSeatingRequestMessage,
+  isFocusPriorityStudent,
+  isFrontPriorityStudent,
+  isMissingTeacherSeatingClassError,
+  summarizePlan
+} from "./utils";
 
 export function useTeacherSeatingPage() {
+  const classesRef = useRef<TeacherClassItem[]>([]);
+  const classIdRef = useRef("");
   const [classes, setClasses] = useState<TeacherClassItem[]>([]);
   const [classId, setClassId] = useState("");
   const [students, setStudents] = useState<TeacherSeatingStudent[]>([]);
@@ -51,54 +60,109 @@ export function useTeacherSeatingPage() {
   const [followUpActing, setFollowUpActing] = useState<null | "remind" | "copy">(null);
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
 
-  const loadData = useCallback(async (mode: "initial" | "refresh" = "initial", targetClassId?: string) => {
-    if (mode === "refresh") {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-    setPageError(null);
+  useEffect(() => {
+    classesRef.current = classes;
+  }, [classes]);
+
+  useEffect(() => {
+    classIdRef.current = classId;
+  }, [classId]);
+
+  const clearSeatingState = useCallback(() => {
+    setStudents([]);
+    setDraftPlan(null);
+    setSavedPlan(null);
+    setPreview(null);
+    setLockedSeatIds([]);
+    setLayoutRows(4);
+    setLayoutColumns(6);
+    setSaveMessage(null);
     setSaveError(null);
+    setFollowUpMessage(null);
+    setFollowUpError(null);
+  }, []);
 
-    try {
-      const query = targetClassId
-        ? `?classId=${encodeURIComponent(targetClassId)}`
-        : classId
-          ? `?classId=${encodeURIComponent(classId)}`
-          : "";
-      const payload = await requestJson<SeatingResponse>(`/api/teacher/seating${query}`);
-      const data = payload.data;
-      const nextClasses = data?.classes ?? [];
-      const nextClassId = data?.class?.id ?? nextClasses[0]?.id ?? "";
-      const nextPlan = data?.plan ?? null;
-
+  const clearCurrentClassState = useCallback(
+    (nextClasses: TeacherClassItem[], nextClassId: string) => {
+      clearSeatingState();
+      classesRef.current = nextClasses;
+      classIdRef.current = nextClassId;
       setClasses(nextClasses);
       setClassId(nextClassId);
-      setStudents(data?.students ?? []);
-      setSavedPlan(data?.savedPlan ?? null);
-      setDraftPlan(nextPlan);
-      setLayoutRows(nextPlan?.rows ?? data?.recommendedLayout?.rows ?? 4);
-      setLayoutColumns(nextPlan?.columns ?? data?.recommendedLayout?.columns ?? 6);
-      setPreview(null);
       setAuthRequired(false);
-      setLastLoadedAt(new Date().toISOString());
-    } catch (nextError) {
-      if (isAuthError(nextError)) {
-        setAuthRequired(true);
-        setClasses([]);
-        setClassId("");
-        setStudents([]);
-        setDraftPlan(null);
-        setSavedPlan(null);
-        setPreview(null);
+    },
+    [clearSeatingState]
+  );
+
+  const handleAuthRequired = useCallback(() => {
+    clearSeatingState();
+    classesRef.current = [];
+    classIdRef.current = "";
+    setClasses([]);
+    setClassId("");
+    setAuthRequired(true);
+  }, [clearSeatingState]);
+
+  const loadData = useCallback(async (mode: "initial" | "refresh" = "initial", targetClassId?: string) => {
+    async function runLoadData(nextMode: "initial" | "refresh", nextTargetClassId?: string) {
+      const activeClassId = nextTargetClassId ?? classIdRef.current;
+
+      if (nextMode === "refresh") {
+        setRefreshing(true);
       } else {
-        setPageError(getRequestErrorMessage(nextError, "加载学期排座配置失败"));
+        setLoading(true);
       }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+      setPageError(null);
+      setSaveError(null);
+
+      try {
+        const query = activeClassId ? `?classId=${encodeURIComponent(activeClassId)}` : "";
+        const payload = await requestJson<SeatingResponse>(`/api/teacher/seating${query}`);
+        const data = payload.data;
+        const nextClasses = data?.classes ?? [];
+        const nextClassId = data?.class?.id ?? nextClasses[0]?.id ?? "";
+        const nextPlan = data?.plan ?? null;
+
+        classesRef.current = nextClasses;
+        classIdRef.current = nextClassId;
+        setClasses(nextClasses);
+        setClassId(nextClassId);
+        setStudents(data?.students ?? []);
+        setSavedPlan(data?.savedPlan ?? null);
+        setDraftPlan(nextPlan);
+        setLayoutRows(nextPlan?.rows ?? data?.recommendedLayout?.rows ?? 4);
+        setLayoutColumns(nextPlan?.columns ?? data?.recommendedLayout?.columns ?? 6);
+        setPreview(null);
+        setAuthRequired(false);
+        setLastLoadedAt(new Date().toISOString());
+      } catch (nextError) {
+        if (isAuthError(nextError)) {
+          handleAuthRequired();
+          return;
+        }
+        const errorMessage = getTeacherSeatingRequestMessage(nextError, "加载学期排座配置失败");
+        if (isMissingTeacherSeatingClassError(nextError)) {
+          const nextClasses = classesRef.current.filter((item) => item.id !== activeClassId);
+          const nextClassId = nextClasses[0]?.id ?? "";
+          clearCurrentClassState(nextClasses, nextClassId);
+          if (nextClassId) {
+            await runLoadData("refresh", nextClassId);
+          } else {
+            setLastLoadedAt(new Date().toISOString());
+          }
+          setPageError(errorMessage);
+          return;
+        }
+        setAuthRequired(false);
+        setPageError(errorMessage);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [classId]);
+
+    await runLoadData(mode, targetClassId);
+  }, [clearCurrentClassState, handleAuthRequired]);
 
   useEffect(() => {
     void loadData();
@@ -254,7 +318,22 @@ export function useTeacherSeatingPage() {
           : "学期预览已生成，可先应用再做少量调整。"
       );
     } catch (nextError) {
-      setPageError(getRequestErrorMessage(nextError, "生成学期预览失败"));
+      if (isAuthError(nextError)) {
+        handleAuthRequired();
+        return;
+      }
+      const errorMessage = getTeacherSeatingRequestMessage(nextError, "生成学期预览失败");
+      if (isMissingTeacherSeatingClassError(nextError)) {
+        const nextClasses = classesRef.current.filter((item) => item.id !== classId);
+        const nextClassId = nextClasses[0]?.id ?? "";
+        clearCurrentClassState(nextClasses, nextClassId);
+        if (nextClassId) {
+          await loadData("refresh", nextClassId);
+        } else {
+          setLastLoadedAt(new Date().toISOString());
+        }
+      }
+      setPageError(errorMessage);
     } finally {
       setPreviewing(false);
     }
@@ -311,7 +390,22 @@ export function useTeacherSeatingPage() {
       }
       setSaveMessage("本学期座位方案已保存，后续可按需做少量微调。");
     } catch (nextError) {
-      setSaveError(getRequestErrorMessage(nextError, "保存学期排座失败"));
+      if (isAuthError(nextError)) {
+        handleAuthRequired();
+        return;
+      }
+      const errorMessage = getTeacherSeatingRequestMessage(nextError, "保存学期排座失败");
+      if (isMissingTeacherSeatingClassError(nextError)) {
+        const nextClasses = classesRef.current.filter((item) => item.id !== classId);
+        const nextClassId = nextClasses[0]?.id ?? "";
+        clearCurrentClassState(nextClasses, nextClassId);
+        if (nextClassId) {
+          await loadData("refresh", nextClassId);
+        } else {
+          setLastLoadedAt(new Date().toISOString());
+        }
+      }
+      setSaveError(errorMessage);
     } finally {
       setSaving(false);
     }
@@ -339,7 +433,22 @@ export function useTeacherSeatingPage() {
         `已发送资料补充提醒：学生 ${result?.students ?? 0} 人${includeParentsInReminder ? `，家长 ${result?.parents ?? 0} 人` : ""}。`
       );
     } catch (nextError) {
-      setFollowUpError(getRequestErrorMessage(nextError, "发送资料补充提醒失败"));
+      if (isAuthError(nextError)) {
+        handleAuthRequired();
+        return;
+      }
+      const errorMessage = getTeacherSeatingRequestMessage(nextError, "发送资料补充提醒失败");
+      if (isMissingTeacherSeatingClassError(nextError)) {
+        const nextClasses = classesRef.current.filter((item) => item.id !== classId);
+        const nextClassId = nextClasses[0]?.id ?? "";
+        clearCurrentClassState(nextClasses, nextClassId);
+        if (nextClassId) {
+          await loadData("refresh", nextClassId);
+        } else {
+          setLastLoadedAt(new Date().toISOString());
+        }
+      }
+      setFollowUpError(errorMessage);
     } finally {
       setFollowUpActing(null);
     }
@@ -361,7 +470,12 @@ export function useTeacherSeatingPage() {
   }
 
   function handleClassChange(nextClassId: string) {
+    classIdRef.current = nextClassId;
     setClassId(nextClassId);
+    setSaveMessage(null);
+    setSaveError(null);
+    setFollowUpMessage(null);
+    setFollowUpError(null);
     void loadData("refresh", nextClassId);
   }
 

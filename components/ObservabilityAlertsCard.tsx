@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  getRequestErrorMessage,
+  isAuthError,
+  requestJson
+} from "@/lib/client-request";
 
 type Alert = {
   id: string;
@@ -26,6 +31,10 @@ type Payload = {
     mediumAlerts: number;
   };
   alerts: Alert[];
+};
+
+type AlertsResponse = {
+  data?: Payload;
 };
 
 const severityLabelMap: Record<Alert["severity"], string> = {
@@ -79,20 +88,35 @@ export default function ObservabilityAlertsCard() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/admin/observability/alerts", { cache: "no-store" })
-      .then(async (res) => {
-        const json = await res.json();
-        if (!res.ok) {
-          throw new Error(json?.error ?? "加载失败");
+    let cancelled = false;
+
+    async function loadAlerts() {
+      try {
+        const json = await requestJson<AlertsResponse>(
+          "/api/admin/observability/alerts",
+          { cache: "no-store" }
+        );
+        if (cancelled) {
+          return;
         }
-        return json;
-      })
-      .then((json) => {
         setData(json?.data ?? null);
-      })
-      .catch((err) => {
-        setError((err as Error).message);
-      });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setError(
+          isAuthError(error)
+            ? "请先使用管理员账号登录"
+            : getRequestErrorMessage(error, "加载失败")
+        );
+      }
+    }
+
+    void loadAlerts();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (error) {
@@ -180,4 +204,3 @@ export default function ObservabilityAlertsCard() {
     </div>
   );
 }
-

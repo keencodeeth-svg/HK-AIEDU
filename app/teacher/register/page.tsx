@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Card from "@/components/Card";
 import PasswordPolicyHint from "@/components/auth/PasswordPolicyHint";
+import { resolveRegisterFormError } from "@/lib/auth-form-errors";
+import { requestJson } from "@/lib/client-request";
 
 export default function TeacherRegisterPage() {
   const [email, setEmail] = useState("");
@@ -18,25 +20,30 @@ export default function TeacherRegisterPage() {
     setLoading(true);
     setError(null);
     try {
+      const normalizedEmail = email.trim();
+      const normalizedName = name.trim();
       const payload = {
-        email,
-        name,
+        email: normalizedEmail,
+        name: normalizedName,
         password,
         schoolCode: schoolCode.trim() || undefined,
         inviteCode: inviteCode.trim() || undefined
       };
-      const res = await fetch("/api/auth/teacher-register", {
+      await requestJson("/api/auth/teacher-register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error ?? "注册失败");
-      }
       window.location.assign("/teacher");
     } catch (err) {
-      setError((err as Error).message);
+      setError(
+        resolveRegisterFormError(err, {
+          fallback: "注册失败",
+          emailExistsMessage: "该教师邮箱已注册，可直接登录。",
+          invalidInviteMessage: "邀请码无效，或当前不允许教师自助注册。",
+          invalidSchoolCodeMessage: "学校编码无效，请核对后重试；不填则会归入默认学校。"
+        })
+      );
     } finally {
       setLoading(false);
     }

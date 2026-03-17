@@ -1,4 +1,4 @@
-import { assertDatabaseEnabled, isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 import { getQuestions } from "./content";
 import { type QuestionAttempt, getAttemptsByKnowledgePoint, getAttemptsByUser } from "./progress";
 import { readJson, writeJson } from "./storage";
@@ -186,6 +186,14 @@ function mapDbRecord(row: DbMasteryRecord): MasteryRecord {
   });
 }
 
+function requireMasteryDatabase() {
+  requireDatabaseEnabled("mastery_records");
+}
+
+function canUseApiTestMasteryFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
 async function buildRecordsFromAttempts(userId: string, attempts: QuestionAttempt[], subject?: string) {
   const nowTs = Date.now();
   const recentWindowStart = nowTs - 7 * MS_PER_DAY;
@@ -279,12 +287,11 @@ async function buildRecordsFromAttempts(userId: string, attempts: QuestionAttemp
 }
 
 async function readMasteryRecords(userId: string, subject?: string) {
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("mastery_records");
+  if (canUseApiTestMasteryFallback()) {
     const records = readJson<MasteryRecord[]>(MASTERY_FILE, []).map(normalizeMasteryRecord);
     return records.filter((item) => item.userId === userId && (!subject || item.subject === subject));
   }
-
+  requireMasteryDatabase();
   const rows = subject
     ? await query<DbMasteryRecord>(
         "SELECT * FROM mastery_records WHERE user_id = $1 AND subject = $2",
@@ -295,8 +302,7 @@ async function readMasteryRecords(userId: string, subject?: string) {
 }
 
 async function replaceMasteryRecords(userId: string, subject: string | undefined, records: MasteryRecord[]) {
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("mastery_records");
+  if (canUseApiTestMasteryFallback()) {
     const all = readJson<MasteryRecord[]>(MASTERY_FILE, []);
     const remained = all.filter((item) => {
       if (item.userId !== userId) return true;
@@ -306,7 +312,7 @@ async function replaceMasteryRecords(userId: string, subject: string | undefined
     writeJson(MASTERY_FILE, [...remained, ...records]);
     return;
   }
-
+  requireMasteryDatabase();
   if (subject) {
     await query("DELETE FROM mastery_records WHERE user_id = $1 AND subject = $2", [userId, subject]);
   } else {
@@ -337,8 +343,7 @@ async function replaceMasteryRecords(userId: string, subject: string | undefined
 }
 
 async function upsertMasteryRecord(record: MasteryRecord) {
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("mastery_records");
+  if (canUseApiTestMasteryFallback()) {
     const all = readJson<MasteryRecord[]>(MASTERY_FILE, []);
     const next = all.filter(
       (item) => !(item.userId === record.userId && item.knowledgePointId === record.knowledgePointId)
@@ -347,7 +352,7 @@ async function upsertMasteryRecord(record: MasteryRecord) {
     writeJson(MASTERY_FILE, next);
     return;
   }
-
+  requireMasteryDatabase();
   await query(
     `INSERT INTO mastery_records
      (id, user_id, subject, knowledge_point_id, correct_count, total_count, mastery_score, confidence_score, recency_weight, mastery_trend_7d, last_attempt_at, updated_at)
@@ -380,8 +385,7 @@ async function upsertMasteryRecord(record: MasteryRecord) {
 }
 
 async function deleteMasteryRecord(userId: string, knowledgePointId: string, subject?: string) {
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("mastery_records");
+  if (canUseApiTestMasteryFallback()) {
     const all = readJson<MasteryRecord[]>(MASTERY_FILE, []);
     const next = all.filter(
       (item) =>
@@ -396,7 +400,7 @@ async function deleteMasteryRecord(userId: string, knowledgePointId: string, sub
     }
     return;
   }
-
+  requireMasteryDatabase();
   if (subject) {
     await query(
       "DELETE FROM mastery_records WHERE user_id = $1 AND knowledge_point_id = $2 AND subject = $3",
@@ -474,8 +478,7 @@ export async function getMasteryRecordsByUser(userId: string, subject?: string) 
 }
 
 export async function getMasteryRecord(userId: string, knowledgePointId: string, subject?: string) {
-  if (!isDbEnabled()) {
-    assertDatabaseEnabled("mastery_records");
+  if (canUseApiTestMasteryFallback()) {
     const records = readJson<MasteryRecord[]>(MASTERY_FILE, []).map(normalizeMasteryRecord);
     const found = records.find(
       (item) =>
@@ -486,7 +489,7 @@ export async function getMasteryRecord(userId: string, knowledgePointId: string,
     if (found) return found;
     return syncMasteryForKnowledgePoint(userId, knowledgePointId, subject);
   }
-
+  requireMasteryDatabase();
   const row = subject
     ? await queryOne<DbMasteryRecord>(
         "SELECT * FROM mastery_records WHERE user_id = $1 AND knowledge_point_id = $2 AND subject = $3",

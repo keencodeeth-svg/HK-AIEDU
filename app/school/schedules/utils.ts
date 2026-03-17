@@ -1,3 +1,4 @@
+import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
 import type { SchoolScheduleTemplate } from "@/lib/school-schedule-templates";
 import type { TeacherScheduleRule } from "@/lib/teacher-schedule-rules";
 import type {
@@ -124,4 +125,80 @@ export function applyTemplateToAiForm(template: SchoolScheduleTemplate): AiSched
     campus: template.campus ?? "主校区",
     weekdays: template.weekdays.map((item) => String(item))
   };
+}
+
+export function getSchoolSchedulesRequestMessage(error: unknown, fallback: string) {
+  const status = getRequestStatus(error) ?? 0;
+  const requestMessage = getRequestErrorMessage(error, "").trim();
+  const normalizedMessage = requestMessage.toLowerCase();
+
+  if (status === 401) {
+    return "登录状态已失效，请重新登录后继续管理课程表。";
+  }
+  if (normalizedMessage.startsWith("class not found")) {
+    return "所选班级不存在，请刷新班级列表后重试。";
+  }
+  if (normalizedMessage === "schedule not found") {
+    return "该课程节次不存在，可能已被其他管理员删除。";
+  }
+  if (normalizedMessage === "schedule template not found") {
+    return "课时模板不存在，可能已被删除。";
+  }
+  if (normalizedMessage === "teacher schedule rule not found") {
+    return "教师排课规则不存在，可能已被删除。";
+  }
+  if (normalizedMessage === "teacher unavailable slot not found") {
+    return "教师禁排时段不存在，可能已被删除。";
+  }
+  if (normalizedMessage === "ai schedule preview not found") {
+    return "这次 AI 预演已失效，请重新预演后再写入。";
+  }
+  if (normalizedMessage === "ai schedule operation not found") {
+    return "没有找到可回滚的 AI 排课记录。";
+  }
+  if (normalizedMessage === "schoolid required for platform admin") {
+    return "请先选择学校后再管理课程表。";
+  }
+  if (normalizedMessage === "school not bound") {
+    return "当前账号尚未绑定学校，暂时无法管理课程表。";
+  }
+  if (normalizedMessage === "cross school access denied") {
+    return "当前账号不能访问这所学校的课程表数据，请切换到有权限的学校后再试。";
+  }
+  if (status === 403 || normalizedMessage === "unauthorized" || normalizedMessage === "forbidden") {
+    return "当前账号没有课程表管理权限，请使用学校管理员或平台主管账号登录。";
+  }
+  if (status === 404) {
+    return fallback;
+  }
+
+  return getRequestErrorMessage(error, fallback);
+}
+
+export function isMissingSchoolScheduleClassError(error: unknown) {
+  return getRequestErrorMessage(error, "").trim().toLowerCase().startsWith("class not found");
+}
+
+export function isMissingSchoolScheduleSessionError(error: unknown) {
+  return getRequestErrorMessage(error, "").trim().toLowerCase() === "schedule not found";
+}
+
+export function isMissingSchoolScheduleTemplateError(error: unknown) {
+  return getRequestErrorMessage(error, "").trim().toLowerCase() === "schedule template not found";
+}
+
+export function isMissingSchoolScheduleTeacherRuleError(error: unknown) {
+  return getRequestErrorMessage(error, "").trim().toLowerCase() === "teacher schedule rule not found";
+}
+
+export function isMissingSchoolScheduleTeacherUnavailableError(error: unknown) {
+  return getRequestErrorMessage(error, "").trim().toLowerCase() === "teacher unavailable slot not found";
+}
+
+export function isMissingSchoolSchedulePreviewError(error: unknown) {
+  return getRequestErrorMessage(error, "").trim().toLowerCase() === "ai schedule preview not found";
+}
+
+export function isMissingSchoolScheduleOperationError(error: unknown) {
+  return getRequestErrorMessage(error, "").trim().toLowerCase() === "ai schedule operation not found";
 }

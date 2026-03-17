@@ -13,3 +13,8 @@ export type CalendarItem = {
 export type CalendarResponse = {
   data?: CalendarItem[];
 };
+
+export type CalendarRoleAction = {
+  href: string;
+  label: string;
+};

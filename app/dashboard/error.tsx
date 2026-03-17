@@ -4,6 +4,14 @@ import { useEffect } from "react";
 import Link from "next/link";
 import Card from "@/components/Card";
 import StatePanel from "@/components/StatePanel";
+import { getRequestStatus, requestJson } from "@/lib/client-request";
+
+function truncateForTelemetry(value: string | undefined, maxLength: number) {
+  if (!value) {
+    return "";
+  }
+  return value.length > maxLength ? value.slice(0, maxLength) : value;
+}
 
 export default function DashboardError({
   error,
@@ -14,20 +22,24 @@ export default function DashboardError({
 }) {
   useEffect(() => {
     console.error("dashboard route error", error);
-    void fetch("/api/observability/client-error", {
+    const payload = {
+      component: "dashboard",
+      pathname: truncateForTelemetry(window.location.pathname, 240),
+      message: truncateForTelemetry(error.message || "dashboard route error", 400),
+      stack: truncateForTelemetry(error.stack || "", 4000),
+      digest: truncateForTelemetry(error.digest || "", 120)
+    };
+    void requestJson("/api/observability/client-error", {
       method: "POST",
       headers: {
         "content-type": "application/json"
       },
-      body: JSON.stringify({
-        component: "dashboard",
-        pathname: window.location.pathname,
-        message: error.message || "dashboard route error",
-        stack: error.stack || "",
-        digest: error.digest || ""
-      })
-    }).catch(() => {
-      // client error reporting must never block the fallback UI
+      body: JSON.stringify(payload)
+    }).catch((reportError) => {
+      if (getRequestStatus(reportError) === 400) {
+        return;
+      }
+      // Client error reporting must never block the fallback UI.
     });
   }, [error]);
 

@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
+import { requestJson } from "@/lib/client-request";
 import type { SchoolClassRecord, SchoolUserRecord } from "@/lib/school-admin-types";
 import type { SchoolScheduleTemplate } from "@/lib/school-schedule-templates";
 import type { TeacherScheduleRule } from "@/lib/teacher-schedule-rules";
 import type { TeacherUnavailableSlot } from "@/lib/teacher-unavailability";
+import { isSchoolAdminAuthRequiredError } from "../utils";
 import type {
   AiMode,
   AiOperationSummary,
@@ -37,12 +38,22 @@ import {
   addMinutesToTime,
   applyTemplateToAiForm,
   formatTeacherRuleSummary,
+  getSchoolSchedulesRequestMessage,
+  isMissingSchoolScheduleClassError,
+  isMissingSchoolScheduleOperationError,
+  isMissingSchoolSchedulePreviewError,
+  isMissingSchoolScheduleSessionError,
+  isMissingSchoolScheduleTeacherRuleError,
+  isMissingSchoolScheduleTeacherUnavailableError,
+  isMissingSchoolScheduleTemplateError,
   toOptionalNumber
 } from "./utils";
 
 export function useSchoolSchedulesPage() {
+  const loadRequestIdRef = useRef(0);
   const manualEditorRef = useRef<HTMLDivElement | null>(null);
   const weekViewRef = useRef<HTMLDivElement | null>(null);
+  const noStoreRequestInit = useMemo(() => ({ cache: "no-store" as const }), []);
   const [classes, setClasses] = useState<SchoolClassRecord[]>([]);
   const [sessions, setSessions] = useState<ScheduleViewItem[]>([]);
   const [summary, setSummary] = useState<SchoolSchedulesData["summary"] | null>(null);
@@ -88,7 +99,56 @@ export function useSchoolSchedulesPage() {
   const [teacherUnavailableMessage, setTeacherUnavailableMessage] = useState<string | null>(null);
   const [teacherUnavailableError, setTeacherUnavailableError] = useState<string | null>(null);
 
+  const clearSchoolSchedulesState = useCallback(() => {
+    setClasses([]);
+    setSessions([]);
+    setSummary(null);
+    setLastLoadedAt(null);
+    setClassFilter("all");
+    setWeekdayFilter("all");
+    setKeyword("");
+    setEditingId(null);
+    setForm({ ...EMPTY_FORM });
+    setFormError(null);
+    setFormMessage(null);
+    setAiForm({ ...DEFAULT_AI_FORM, weekdays: [...DEFAULT_AI_FORM.weekdays] });
+    setAiError(null);
+    setAiMessage(null);
+    setAiResult(null);
+    setLatestAiOperation(null);
+    setDeletingId(null);
+    setLockingId(null);
+    setTemplates([]);
+    setTeacherRules([]);
+    setTeacherUnavailableSlots([]);
+    setTeachers([]);
+    setTemplateForm({ ...DEFAULT_TEMPLATE_FORM, weekdays: [...DEFAULT_TEMPLATE_FORM.weekdays] });
+    setTemplateSaving(false);
+    setTemplateDeletingId(null);
+    setTemplateError(null);
+    setTemplateMessage(null);
+    setTeacherRuleForm({ ...DEFAULT_TEACHER_RULE_FORM });
+    setTeacherRuleSaving(false);
+    setTeacherRuleDeletingId(null);
+    setTeacherRuleError(null);
+    setTeacherRuleMessage(null);
+    setTeacherUnavailableForm({ ...DEFAULT_TEACHER_UNAVAILABLE_FORM });
+    setTeacherUnavailableSaving(false);
+    setTeacherUnavailableDeletingId(null);
+    setTeacherUnavailableError(null);
+    setTeacherUnavailableMessage(null);
+    setPageError(null);
+  }, []);
+
+  const handleAuthRequired = useCallback(() => {
+    clearSchoolSchedulesState();
+    setAuthRequired(true);
+  }, [clearSchoolSchedulesState]);
+
   const loadData = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
+
     if (mode === "refresh") {
       setRefreshing(true);
     } else {
@@ -99,13 +159,18 @@ export function useSchoolSchedulesPage() {
     try {
       const [payload, templatesPayload, teacherRulesPayload, teacherUnavailablePayload, teachersPayload, latestAiOperationPayload] =
         await Promise.all([
-          requestJson<SchoolSchedulesResponse>("/api/school/schedules"),
-          requestJson<ScheduleTemplateResponse>("/api/school/schedules/templates"),
-          requestJson<TeacherRuleListResponse>("/api/school/schedules/teacher-rules"),
-          requestJson<TeacherUnavailableResponse>("/api/school/schedules/teacher-unavailability"),
-          requestJson<SchoolUsersResponse>("/api/school/users?role=teacher"),
-          requestJson<LatestAiOperationResponse>("/api/school/schedules/ai-operations/latest")
+          requestJson<SchoolSchedulesResponse>("/api/school/schedules", noStoreRequestInit),
+          requestJson<ScheduleTemplateResponse>("/api/school/schedules/templates", noStoreRequestInit),
+          requestJson<TeacherRuleListResponse>("/api/school/schedules/teacher-rules", noStoreRequestInit),
+          requestJson<TeacherUnavailableResponse>("/api/school/schedules/teacher-unavailability", noStoreRequestInit),
+          requestJson<SchoolUsersResponse>("/api/school/users?role=teacher", noStoreRequestInit),
+          requestJson<LatestAiOperationResponse>("/api/school/schedules/ai-operations/latest", noStoreRequestInit)
         ]);
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+      const nextClasses = payload.data?.classes ?? [];
+
       setClasses(payload.data?.classes ?? []);
       setSessions(payload.data?.sessions ?? []);
       setSummary(payload.data?.summary ?? null);
@@ -115,9 +180,10 @@ export function useSchoolSchedulesPage() {
       setTeachers(teachersPayload.data ?? []);
       setLatestAiOperation(latestAiOperationPayload.data ?? null);
       setAuthRequired(false);
+      setClassFilter((prev) => (prev === "all" || nextClasses.some((item) => item.id === prev) ? prev : "all"));
       setLastLoadedAt(new Date().toISOString());
-      if (payload.data?.classes?.[0]?.id) {
-        const firstClass = payload.data.classes[0];
+      if (nextClasses[0]?.id) {
+        const firstClass = nextClasses[0];
         setForm((prev) => (prev.classId ? prev : { ...prev, classId: firstClass.id }));
         setTemplateForm((prev) =>
           prev.grade && prev.subject ? prev : { ...DEFAULT_TEMPLATE_FORM, grade: firstClass.grade, subject: firstClass.subject }
@@ -128,26 +194,29 @@ export function useSchoolSchedulesPage() {
         setTeacherUnavailableForm((prev) =>
           prev.teacherId ? prev : { ...DEFAULT_TEACHER_UNAVAILABLE_FORM, teacherId: firstClass.teacherId ?? "" }
         );
+      } else {
+        setForm({ ...EMPTY_FORM });
+        setTemplateForm({ ...DEFAULT_TEMPLATE_FORM, weekdays: [...DEFAULT_TEMPLATE_FORM.weekdays] });
+        setTeacherRuleForm({ ...DEFAULT_TEACHER_RULE_FORM });
+        setTeacherUnavailableForm({ ...DEFAULT_TEACHER_UNAVAILABLE_FORM });
       }
     } catch (error) {
-      if (isAuthError(error)) {
-        setAuthRequired(true);
-        setClasses([]);
-        setSessions([]);
-        setSummary(null);
-        setTemplates([]);
-        setTeacherRules([]);
-        setTeacherUnavailableSlots([]);
-        setTeachers([]);
-        setLatestAiOperation(null);
+      if (requestId !== loadRequestIdRef.current) {
+        return;
+      }
+      if (isSchoolAdminAuthRequiredError(error)) {
+        handleAuthRequired();
       } else {
-        setPageError(getRequestErrorMessage(error, "加载课程表管理失败"));
+        setAuthRequired(false);
+        setPageError(getSchoolSchedulesRequestMessage(error, "加载课程表管理失败"));
       }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === loadRequestIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, []);
+  }, [handleAuthRequired, noStoreRequestInit]);
 
   useEffect(() => {
     void loadData("initial");
@@ -527,11 +596,19 @@ export function useSchoolSchedulesPage() {
       resetForm({ preserveMessage: true, nextClassId: payload.classId });
       setFormMessage(successMessage);
     } catch (error) {
-      setFormError(getRequestErrorMessage(error, editingId ? "更新节次失败" : "创建节次失败"));
+      if (isSchoolAdminAuthRequiredError(error)) {
+        handleAuthRequired();
+      } else if (isMissingSchoolScheduleClassError(error) || (editingId && isMissingSchoolScheduleSessionError(error))) {
+        resetForm({ preserveMessage: true });
+        await loadData("refresh");
+        setFormError(getSchoolSchedulesRequestMessage(error, editingId ? "更新节次失败" : "创建节次失败"));
+      } else {
+        setFormError(getSchoolSchedulesRequestMessage(error, editingId ? "更新节次失败" : "创建节次失败"));
+      }
     } finally {
       setSaving(false);
     }
-  }, [editingId, form, loadData, resetForm]);
+  }, [editingId, form, handleAuthRequired, loadData, resetForm]);
 
   const handleDelete = useCallback(async (id: string) => {
     if (typeof window !== "undefined" && !window.confirm("确定删除这个课程节次吗？")) {
@@ -547,11 +624,21 @@ export function useSchoolSchedulesPage() {
       await loadData("refresh");
       setFormMessage("课程节次已删除");
     } catch (error) {
-      setPageError(getRequestErrorMessage(error, "删除节次失败"));
+      if (isSchoolAdminAuthRequiredError(error)) {
+        handleAuthRequired();
+      } else if (isMissingSchoolScheduleSessionError(error)) {
+        if (editingId === id) {
+          resetForm({ preserveMessage: true });
+        }
+        await loadData("refresh");
+        setPageError(getSchoolSchedulesRequestMessage(error, "删除节次失败"));
+      } else {
+        setPageError(getSchoolSchedulesRequestMessage(error, "删除节次失败"));
+      }
     } finally {
       setDeletingId(null);
     }
-  }, [editingId, loadData, resetForm]);
+  }, [editingId, handleAuthRequired, loadData, resetForm]);
 
   const toggleAiWeekday = useCallback((weekday: string) => {
     setAiForm((prev) => {
@@ -613,11 +700,15 @@ export function useSchoolSchedulesPage() {
       setAiResult(result.data ?? null);
       setAiMessage(`AI 预演已完成，预计新增 ${result.data?.summary.createdSessions ?? 0} 个节次。`);
     } catch (error) {
-      setAiError(getRequestErrorMessage(error, "AI 预演失败"));
+      if (isSchoolAdminAuthRequiredError(error)) {
+        handleAuthRequired();
+      } else {
+        setAiError(getSchoolSchedulesRequestMessage(error, "AI 预演失败"));
+      }
     } finally {
       setAiGenerating(false);
     }
-  }, [buildAiRequestBody]);
+  }, [buildAiRequestBody, handleAuthRequired]);
 
   const handleAiApplyPreview = useCallback(async () => {
     if (!aiResult?.previewId) {
@@ -640,11 +731,19 @@ export function useSchoolSchedulesPage() {
       await loadData("refresh");
       setAiMessage(`AI 排课已写入课表，本次新增 ${result.data?.summary.createdSessions ?? 0} 个节次。`);
     } catch (error) {
-      setAiError(getRequestErrorMessage(error, "确认写入 AI 排课失败"));
+      if (isSchoolAdminAuthRequiredError(error)) {
+        handleAuthRequired();
+      } else if (isMissingSchoolSchedulePreviewError(error)) {
+        setAiResult(null);
+        await loadData("refresh");
+        setAiError(getSchoolSchedulesRequestMessage(error, "确认写入 AI 排课失败"));
+      } else {
+        setAiError(getSchoolSchedulesRequestMessage(error, "确认写入 AI 排课失败"));
+      }
     } finally {
       setAiGenerating(false);
     }
-  }, [aiForm.mode, aiResult?.previewId, loadData]);
+  }, [aiForm.mode, aiResult?.previewId, handleAuthRequired, loadData]);
 
   const handleAiRollback = useCallback(async () => {
     if (!latestAiOperation?.id) {
@@ -669,11 +768,19 @@ export function useSchoolSchedulesPage() {
       await loadData("refresh");
       setAiMessage(`已回滚最近一次 AI 排课，恢复 ${result.data?.restoredSessionCount ?? 0} 个节次。`);
     } catch (error) {
-      setAiError(getRequestErrorMessage(error, "回滚 AI 排课失败"));
+      if (isSchoolAdminAuthRequiredError(error)) {
+        handleAuthRequired();
+      } else if (isMissingSchoolScheduleOperationError(error)) {
+        setLatestAiOperation(null);
+        await loadData("refresh");
+        setAiError(getSchoolSchedulesRequestMessage(error, "回滚 AI 排课失败"));
+      } else {
+        setAiError(getSchoolSchedulesRequestMessage(error, "回滚 AI 排课失败"));
+      }
     } finally {
       setAiRollingBack(false);
     }
-  }, [latestAiOperation?.id, loadData]);
+  }, [handleAuthRequired, latestAiOperation?.id, loadData]);
 
   const handleToggleLock = useCallback(async (item: ScheduleViewItem) => {
     setLockingId(item.id);
@@ -692,11 +799,21 @@ export function useSchoolSchedulesPage() {
       await loadData("refresh");
       setFormMessage(item.locked ? "课程节次已解锁" : "课程节次已锁定");
     } catch (error) {
-      setPageError(getRequestErrorMessage(error, item.locked ? "解锁节次失败" : "锁定节次失败"));
+      if (isSchoolAdminAuthRequiredError(error)) {
+        handleAuthRequired();
+      } else if (isMissingSchoolScheduleSessionError(error)) {
+        if (editingId === item.id) {
+          resetForm({ preserveMessage: true });
+        }
+        await loadData("refresh");
+        setPageError(getSchoolSchedulesRequestMessage(error, item.locked ? "解锁节次失败" : "锁定节次失败"));
+      } else {
+        setPageError(getSchoolSchedulesRequestMessage(error, item.locked ? "解锁节次失败" : "锁定节次失败"));
+      }
     } finally {
       setLockingId(null);
     }
-  }, [editingId, loadData, resetForm]);
+  }, [editingId, handleAuthRequired, loadData, resetForm]);
 
   const toggleTemplateWeekday = useCallback((weekday: string) => {
     setTemplateForm((prev) => {
@@ -799,11 +916,19 @@ export function useSchoolSchedulesPage() {
       setTemplateMessage(templateForm.id ? "课时模板已更新" : "课时模板已保存");
       setTemplateForm((prev) => ({ ...prev, id: undefined }));
     } catch (error) {
-      setTemplateError(getRequestErrorMessage(error, "保存模板失败"));
+      if (isSchoolAdminAuthRequiredError(error)) {
+        handleAuthRequired();
+      } else if (isMissingSchoolScheduleTemplateError(error)) {
+        resetTemplateForm();
+        await loadData("refresh");
+        setTemplateError(getSchoolSchedulesRequestMessage(error, "保存模板失败"));
+      } else {
+        setTemplateError(getSchoolSchedulesRequestMessage(error, "保存模板失败"));
+      }
     } finally {
       setTemplateSaving(false);
     }
-  }, [loadData, templateForm]);
+  }, [handleAuthRequired, loadData, resetTemplateForm, templateForm]);
 
   const applyDraftTemplateToAi = useCallback(() => {
     if (!templateForm.grade || !templateForm.subject || !templateForm.weekdays.length) {
@@ -847,11 +972,21 @@ export function useSchoolSchedulesPage() {
       }
       setTemplateMessage("课时模板已删除");
     } catch (error) {
-      setTemplateError(getRequestErrorMessage(error, "删除模板失败"));
+      if (isSchoolAdminAuthRequiredError(error)) {
+        handleAuthRequired();
+      } else if (isMissingSchoolScheduleTemplateError(error)) {
+        if (templateForm.id === id) {
+          resetTemplateForm();
+        }
+        await loadData("refresh");
+        setTemplateError(getSchoolSchedulesRequestMessage(error, "删除模板失败"));
+      } else {
+        setTemplateError(getSchoolSchedulesRequestMessage(error, "删除模板失败"));
+      }
     } finally {
       setTemplateDeletingId(null);
     }
-  }, [loadData, resetTemplateForm, templateForm.id]);
+  }, [handleAuthRequired, loadData, resetTemplateForm, templateForm.id]);
 
   const handleSaveTeacherRule = useCallback(async () => {
     const weeklyMaxLessons = toOptionalNumber(teacherRuleForm.weeklyMaxLessons);
@@ -884,11 +1019,19 @@ export function useSchoolSchedulesPage() {
       setTeacherRuleMessage(teacherRuleForm.id ? "教师排课规则已更新" : "教师排课规则已保存");
       setTeacherRuleForm((prev) => ({ ...DEFAULT_TEACHER_RULE_FORM, teacherId: prev.teacherId }));
     } catch (error) {
-      setTeacherRuleError(getRequestErrorMessage(error, "保存教师排课规则失败"));
+      if (isSchoolAdminAuthRequiredError(error)) {
+        handleAuthRequired();
+      } else if (isMissingSchoolScheduleTeacherRuleError(error)) {
+        resetTeacherRuleForm();
+        await loadData("refresh");
+        setTeacherRuleError(getSchoolSchedulesRequestMessage(error, "保存教师排课规则失败"));
+      } else {
+        setTeacherRuleError(getSchoolSchedulesRequestMessage(error, "保存教师排课规则失败"));
+      }
     } finally {
       setTeacherRuleSaving(false);
     }
-  }, [loadData, teacherRuleForm]);
+  }, [handleAuthRequired, loadData, resetTeacherRuleForm, teacherRuleForm]);
 
   const handleDeleteTeacherRule = useCallback(async (id: string) => {
     if (typeof window !== "undefined" && !window.confirm("确定删除这个教师排课规则吗？")) {
@@ -905,11 +1048,21 @@ export function useSchoolSchedulesPage() {
       }
       setTeacherRuleMessage("教师排课规则已删除");
     } catch (error) {
-      setTeacherRuleError(getRequestErrorMessage(error, "删除教师排课规则失败"));
+      if (isSchoolAdminAuthRequiredError(error)) {
+        handleAuthRequired();
+      } else if (isMissingSchoolScheduleTeacherRuleError(error)) {
+        if (teacherRuleForm.id === id) {
+          resetTeacherRuleForm();
+        }
+        await loadData("refresh");
+        setTeacherRuleError(getSchoolSchedulesRequestMessage(error, "删除教师排课规则失败"));
+      } else {
+        setTeacherRuleError(getSchoolSchedulesRequestMessage(error, "删除教师排课规则失败"));
+      }
     } finally {
       setTeacherRuleDeletingId(null);
     }
-  }, [loadData, resetTeacherRuleForm, teacherRuleForm.id]);
+  }, [handleAuthRequired, loadData, resetTeacherRuleForm, teacherRuleForm.id]);
 
   const handleSaveTeacherUnavailable = useCallback(async () => {
     if (!teacherUnavailableForm.teacherId) {
@@ -935,11 +1088,15 @@ export function useSchoolSchedulesPage() {
       setTeacherUnavailableMessage("教师禁排时段已保存");
       setTeacherUnavailableForm((prev) => ({ ...DEFAULT_TEACHER_UNAVAILABLE_FORM, teacherId: prev.teacherId }));
     } catch (error) {
-      setTeacherUnavailableError(getRequestErrorMessage(error, "保存教师禁排失败"));
+      if (isSchoolAdminAuthRequiredError(error)) {
+        handleAuthRequired();
+      } else {
+        setTeacherUnavailableError(getSchoolSchedulesRequestMessage(error, "保存教师禁排失败"));
+      }
     } finally {
       setTeacherUnavailableSaving(false);
     }
-  }, [loadData, teacherUnavailableForm]);
+  }, [handleAuthRequired, loadData, teacherUnavailableForm]);
 
   const handleDeleteTeacherUnavailable = useCallback(async (id: string) => {
     if (typeof window !== "undefined" && !window.confirm("确定删除这个教师禁排时段吗？")) {
@@ -953,11 +1110,18 @@ export function useSchoolSchedulesPage() {
       await loadData("refresh");
       setTeacherUnavailableMessage("教师禁排时段已删除");
     } catch (error) {
-      setTeacherUnavailableError(getRequestErrorMessage(error, "删除教师禁排失败"));
+      if (isSchoolAdminAuthRequiredError(error)) {
+        handleAuthRequired();
+      } else if (isMissingSchoolScheduleTeacherUnavailableError(error)) {
+        await loadData("refresh");
+        setTeacherUnavailableError(getSchoolSchedulesRequestMessage(error, "删除教师禁排失败"));
+      } else {
+        setTeacherUnavailableError(getSchoolSchedulesRequestMessage(error, "删除教师禁排失败"));
+      }
     } finally {
       setTeacherUnavailableDeletingId(null);
     }
-  }, [loadData]);
+  }, [handleAuthRequired, loadData]);
 
   return {
     manualEditorRef,

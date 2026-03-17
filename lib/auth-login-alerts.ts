@@ -1,6 +1,6 @@
 import { addAdminLog } from "./admin-log";
 import type { User, UserRole } from "./auth";
-import { isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 import { createNotification } from "./notifications";
 import { readJson, updateJson } from "./storage";
 
@@ -76,6 +76,14 @@ function mapDbProfile(row: DbAuthLoginProfile): AuthLoginProfile {
   };
 }
 
+function canUseApiTestAuthLoginProfileFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireAuthLoginProfilesDatabase() {
+  requireDatabaseEnabled("auth_login_profiles");
+}
+
 function isPrivilegedRole(role: UserRole) {
   return PRIVILEGED_ROLES.has(role);
 }
@@ -123,11 +131,12 @@ function buildSuspiciousLoginNotification(user: AlertUser, alert: SuccessfulLogi
 }
 
 async function readProfile(userId: string) {
-  if (!isDbEnabled()) {
+  if (canUseApiTestAuthLoginProfileFallback()) {
     const list = readJson<AuthLoginProfile[]>(AUTH_LOGIN_PROFILES_FILE, []);
     return list.find((item) => item.userId === userId) ?? null;
   }
 
+  requireAuthLoginProfilesDatabase();
   const row = await queryOne<DbAuthLoginProfile>(
     "SELECT * FROM auth_login_profiles WHERE user_id = $1",
     [userId]
@@ -136,7 +145,7 @@ async function readProfile(userId: string) {
 }
 
 async function writeProfile(profile: AuthLoginProfile) {
-  if (!isDbEnabled()) {
+  if (canUseApiTestAuthLoginProfileFallback()) {
     await updateJson<AuthLoginProfile[]>(AUTH_LOGIN_PROFILES_FILE, [], (list) => {
       const index = list.findIndex((item) => item.userId === profile.userId);
       if (index >= 0) {
@@ -149,6 +158,7 @@ async function writeProfile(profile: AuthLoginProfile) {
     return;
   }
 
+  requireAuthLoginProfilesDatabase();
   await query(
     `INSERT INTO auth_login_profiles
       (user_id, email, role, last_ip, known_ips, last_login_at, updated_at)

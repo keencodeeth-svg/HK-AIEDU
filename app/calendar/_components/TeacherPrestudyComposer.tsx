@@ -3,7 +3,11 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import type { Difficulty } from "@/lib/types";
 import type { ScheduleLessonBase } from "@/lib/class-schedules";
-import { getRequestErrorMessage, requestJson } from "@/lib/client-request";
+import {
+  getRequestErrorMessage,
+  isAuthError,
+  requestJson
+} from "@/lib/client-request";
 
 type TeacherPrestudyComposerProps = {
   lesson: ScheduleLessonBase;
@@ -138,7 +142,11 @@ export default function TeacherPrestudyComposer({
       await onCreated?.();
       onClose();
     } catch (nextError) {
-      setError(getRequestErrorMessage(nextError, "布置预习任务失败"));
+      setError(
+        isAuthError(nextError)
+          ? "请先登录后再布置预习任务"
+          : getRequestErrorMessage(nextError, "布置预习任务失败")
+      );
     } finally {
       setSaving(false);
     }

@@ -190,7 +190,7 @@ test("readiness fails when promoted execution-state JSON files remain in seed st
   }
 });
 
-test("readiness warns when migration-priority JSON state files remain on disk", async () => {
+test("readiness fails when promoted review-loop JSON state files remain on disk", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "hk-ai-health-migration-"));
   const runtimeDir = path.join(root, "runtime");
   const seedDir = path.join(root, "seed");
@@ -200,7 +200,7 @@ test("readiness warns when migration-priority JSON state files remain on disk", 
     await fs.mkdir(runtimeDir, { recursive: true });
     await fs.mkdir(seedDir, { recursive: true });
     await fs.mkdir(objectRoot, { recursive: true });
-    await fs.writeFile(path.join(seedDir, "study-plans.json"), "[]");
+    await fs.writeFile(path.join(seedDir, "review-tasks.json"), "[]");
 
     setEnv({
       NODE_ENV: "production",
@@ -219,12 +219,12 @@ test("readiness warns when migration-priority JSON state files remain on disk", 
 
     const payload = await getReadinessPayload();
     const highFrequencyStateCheck = payload.checks.find((item) => item.name === "highFrequencyState");
-    assert.equal(highFrequencyStateCheck?.state, "pass");
+    assert.equal(highFrequencyStateCheck?.state, "fail");
+    const highFrequencyDetails = (highFrequencyStateCheck?.details ?? {}) as { seedFiles?: string[] };
+    assert.deepEqual(highFrequencyDetails.seedFiles, ["review-tasks.json"]);
 
     const migrationPriorityCheck = payload.checks.find((item) => item.name === "migrationPriorityState");
-    assert.equal(migrationPriorityCheck?.state, "warn");
-    const details = (migrationPriorityCheck?.details ?? {}) as { seedFiles?: string[] };
-    assert.deepEqual(details.seedFiles, ["study-plans.json"]);
+    assert.equal(migrationPriorityCheck?.state, "pass");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

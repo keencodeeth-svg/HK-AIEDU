@@ -8,6 +8,7 @@ type AuthSecurityModule = typeof import("../../lib/auth-security");
 
 const ENV_KEYS = [
   "ALLOW_JSON_FALLBACK",
+  "API_TEST_SCOPE",
   "AUTH_FAIL_WINDOW_MINUTES",
   "AUTH_LOCK_MINUTES",
   "AUTH_MAX_FAILED_ATTEMPTS",
@@ -56,6 +57,7 @@ async function loadAuthSecurity(overrides: Partial<Record<(typeof ENV_KEYS)[numb
   await fs.mkdir(seedDir, { recursive: true });
 
   process.env.NODE_ENV = "development";
+  process.env.API_TEST_SCOPE = "unit-auth-security";
   process.env.AUTH_SECURITY_ENFORCE = "true";
   process.env.AUTH_MAX_FAILED_ATTEMPTS = "3";
   process.env.AUTH_FAIL_WINDOW_MINUTES = "3";

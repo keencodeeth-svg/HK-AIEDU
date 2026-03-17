@@ -1,7 +1,7 @@
 import crypto from "crypto";
-import { readJson, writeJson } from "./storage";
-import { isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 import { getQuestions } from "./content";
+import { readJson, writeJson } from "./storage";
 
 export type CorrectionTaskStatus = "pending" | "completed";
 
@@ -16,8 +16,6 @@ export type CorrectionTask = {
   createdAt: string;
   completedAt?: string | null;
 };
-
-const TASK_FILE = "correction-tasks.json";
 
 type DbTask = {
   id: string;
@@ -45,13 +43,22 @@ function mapTask(row: DbTask): CorrectionTask {
   };
 }
 
+function requireCorrectionsDatabase() {
+  requireDatabaseEnabled("correction_tasks");
+}
+
+function canUseApiTestCorrectionsFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
 export async function getCorrectionTasksByUser(userId: string): Promise<CorrectionTask[]> {
-  if (!isDbEnabled()) {
-    const list = readJson<CorrectionTask[]>(TASK_FILE, []);
+  if (canUseApiTestCorrectionsFallback()) {
+    const list = readJson<CorrectionTask[]>("correction-tasks.json", []);
     return list
       .filter((item) => item.userId === userId)
       .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
   }
+  requireCorrectionsDatabase();
   const rows = await query<DbTask>(
     "SELECT * FROM correction_tasks WHERE user_id = $1 ORDER BY due_date ASC, created_at DESC",
     [userId]
@@ -96,10 +103,10 @@ export async function addCorrectionTasks(params: {
       completedAt: null
     };
 
-    if (!isDbEnabled()) {
-      const list = readJson<CorrectionTask[]>(TASK_FILE, []);
+    if (canUseApiTestCorrectionsFallback()) {
+      const list = readJson<CorrectionTask[]>("correction-tasks.json", []);
       list.push(task);
-      writeJson(TASK_FILE, list);
+      writeJson("correction-tasks.json", list);
       created.push(task);
       continue;
     }
@@ -137,15 +144,17 @@ export async function updateCorrectionTask(params: {
   const { id, userId, status } = params;
   const completedAt = status === "completed" ? new Date().toISOString() : null;
 
-  if (!isDbEnabled()) {
-    const list = readJson<CorrectionTask[]>(TASK_FILE, []);
+  if (canUseApiTestCorrectionsFallback()) {
+    const list = readJson<CorrectionTask[]>("correction-tasks.json", []);
     const index = list.findIndex((item) => item.id === id && item.userId === userId);
     if (index === -1) return null;
     const next = { ...list[index], status, completedAt } as CorrectionTask;
     list[index] = next;
-    writeJson(TASK_FILE, list);
+    writeJson("correction-tasks.json", list);
     return next;
   }
+
+  requireCorrectionsDatabase();
 
   const row = await queryOne<DbTask>(
     `UPDATE correction_tasks

@@ -9,6 +9,7 @@ type AdminLogModule = typeof import("../../lib/admin-log");
 
 const ENV_KEYS = [
   "ALLOW_JSON_FALLBACK",
+  "API_TEST_SCOPE",
   "AUTH_RECOVERY_EMAIL_MAX_ATTEMPTS",
   "AUTH_RECOVERY_EMAIL_WINDOW_MINUTES",
   "AUTH_RECOVERY_IP_MAX_ATTEMPTS",
@@ -67,6 +68,7 @@ async function loadRecoveryModules(overrides: Partial<Record<(typeof ENV_KEYS)[n
   await fs.mkdir(seedDir, { recursive: true });
 
   process.env.NODE_ENV = "development";
+  process.env.API_TEST_SCOPE = "unit-account-recovery";
   process.env.AUTH_TRUST_PROXY_HEADERS = "false";
   process.env.AUTH_RECOVERY_EMAIL_MAX_ATTEMPTS = "4";
   process.env.AUTH_RECOVERY_EMAIL_WINDOW_MINUTES = "30";

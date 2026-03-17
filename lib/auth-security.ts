@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 import { mutateJson, readJson, updateJson } from "./storage";
 
 type AuthLoginAttempt = {
@@ -102,6 +102,14 @@ function mapDbAttempt(row: DbAuthLoginAttempt): AuthLoginAttempt {
   };
 }
 
+function canUseApiTestAuthSecurityFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireAuthLoginAttemptsDatabase() {
+  requireDatabaseEnabled("auth_login_attempts");
+}
+
 export function buildLoginAttemptIdentity(input: {
   email: string;
   forwardedFor?: string | null;
@@ -116,11 +124,12 @@ export function buildLoginAttemptIdentity(input: {
 }
 
 async function readAttempt(key: string) {
-  if (!isDbEnabled()) {
+  if (canUseApiTestAuthSecurityFallback()) {
     const list = readJson<AuthLoginAttempt[]>(AUTH_LOGIN_ATTEMPTS_FILE, []);
     return list.find((item) => item.key === key) ?? null;
   }
 
+  requireAuthLoginAttemptsDatabase();
   const row = await queryOne<DbAuthLoginAttempt>(
     "SELECT * FROM auth_login_attempts WHERE key = $1",
     [key]
@@ -129,7 +138,7 @@ async function readAttempt(key: string) {
 }
 
 async function writeAttempt(attempt: AuthLoginAttempt) {
-  if (!isDbEnabled()) {
+  if (canUseApiTestAuthSecurityFallback()) {
     await updateJson<AuthLoginAttempt[]>(AUTH_LOGIN_ATTEMPTS_FILE, [], (list) => {
       const index = list.findIndex((item) => item.key === attempt.key);
       if (index >= 0) {
@@ -142,6 +151,7 @@ async function writeAttempt(attempt: AuthLoginAttempt) {
     return;
   }
 
+  requireAuthLoginAttemptsDatabase();
   await query(
     `INSERT INTO auth_login_attempts
       (key, email, ip, failed_count, first_failed_at, lock_until, updated_at)
@@ -167,12 +177,13 @@ async function writeAttempt(attempt: AuthLoginAttempt) {
 }
 
 async function removeAttempt(key: string) {
-  if (!isDbEnabled()) {
+  if (canUseApiTestAuthSecurityFallback()) {
     await updateJson<AuthLoginAttempt[]>(AUTH_LOGIN_ATTEMPTS_FILE, [], (list) =>
       list.filter((item) => item.key !== key)
     );
     return;
   }
+  requireAuthLoginAttemptsDatabase();
   await query("DELETE FROM auth_login_attempts WHERE key = $1", [key]);
 }
 
@@ -257,7 +268,7 @@ export async function registerFailedLoginAttempt(identity: LoginAttemptIdentity)
   }
 
   const nowIso = new Date().toISOString();
-  if (!isDbEnabled()) {
+  if (canUseApiTestAuthSecurityFallback()) {
     return mutateJson<AuthLoginAttempt[], LoginAttemptStatus>(AUTH_LOGIN_ATTEMPTS_FILE, [], (list) => {
       const existing = list.find((item) => item.key === identity.key) ?? null;
       const nowTs = Date.now();
@@ -307,6 +318,7 @@ export async function registerFailedLoginAttempt(identity: LoginAttemptIdentity)
     });
   }
 
+  requireAuthLoginAttemptsDatabase();
   const current = await getLoginAttemptStatus(identity);
   if (current.locked) {
     return current;

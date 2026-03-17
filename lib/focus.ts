@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { mutateJson, readJson } from "./storage";
-import { isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 
 export type FocusSession = {
   id: string;
@@ -41,11 +41,20 @@ function toDateKey(date: Date) {
   return date.toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai" });
 }
 
+function canUseApiTestFocusFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireFocusDatabase() {
+  requireDatabaseEnabled("focus_sessions");
+}
+
 export async function getFocusSessionsByUser(userId: string): Promise<FocusSession[]> {
-  if (!isDbEnabled()) {
+  if (canUseApiTestFocusFallback()) {
     const list = readJson<FocusSession[]>(FILE, []);
     return list.filter((item) => item.userId === userId);
   }
+  requireFocusDatabase();
   const rows = await query<DbFocusSession>(
     "SELECT * FROM focus_sessions WHERE user_id = $1 ORDER BY created_at DESC",
     [userId]
@@ -61,7 +70,7 @@ export async function addFocusSession(input: {
   endedAt?: string;
 }) {
   const createdAt = input.endedAt ?? new Date().toISOString();
-  if (!isDbEnabled()) {
+  if (canUseApiTestFocusFallback()) {
     const record: FocusSession = {
       id: `focus-${crypto.randomBytes(6).toString("hex")}`,
       userId: input.userId,
@@ -80,6 +89,7 @@ export async function addFocusSession(input: {
     });
   }
 
+  requireFocusDatabase();
   const id = `focus-${crypto.randomBytes(6).toString("hex")}`;
   const row = await queryOne<DbFocusSession>(
     `INSERT INTO focus_sessions

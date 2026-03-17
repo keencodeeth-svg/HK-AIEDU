@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { readJson, writeJson } from "./storage";
-import { isDbEnabled, query, queryOne } from "./db";
+import { isDbEnabled, query, queryOne, requireDatabaseEnabled } from "./db";
 import { getQuestions } from "./content";
 import type { Question } from "./types";
 import {
@@ -27,6 +27,14 @@ type MemoryReviewReadOptions = {
 
 const REVIEW_FILE = "memory-reviews.json";
 const STAGES = [1, 3, 7, 14, 30];
+
+function canUseApiTestMemoryFallback() {
+  return !isDbEnabled() && Boolean((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim());
+}
+
+function requireMemoryReviewsDatabase() {
+  requireDatabaseEnabled("memory_reviews");
+}
 
 type DbMemoryReview = {
   id: string;
@@ -123,10 +131,11 @@ async function getPersistedMemoryReviewsByUser(userId: string) {
 }
 
 async function getLegacyMemoryReviewsByUser(userId: string) {
-  if (!isDbEnabled()) {
+  if (canUseApiTestMemoryFallback()) {
     const list = readJson<MemoryReview[]>(REVIEW_FILE, []);
     return list.filter((item) => item.userId === userId).sort(compareMemoryReviews);
   }
+  requireMemoryReviewsDatabase();
 
   const rows = await query<DbMemoryReview>(
     "SELECT * FROM memory_reviews WHERE user_id = $1 ORDER BY next_review_at ASC",
@@ -158,7 +167,7 @@ export async function updateMemorySchedule(params: {
   correct: boolean;
 }) {
   const now = new Date().toISOString();
-  if (!isDbEnabled()) {
+  if (canUseApiTestMemoryFallback()) {
     const list = readJson<MemoryReview[]>(REVIEW_FILE, []);
     const index = list.findIndex(
       (item) => item.userId === params.userId && item.questionId === params.questionId
@@ -185,6 +194,7 @@ export async function updateMemorySchedule(params: {
     await syncMemoryReviewTask(record);
     return record;
   }
+  requireMemoryReviewsDatabase();
 
   const existing = await queryOne<DbMemoryReview>(
     "SELECT * FROM memory_reviews WHERE user_id = $1 AND question_id = $2",
@@ -224,6 +234,9 @@ export function getMemoryStageLabel(stage: number) {
 }
 
 export async function getMemoryReviewsByUser(userId: string, options?: MemoryReviewReadOptions) {
+  if (!canUseApiTestMemoryFallback() && !isDbEnabled()) {
+    requireMemoryReviewsDatabase();
+  }
   const preferUnifiedStore = options?.preferUnifiedStore ?? true;
   if (preferUnifiedStore && isUnifiedReviewTaskStoreEnabled()) {
     await ensureMemoryReviewTasksBackfilled(userId);

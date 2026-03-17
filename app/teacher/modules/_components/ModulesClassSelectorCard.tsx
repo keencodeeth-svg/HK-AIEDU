@@ -18,6 +18,7 @@ export default function ModulesClassSelectorCard({ classes, classId, onClassChan
           onChange={(event) => onClassChange(event.target.value)}
           style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
         >
+          <option value="">{classes.length ? "请选择班级" : "暂无可用班级"}</option>
           {classes.map((item) => (
             <option key={item.id} value={item.id}>
               {item.name} · {SUBJECT_LABELS[item.subject] ?? item.subject} · {item.grade} 年级

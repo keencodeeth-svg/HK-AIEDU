@@ -7,6 +7,7 @@ import { afterEach, test } from "node:test";
 type ReviewTasksModule = typeof import("../../lib/review-tasks");
 
 const ENV_KEYS = [
+  "API_TEST_SCOPE",
   "DATA_DIR",
   "DATA_SEED_DIR",
   "DATABASE_URL",
@@ -56,6 +57,7 @@ async function loadReviewTasksModule(
   await fs.mkdir(seedDir, { recursive: true });
 
   process.env.NODE_ENV = "development";
+  process.env.API_TEST_SCOPE = "unit-review-tasks";
   process.env.DATA_DIR = runtimeDir;
   process.env.DATA_SEED_DIR = seedDir;
   process.env.UNIFIED_REVIEW_ENGINE = "true";

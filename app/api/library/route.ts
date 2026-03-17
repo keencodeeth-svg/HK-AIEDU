@@ -127,7 +127,7 @@ export const GET = createLearningRoute({
     }
 
     const query = parseSearchParams(request, querySchema);
-    const contentTypeInput = query.contentType?.trim();
+    const contentTypeInput = query.contentType?.trim().toLowerCase();
     const contentType =
       contentTypeInput === "textbook" ||
       contentTypeInput === "courseware" ||

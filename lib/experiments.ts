@@ -96,6 +96,10 @@ export type ChallengeABReport = {
   };
 };
 
+function normalizeExperimentKey(value: string) {
+  return value.trim().toLowerCase();
+}
+
 function clampRollout(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -108,7 +112,7 @@ function roundPct(value: number) {
 function mapFlag(row: DbExperimentFlag): ExperimentFlag {
   return {
     id: row.id,
-    key: row.key,
+    key: normalizeExperimentKey(row.key),
     name: row.name,
     description: row.description ?? "",
     enabled: row.enabled,
@@ -118,13 +122,25 @@ function mapFlag(row: DbExperimentFlag): ExperimentFlag {
 }
 
 function mergeDefaults(flags: ExperimentFlag[]) {
-  const map = new Map(flags.map((item) => [item.key, item]));
+  const map = new Map(
+    flags.map((item) => {
+      const key = normalizeExperimentKey(item.key);
+      return [
+        key,
+        {
+          ...item,
+          key
+        }
+      ] as const;
+    })
+  );
   const now = new Date().toISOString();
   DEFAULT_FLAGS.forEach((preset) => {
-    if (map.has(preset.key)) return;
-    map.set(preset.key, {
+    const key = normalizeExperimentKey(preset.key);
+    if (map.has(key)) return;
+    map.set(key, {
       id: `exp-${crypto.randomBytes(6).toString("hex")}`,
-      key: preset.key,
+      key,
       name: preset.name,
       description: preset.description,
       enabled: preset.enabled,
@@ -136,7 +152,8 @@ function mergeDefaults(flags: ExperimentFlag[]) {
 }
 
 function getBucket(key: string, userId: string) {
-  const hash = crypto.createHash("sha256").update(`${key}:${userId}`).digest("hex");
+  const normalizedKey = normalizeExperimentKey(key);
+  const hash = crypto.createHash("sha256").update(`${normalizedKey}:${userId}`).digest("hex");
   const prefix = hash.slice(0, 8);
   return Number.parseInt(prefix, 16) % 100;
 }
@@ -164,12 +181,13 @@ export async function listExperimentFlags() {
   }
 
   const refreshed = await query<DbExperimentFlag>("SELECT * FROM experiment_flags ORDER BY key ASC");
-  return refreshed.map(mapFlag);
+  return mergeDefaults(refreshed.map(mapFlag));
 }
 
 export async function getExperimentFlag(key: string) {
+  const normalizedKey = normalizeExperimentKey(key);
   const flags = await listExperimentFlags();
-  return flags.find((item) => item.key === key) ?? null;
+  return flags.find((item) => item.key === normalizedKey) ?? null;
 }
 
 export async function upsertExperimentFlag(input: {
@@ -177,9 +195,9 @@ export async function upsertExperimentFlag(input: {
   enabled?: boolean;
   rollout?: number;
 }) {
-  const key = input.key.trim();
+  const key = normalizeExperimentKey(input.key);
   const current = await getExperimentFlag(key);
-  const preset = DEFAULT_FLAGS.find((item) => item.key === key);
+  const preset = DEFAULT_FLAGS.find((item) => normalizeExperimentKey(item.key) === key);
   const now = new Date().toISOString();
 
   const next: ExperimentFlag = {
@@ -204,16 +222,25 @@ export async function upsertExperimentFlag(input: {
     return next;
   }
 
-  const row = await queryOne<DbExperimentFlag>(
-    `INSERT INTO experiment_flags (id, key, name, description, enabled, rollout, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     ON CONFLICT (key) DO UPDATE SET
-       enabled = EXCLUDED.enabled,
-       rollout = EXCLUDED.rollout,
-       updated_at = EXCLUDED.updated_at
-     RETURNING *`,
-    [next.id, next.key, next.name, next.description, next.enabled, next.rollout, next.updatedAt]
-  );
+  const row = current
+    ? await queryOne<DbExperimentFlag>(
+        `UPDATE experiment_flags
+         SET key = $2,
+             name = $3,
+             description = $4,
+             enabled = $5,
+             rollout = $6,
+             updated_at = $7
+         WHERE id = $1
+         RETURNING *`,
+        [current.id, next.key, next.name, next.description, next.enabled, next.rollout, next.updatedAt]
+      )
+    : await queryOne<DbExperimentFlag>(
+        `INSERT INTO experiment_flags (id, key, name, description, enabled, rollout, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING *`,
+        [next.id, next.key, next.name, next.description, next.enabled, next.rollout, next.updatedAt]
+      );
   return row ? mapFlag(row) : next;
 }
 
@@ -222,13 +249,14 @@ export async function assignExperimentVariant(params: {
   userId: string;
   flag?: ExperimentFlag | null;
 }) {
-  const flag = params.flag ?? (await getExperimentFlag(params.key));
+  const normalizedKey = normalizeExperimentKey(params.key);
+  const flag = params.flag ?? (await getExperimentFlag(normalizedKey));
   const enabled = flag?.enabled ?? false;
   const rollout = clampRollout(flag?.rollout ?? 0);
-  const bucket = getBucket(params.key, params.userId);
+  const bucket = getBucket(normalizedKey, params.userId);
   const variant: ExperimentVariant = enabled && bucket < rollout ? "treatment" : "control";
   return {
-    key: params.key,
+    key: normalizedKey,
     enabled,
     rollout,
     bucket,

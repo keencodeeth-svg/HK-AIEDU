@@ -1,6 +1,9 @@
+import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
 import type {
   GradebookAssignment,
+  GradebookClass,
   GradebookProgressCell,
+  GradebookPayload,
   GradebookStudent,
   GradebookStudentProgress
 } from "./types";
@@ -9,6 +12,32 @@ export function getTierLabel(avgScore: number) {
   if (avgScore >= 85) return "A";
   if (avgScore >= 70) return "B";
   return "C";
+}
+
+export function getTeacherGradebookRequestMessage(error: unknown, fallback: string) {
+  const status = getRequestStatus(error) ?? 0;
+  const requestMessage = getRequestErrorMessage(error, "").trim().toLowerCase();
+
+  if (status === 401 || status === 403) {
+    return "教师登录状态已失效，请重新登录后继续查看成绩册。";
+  }
+  if (requestMessage === "class not found" || (status === 404 && requestMessage === "not found")) {
+    return "当前班级不存在，或你没有查看这份成绩册的权限。";
+  }
+
+  return getRequestErrorMessage(error, fallback);
+}
+
+export function resolveTeacherGradebookClassId(payload: Pick<GradebookPayload, "class" | "classes"> | null | undefined) {
+  return payload?.class?.id ?? payload?.classes?.[0]?.id ?? "";
+}
+
+export function resolveTeacherGradebookSelectedClass(
+  classes: GradebookClass[] | null | undefined,
+  classId: string,
+  fallbackClass: GradebookClass | null | undefined
+) {
+  return (classes ?? []).find((item) => item.id === classId) ?? fallbackClass ?? null;
 }
 
 export function getAssignmentProgressCell(

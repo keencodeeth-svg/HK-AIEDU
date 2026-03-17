@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  getRequestErrorMessage,
+  isAuthError,
+  requestJson
+} from "@/lib/client-request";
 
 type FunnelStage = {
   key: string;
@@ -14,6 +19,10 @@ type FunnelPayload = {
   totalEvents: number;
   totalActors: number;
   stages: FunnelStage[];
+};
+
+type FunnelResponse = {
+  data?: FunnelPayload;
 };
 
 function toIsoDay(offsetDays: number) {
@@ -34,20 +43,32 @@ export default function AnalyticsFunnelCard() {
   }, []);
 
   useEffect(() => {
-    fetch(`/api/analytics/funnel?${query}`)
-      .then(async (res) => {
-        const json = await res.json();
-        if (!res.ok) {
-          throw new Error(json?.error ?? "加载失败");
+    let cancelled = false;
+
+    async function loadFunnel() {
+      try {
+        const json = await requestJson<FunnelResponse>(`/api/analytics/funnel?${query}`);
+        if (cancelled) {
+          return;
         }
-        return json;
-      })
-      .then((json) => {
         setData(json?.data ?? null);
-      })
-      .catch((err) => {
-        setError((err as Error).message);
-      });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setError(
+          isAuthError(error)
+            ? "请先使用管理员账号登录"
+            : getRequestErrorMessage(error, "加载失败")
+        );
+      }
+    }
+
+    void loadFunnel();
+
+    return () => {
+      cancelled = true;
+    };
   }, [query]);
 
   if (error) {
