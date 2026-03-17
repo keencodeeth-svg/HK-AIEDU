@@ -7,8 +7,9 @@ export function createRuntime(port) {
   const configuredBaseUrl = process.env.API_TEST_BASE_URL?.trim();
   const baseUrl = configuredBaseUrl
     ? configuredBaseUrl.replace(/\/+$/, "")
-    : `http://localhost:${port}`;
+    : `http://127.0.0.1:${port}`;
   const baseOrigin = new URL(baseUrl).origin;
+  const allowCustomOriginHeader = process.env.API_TEST_ALLOW_CUSTOM_ORIGIN_HEADER === "true";
   const isRemote = Boolean(configuredBaseUrl);
   const readinessToken = process.env.API_TEST_READINESS_TOKEN?.trim() || process.env.READINESS_PROBE_TOKEN?.trim() || "";
   const cookieJar = new Map();
@@ -66,7 +67,7 @@ export function createRuntime(port) {
         headers.set("cookie", cookie);
       }
     }
-    if (!headers.has("x-test-origin")) {
+    if (allowCustomOriginHeader && !headers.has("x-test-origin")) {
       headers.set("x-test-origin", baseOrigin);
     }
     if (!safeMethod && !explicitTestOrigin) {
@@ -168,7 +169,6 @@ export function createRuntime(port) {
     const runtimeEnv = {
       ...process.env,
       NEXT_TELEMETRY_DISABLED: "1",
-      API_TEST_ALLOW_CUSTOM_ORIGIN_HEADER: "true",
       REQUIRE_DATABASE: process.env.REQUIRE_DATABASE ?? "false",
       ALLOW_JSON_FALLBACK: process.env.ALLOW_JSON_FALLBACK ?? "true"
     };

@@ -26,69 +26,9 @@ jobs:
       - name: Validate GitHub Workflows
         uses: rhysd/actionlint@v1.7.11
 
-  lint:
+  strict-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-  test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build test server
-        run: npm run build
-
-      - name: Run unit and API tests
-        run: npm test
-
-  browser-smoke:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -105,11 +45,79 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
-      - name: Build browser smoke server
+      - name: Run strict verification gate
+        run: npm run verify:strict
+
+  production-like-smoke:
+    name: production-like-regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: hk_aiedu_ci
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d hk_aiedu_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/hk_aiedu_ci
+      DB_SSL: "false"
+      REQUIRE_DATABASE: "true"
+      ALLOW_JSON_FALLBACK: "false"
+      DATA_DIR: .runtime-data/ci-runtime
+      OBJECT_STORAGE_ROOT: .runtime-data/ci-objects
+      FILE_OBJECT_STORAGE_ENABLED: "true"
+      LIBRARY_OBJECT_STORAGE_ENABLED: "true"
+      FILE_INLINE_CONTENT: "false"
+      LIBRARY_INLINE_FILE_CONTENT: "false"
+      READINESS_PROBE_TOKEN: ci-readiness-token
+      RUNTIME_GUARDRAILS_ENFORCE: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Build production server
         run: npm run build
 
-      - name: Run browser smoke suite
-        run: npm run test:browser
+      - name: Initialize database schema
+        run: npm run db:migrate
+
+      - name: Seed baseline content
+        run: npm run seed:base
+
+      - name: Seed stage3 demo flows
+        run: npm run seed:stage3
+
+      - name: Migrate seeded plain passwords
+        run: npm run security:migrate-passwords
+
+      - name: Run production-like smoke
+        run: npm run test:smoke:production-like
+
+      - name: Run production-like browser smoke
+        run: npm run test:browser:production-like
+
+      - name: Run production-like school schedule regression
+        run: npm run test:school-schedules:production-like
 
   verify:
     if: always()
@@ -117,10 +125,8 @@ jobs:
     timeout-minutes: 5
     needs:
       - workflow-lint
-      - lint
-      - build
-      - test
-      - browser-smoke
+      - strict-verify
+      - production-like-smoke
     steps:
       - name: Publish Verify Summary
         run: |
@@ -130,25 +136,20 @@ jobs:
             echo "| Job | Result |"
             echo "| --- | --- |"
             echo "| workflow-lint | ${{ needs['workflow-lint'].result }} |"
-            echo "| lint | ${{ needs.lint.result }} |"
-            echo "| build | ${{ needs.build.result }} |"
-            echo "| test | ${{ needs.test.result }} |"
-            echo "| browser-smoke | ${{ needs['browser-smoke'].result }} |"
+            echo "| strict-verify | ${{ needs['strict-verify'].result }} |"
+            echo "| production-like-regression | ${{ needs['production-like-smoke'].result }} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce all checks passed
         run: |
           status_workflow="${{ needs['workflow-lint'].result }}"
-          status_lint="${{ needs.lint.result }}"
-          status_build="${{ needs.build.result }}"
-          status_test="${{ needs.test.result }}"
+          status_verify="${{ needs['strict-verify'].result }}"
+          status_prodlike="${{ needs['production-like-smoke'].result }}"
 
           for entry in \
             "workflow-lint:$status_workflow" \
-            "lint:$status_lint" \
-            "build:$status_build" \
-            "test:$status_test" \
-            "browser-smoke:${{ needs['browser-smoke'].result }}"; do
+            "strict-verify:$status_verify" \
+            "production-like-regression:$status_prodlike"; do
             name="${entry%%:*}"
             value="${entry##*:}"
             if [ "$value" != "success" ]; then

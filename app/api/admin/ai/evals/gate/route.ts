@@ -4,6 +4,7 @@ import { addAdminLog } from "@/lib/admin-log";
 import { badRequest, unauthorized } from "@/lib/api/http";
 import type { AiEvalDatasetName } from "@/lib/ai-evals";
 import {
+  refreshAiEvalGateState,
   getAiEvalGateConfig,
   listAiEvalGateRuns,
   runAiEvalGate,
@@ -41,6 +42,14 @@ function parseDatasets(value: unknown) {
   return datasets.length ? datasets : undefined;
 }
 
+async function buildPayload(limit = 10) {
+  await refreshAiEvalGateState();
+  return {
+    config: getAiEvalGateConfig(),
+    recentRuns: listAiEvalGateRuns(limit)
+  };
+}
+
 export const GET = createAdminRoute({
   role: "admin",
   query: querySchema,
@@ -50,12 +59,7 @@ export const GET = createAdminRoute({
       unauthorized();
     }
     const limit = query.limit ?? 10;
-    return {
-      data: {
-        config: getAiEvalGateConfig(),
-        recentRuns: listAiEvalGateRuns(limit)
-      }
-    };
+    return { data: await buildPayload(limit) };
   }
 });
 
@@ -84,7 +88,7 @@ export const POST = createAdminRoute({
       const override = body.configOverride && typeof body.configOverride === "object" && !Array.isArray(body.configOverride)
         ? (body.configOverride as Record<string, unknown>)
         : {};
-      const runResult = runAiEvalGate({
+      const runResult = await runAiEvalGate({
         force: body.force === true,
         runBy: user.id,
         configOverride: {
@@ -111,8 +115,7 @@ export const POST = createAdminRoute({
       });
       return {
         data: {
-          config: getAiEvalGateConfig(),
-          recentRuns: listAiEvalGateRuns(10),
+          ...(await buildPayload(10)),
           lastRun: runResult.run,
           report: runResult.report
         }
@@ -130,7 +133,7 @@ export const POST = createAdminRoute({
       badRequest("missing action or config patch");
     }
 
-    const next = updateAiEvalGateConfig(
+    const next = await updateAiEvalGateConfig(
       {
         enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
         datasets: parseDatasets(body.datasets),
@@ -150,11 +153,6 @@ export const POST = createAdminRoute({
       detail: JSON.stringify(next)
     });
 
-    return {
-      data: {
-        config: next,
-        recentRuns: listAiEvalGateRuns(10)
-      }
-    };
+    return { data: await buildPayload(10) };
   }
 });

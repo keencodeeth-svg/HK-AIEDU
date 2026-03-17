@@ -89,6 +89,24 @@ CREATE TABLE IF NOT EXISTS student_profiles (
 ALTER TABLE student_profiles ADD COLUMN IF NOT EXISTS observer_code TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS student_profiles_observer_code_idx ON student_profiles (observer_code);
 
+CREATE TABLE IF NOT EXISTS student_personas (
+  id TEXT PRIMARY KEY,
+  user_id TEXT UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  preferred_name TEXT,
+  gender TEXT,
+  height_cm INT,
+  eyesight_level TEXT,
+  seat_preference TEXT,
+  personality TEXT,
+  focus_support TEXT,
+  peer_support TEXT,
+  strengths TEXT,
+  support_notes TEXT,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS student_personas_updated_idx ON student_personas (updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS knowledge_points (
   id TEXT PRIMARY KEY,
   subject TEXT NOT NULL,
@@ -199,6 +217,11 @@ CREATE TABLE IF NOT EXISTS question_attempts (
   created_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS question_attempts_user_created_idx ON question_attempts (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS question_attempts_user_kp_subject_created_idx
+  ON question_attempts (user_id, knowledge_point_id, subject, created_at DESC);
+CREATE INDEX IF NOT EXISTS question_attempts_question_created_idx ON question_attempts (question_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS mastery_records (
   id TEXT PRIMARY KEY,
   user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
@@ -236,6 +259,9 @@ CREATE TABLE IF NOT EXISTS study_plan_items (
   target_count INT NOT NULL,
   due_date TIMESTAMPTZ NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS study_plans_user_subject_idx ON study_plans (user_id, subject);
+CREATE INDEX IF NOT EXISTS study_plan_items_plan_due_idx ON study_plan_items (plan_id, due_date);
 
 CREATE TABLE IF NOT EXISTS ai_history (
   id TEXT PRIMARY KEY,
@@ -982,6 +1008,174 @@ CREATE TABLE IF NOT EXISTS ai_provider_runtime_config (
 );
 
 CREATE INDEX IF NOT EXISTS ai_provider_runtime_config_updated_idx ON ai_provider_runtime_config (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS ai_quality_calibration_runtime (
+  id TEXT PRIMARY KEY,
+  config JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  updated_by TEXT
+);
+
+CREATE INDEX IF NOT EXISTS ai_quality_calibration_runtime_updated_idx
+  ON ai_quality_calibration_runtime (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS ai_quality_calibration_history (
+  id TEXT PRIMARY KEY,
+  reason TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  created_by TEXT,
+  config JSONB NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ai_quality_calibration_history_created_idx
+  ON ai_quality_calibration_history (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS ai_eval_gate_runtime (
+  id TEXT PRIMARY KEY,
+  config JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  updated_by TEXT
+);
+
+CREATE INDEX IF NOT EXISTS ai_eval_gate_runtime_updated_idx
+  ON ai_eval_gate_runtime (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS ai_eval_gate_runs (
+  id TEXT PRIMARY KEY,
+  executed_at TIMESTAMPTZ NOT NULL,
+  config JSONB NOT NULL,
+  report_summary JSONB NOT NULL,
+  passed BOOLEAN NOT NULL,
+  failed_rules TEXT[] NOT NULL DEFAULT '{}',
+  rollback JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS ai_eval_gate_runs_executed_idx
+  ON ai_eval_gate_runs (executed_at DESC);
+
+CREATE TABLE IF NOT EXISTS class_schedule_sessions (
+  id TEXT PRIMARY KEY,
+  school_id TEXT NOT NULL,
+  class_id TEXT NOT NULL,
+  weekday INT NOT NULL CHECK (weekday BETWEEN 1 AND 7),
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  slot_label TEXT,
+  room TEXT,
+  campus TEXT,
+  note TEXT,
+  focus_summary TEXT,
+  locked BOOLEAN NOT NULL DEFAULT false,
+  locked_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS class_schedule_sessions_school_class_idx
+  ON class_schedule_sessions (school_id, class_id);
+CREATE INDEX IF NOT EXISTS class_schedule_sessions_school_weekday_time_idx
+  ON class_schedule_sessions (school_id, weekday, start_time, end_time);
+
+CREATE TABLE IF NOT EXISTS teacher_schedule_rules (
+  id TEXT PRIMARY KEY,
+  school_id TEXT NOT NULL,
+  teacher_id TEXT NOT NULL,
+  weekly_max_lessons INT,
+  max_consecutive_lessons INT,
+  min_campus_gap_minutes INT,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (school_id, teacher_id)
+);
+
+CREATE INDEX IF NOT EXISTS teacher_schedule_rules_school_teacher_idx
+  ON teacher_schedule_rules (school_id, teacher_id);
+CREATE INDEX IF NOT EXISTS teacher_schedule_rules_updated_idx
+  ON teacher_schedule_rules (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS teacher_unavailability_slots (
+  id TEXT PRIMARY KEY,
+  school_id TEXT NOT NULL,
+  teacher_id TEXT NOT NULL,
+  weekday INT NOT NULL CHECK (weekday BETWEEN 1 AND 7),
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS teacher_unavailability_slots_school_teacher_idx
+  ON teacher_unavailability_slots (school_id, teacher_id);
+CREATE INDEX IF NOT EXISTS teacher_unavailability_slots_teacher_weekday_time_idx
+  ON teacher_unavailability_slots (teacher_id, weekday, start_time, end_time);
+
+CREATE TABLE IF NOT EXISTS school_schedule_templates (
+  id TEXT PRIMARY KEY,
+  school_id TEXT NOT NULL,
+  grade TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  weekly_lessons_per_class INT NOT NULL,
+  lesson_duration_minutes INT NOT NULL,
+  periods_per_day INT NOT NULL,
+  weekdays JSONB NOT NULL DEFAULT '[]'::jsonb,
+  day_start_time TEXT NOT NULL,
+  short_break_minutes INT NOT NULL,
+  lunch_break_after_period INT,
+  lunch_break_minutes INT NOT NULL,
+  campus TEXT,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (school_id, grade, subject)
+);
+
+CREATE INDEX IF NOT EXISTS school_schedule_templates_school_grade_subject_idx
+  ON school_schedule_templates (school_id, grade, subject);
+CREATE INDEX IF NOT EXISTS school_schedule_templates_updated_idx
+  ON school_schedule_templates (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS assignment_lesson_links (
+  id TEXT PRIMARY KEY,
+  assignment_id TEXT NOT NULL,
+  class_id TEXT NOT NULL,
+  schedule_session_id TEXT NOT NULL,
+  task_kind TEXT NOT NULL,
+  teacher_id TEXT NOT NULL,
+  lesson_date TEXT NOT NULL,
+  note TEXT,
+  publish_lead_minutes INT,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (schedule_session_id, lesson_date, task_kind)
+);
+
+CREATE INDEX IF NOT EXISTS assignment_lesson_links_assignment_idx
+  ON assignment_lesson_links (assignment_id);
+CREATE INDEX IF NOT EXISTS assignment_lesson_links_class_lesson_idx
+  ON assignment_lesson_links (class_id, lesson_date);
+CREATE INDEX IF NOT EXISTS assignment_lesson_links_schedule_lesson_idx
+  ON assignment_lesson_links (schedule_session_id, lesson_date);
+
+CREATE TABLE IF NOT EXISTS school_ai_schedule_operations (
+  id TEXT PRIMARY KEY,
+  school_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  applied_at TIMESTAMPTZ,
+  rolled_back_at TIMESTAMPTZ,
+  target_class_ids TEXT[] NOT NULL DEFAULT '{}',
+  replace_class_ids TEXT[] NOT NULL DEFAULT '{}',
+  base_sessions JSONB NOT NULL DEFAULT '[]'::jsonb,
+  after_sessions JSONB NOT NULL DEFAULT '[]'::jsonb,
+  drafts JSONB NOT NULL DEFAULT '[]'::jsonb,
+  result JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS school_ai_schedule_operations_school_status_updated_idx
+  ON school_ai_schedule_operations (school_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS school_ai_schedule_operations_applied_idx
+  ON school_ai_schedule_operations (applied_at DESC);
 
 CREATE TABLE IF NOT EXISTS ai_task_policies (
   task_type TEXT PRIMARY KEY,

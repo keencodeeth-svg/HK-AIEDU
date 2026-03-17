@@ -3,6 +3,7 @@ import { getEffectiveAiProviderChain, type AiProviderKey } from "./ai-config";
 import { isDbEnabled, query } from "./db";
 import { reportAiCallFailure } from "./error-tracker";
 import { getTraceIdFromContext } from "./request-context";
+import { shouldAllowDbBootstrapFromJsonFallback } from "./runtime-guardrails";
 import { readJson, writeJson } from "./storage";
 
 export type AiTaskType =
@@ -157,7 +158,8 @@ const PROVIDER_ALIASES: Record<string, AiProviderKey> = {
   seed: "seedance"
 };
 
-let policyStoreCache: AiTaskPolicyStore = readPolicyStoreFromFile();
+let policyStoreCache: AiTaskPolicyStore =
+  isDbEnabled() && !shouldAllowDbBootstrapFromJsonFallback() ? ({} as AiTaskPolicyStore) : readPolicyStoreFromFile();
 let policyStoreCacheSyncedAt = 0;
 let policyStoreSyncing: Promise<void> | null = null;
 
@@ -256,8 +258,10 @@ async function syncPolicyStoreFromDb(force = false) {
       );
       const nextStore: AiTaskPolicyStore = {};
       if (!rows.length) {
-        // First DB boot: migrate file-based policy history into table to preserve prior tuning.
-        const fileStore = readPolicyStoreFromFile();
+        // First DB boot can migrate file-based policy history, unless guarded runtime explicitly disables fallback.
+        const fileStore = shouldAllowDbBootstrapFromJsonFallback()
+          ? readPolicyStoreFromFile()
+          : ({} as AiTaskPolicyStore);
         const entries = Object.entries(fileStore) as Array<[AiTaskType, AiTaskPolicyRecord]>;
         await Promise.all(
           entries.map(async ([taskType, record]) => {

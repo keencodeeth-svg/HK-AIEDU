@@ -1,4 +1,5 @@
 import { isDbEnabled, query, queryOne } from "./db";
+import { shouldAllowDbBootstrapFromJsonFallback } from "./runtime-guardrails";
 import { readJson, writeJson } from "./storage";
 
 export type AiProviderKey =
@@ -99,7 +100,8 @@ const PROVIDER_OPTIONS: AiProviderOption[] = [
   }
 ];
 
-let runtimeConfigCache: AiProviderRuntimeConfig = readRuntimeConfigFromFile();
+let runtimeConfigCache: AiProviderRuntimeConfig =
+  isDbEnabled() && !shouldAllowDbBootstrapFromJsonFallback() ? { providerChain: [] } : readRuntimeConfigFromFile();
 let runtimeConfigCacheSyncedAt = 0;
 let runtimeConfigSyncing: Promise<void> | null = null;
 
@@ -167,7 +169,9 @@ async function syncRuntimeConfigFromDb(force = false) {
         [AI_PROVIDER_RUNTIME_CONFIG_ROW_ID]
       );
       if (!row) {
-        const fallback = readRuntimeConfigFromFile();
+        const fallback = shouldAllowDbBootstrapFromJsonFallback()
+          ? readRuntimeConfigFromFile()
+          : { providerChain: [] as AiProviderKey[] };
         if (fallback.providerChain.length) {
           const updatedAt = fallback.updatedAt ?? new Date().toISOString();
           await query(

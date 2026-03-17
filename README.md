@@ -2,7 +2,7 @@
 
 面向 K12 的 AI 教育产品原型，覆盖学生、教师、家长、学校管理员、平台管理员五端，围绕“诊断 -> 计划 -> 练习 -> 复练 -> 干预 -> 反馈 -> 验证”的提分闭环构建。
 
-更新时间：2026-03-01
+更新时间：2026-03-17
 
 ## 1. 项目定位
 
@@ -20,7 +20,15 @@
 - 把 AI 从“生成内容”升级到“可治理、可观测、可回滚”
 - 支持从演示环境平滑迁移到数据库部署
 
-近期新增（2026-03-01）：
+近期新增（2026-03-17）：
+
+- 新增 `docs/project-readiness-index.md` 作为项目状态、P0 阻断项、测试与发布入口的统一索引
+- 学校排课栈、AI 质量校准、AI eval gate 与 student personas 均已具备 DB canonical path；当前工作树 `data/` 目录下可见的 `23` 个 JSON 文件都已完成 DB 对应关系梳理
+- 单测基线扩到 `78` 个测试文件、`201` 条用例，新增 `API_TEST_SUITE=school-schedules` 的独立深排课回归与 production-like 本地入口
+- 主干 CI 的 production-like 回归作业已顺序执行 `test:smoke:production-like`、`test:browser:production-like` 与 `test:school-schedules:production-like`
+- 浏览器 smoke 新增账号恢复请求、登录锁定、管理员异常登录安全告警通知、学生考试提交、学生作业附件上传并由教师批改页读取 / 下载、恢复工单后台处理、资料库文件上传 / 下载 / 分享、学校管理员排课 AI 预演 / 应用 / 回滚与学校组织边界回归，当前整套关键流程 smoke 为 `14` 条；最新 production-like 浏览器回归里的 runtime fallback 告警已清零
+
+此前里程碑（2026-03-01）：
 
 - 全学科全年级知识点批量生成升级：支持分批预览、分批入库、批次进度提示，移除旧的组合/条数硬上限
 - 知识点导入去重修复：去重键升级为 `subject+grade+unit+chapter+title`，避免跨学科/跨年级误判
@@ -347,6 +355,100 @@ npm run seed:library-db
 - 未配置 `DATABASE_URL` 时使用 JSON fallback
 - DB 模式需要先执行迁移命令（`db:migrate` 或兼容命令 `db:init`）
 
+### 7.2.1 本地最小 PostgreSQL 环境（Docker）
+
+如果本机已安装 Docker，推荐直接使用仓库内的本地编排文件：
+
+```bash
+npm run infra:postgres:up
+```
+
+默认会启动：
+
+- PostgreSQL 16
+- 端口：`127.0.0.1:54329`
+- 数据库：`hk_aiedu_local`
+- 用户名：`postgres`
+- 密码：`postgres`
+
+常用命令：
+
+```bash
+npm run infra:postgres:logs
+npm run infra:postgres:down
+```
+
+### 7.2.2 本地 production-like smoke
+
+本地要尽量贴近 CI / 生产配置时，直接跑：
+
+```bash
+npm run test:smoke:production-like:local
+```
+
+这条命令会自动执行：
+
+1. 启动本地 PostgreSQL 容器
+2. `npm run build`
+3. `npm run db:migrate`
+4. `npm run seed:base`
+5. `npm run seed:stage3`
+6. `npm run security:migrate-passwords`
+7. `npm run test:smoke:production-like`
+
+补充说明：
+
+- 脚本会自动复制一份临时 `DATA_SEED_DIR`，并剔除 production guardrails 禁止的高频 JSON 运行态文件，避免仓库内遗留 seed 数据把 readiness 误报成失败
+- 脚本会自动使用临时 `DATA_DIR` 与对象存储根目录，不污染仓库内 `.runtime-data`
+
+默认环境：
+
+```bash
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54329/hk_aiedu_local
+REQUIRE_DATABASE=true
+ALLOW_JSON_FALLBACK=false
+OBJECT_STORAGE_ROOT=.runtime-data/local-objects
+FILE_OBJECT_STORAGE_ENABLED=true
+LIBRARY_OBJECT_STORAGE_ENABLED=true
+FILE_INLINE_CONTENT=false
+LIBRARY_INLINE_FILE_CONTENT=false
+```
+
+如需覆盖数据库地址，可在命令前传入：
+
+```bash
+PRODUCTION_LIKE_DB_PORT=54330 npm run test:smoke:production-like:local
+```
+
+如果想直接复用本机已经启动的 PostgreSQL，而不是等待 Docker 首次拉镜像，可运行：
+
+```bash
+PRODUCTION_LIKE_USE_EXISTING_DB=1 \
+PRODUCTION_LIKE_DB_HOST=/tmp \
+PRODUCTION_LIKE_DB_PORT=5432 \
+PRODUCTION_LIKE_DB_USER="$USER" \
+DATABASE_URL="postgresql:///hk_aiedu_local" \
+npm run test:smoke:production-like:local
+```
+
+如果机器上没有可用 Docker daemon，但本机已有可连接 PostgreSQL，这条“复用现有 DB”路径也是推荐做法。
+
+如果要在同一条 DB-only / object-storage 路径下专门验证学校排课 AI 预演 / 应用 / 回滚链路，可运行：
+
+```bash
+npm run test:school-schedules:production-like:local
+```
+
+这条命令复用同一套 `build -> db:migrate -> seed:base -> seed:stage3 -> security:migrate-passwords` 路径，但最终执行的是独立排课 API 套件，而不是只读 smoke。
+
+如果要在同一条 DB-only / object-storage 路径下验证浏览器关键流程，可运行：
+
+```bash
+npm run test:browser:production-like:local
+```
+
+这条命令复用同一套 `build -> db:migrate -> seed:base -> seed:stage3 -> security:migrate-passwords` 路径，但最终执行的是 `tests/browser/smoke.spec.ts`，用于确认浏览器关键链路在强制 PostgreSQL + 对象存储配置下仍可通过。
+
 ### 7.3 旧文件数据迁移到对象存储
 
 适用场景：历史数据仍在 `content_base64/contentBase64` 字段内联存储，需迁移到对象存储（本地文件实现）。
@@ -488,21 +590,36 @@ npm run seed:library-db
 本地质量门槛：
 
 ```bash
-npm run lint
-npm run build
-npm test
+npm run verify:strict
 ```
 
 CI 工作流：`.github/workflows/ci.yml`
 
 - workflow-lint
-- lint
-- build
-- test（执行 `npm test`，当前包含 `test:unit + test:api`）
+- strict-verify（执行 `npm run verify:strict`，顺序包含 `lint + build + test:unit + test:api + test:browser:built`）
+- production-like-regression（PostgreSQL + 对象存储根路径 + `ALLOW_JSON_FALLBACK=false` 下顺序执行 `test:smoke:production-like`、`test:browser:production-like` 与 `test:school-schedules:production-like`）
 - verify（强制汇总校验）
-- 本地发布前建议执行：`npm run lint && npm run build && npm test`
-- 已部署环境发布后建议执行：`API_TEST_BASE_URL=https://your-env.example.com API_TEST_READINESS_TOKEN=$READINESS_PROBE_TOKEN npm run test:smoke:remote`
+- `npm test` 当前仍保留为快速门：`test:unit + test:api`
+- 本地发布前建议执行：`npm run verify:strict`
+- 本地要复现 CI 的 DB/object-storage 路径时，执行：`npm run test:smoke:production-like:local`
+- 本地要复现 CI 的 DB/object-storage 浏览器路径时，执行：`npm run test:browser:production-like:local`
+- 学校排课 AI 预演 / 应用 / 回滚的深 API 回归，可执行：`npm run test:school-schedules:production-like:local`
+- 提交到主干后的 CI 还会再跑一遍 production-like 三层回归，先验证最小 smoke，再验证浏览器 smoke 与学校排课深回归
+- 已部署环境发布后建议执行：
+
+```bash
+API_TEST_BASE_URL=https://your-env.example.com \
+API_TEST_READINESS_TOKEN=$READINESS_PROBE_TOKEN \
+API_TEST_ADMIN_EMAIL=admin@demo.com \
+API_TEST_ADMIN_PASSWORD=Admin123 \
+API_TEST_SMOKE_SCHOOL_ID=school-default \
+npm run test:smoke:remote
+```
+
+- 远端 smoke 当前除健康检查和学生认证链路外，还会验证管理员登录与学校课表只读拉取
+- 远端 smoke 默认使用 `admin@demo.com / Admin123` 与 `school-default`；可通过 `API_TEST_ADMIN_EMAIL`、`API_TEST_ADMIN_PASSWORD`、`API_TEST_SMOKE_SCHOOL_ID` 覆盖
 - 可通过手工工作流 `.github/workflows/release-smoke.yml` 对 staging / production 执行远端 smoke
+- 首次运行浏览器测试前，需要先执行一次：`npx playwright install --with-deps chromium`
 
 ## 13. Render 部署建议
 
@@ -524,7 +641,7 @@ npm run seed:library-db
 npm run db:migrate
 ```
 
-5. 开启 `UNIFIED_REVIEW_ENGINE=true` 后，历史 `wrong_review_items` 与 `memory_reviews` 会在用户读取复练数据时懒回填到 `review_tasks`，发布窗口仍建议完整执行 `npm run lint`、`npm run build`、`npm run test:api`。
+5. 开启 `UNIFIED_REVIEW_ENGINE=true` 后，历史 `wrong_review_items` 与 `memory_reviews` 会在用户读取复练数据时懒回填到 `review_tasks`，发布窗口建议完整执行 `npm run verify:strict`。
 
 6. 登录管理端 `/admin/ai-models` 校验模型链与健康状态
 
@@ -537,13 +654,30 @@ npm run db:migrate
 - `docs/` 周计划、验收清单、导入模板
 - `data/` JSON fallback 数据
 
-## 15. 运营与治理文档
+## 15. 运营与治理文档索引
 
-- `docs/p0-optimization-task-cards.md`
+索引更新：2026-03-17
+
+- `docs/project-readiness-index.md`
+  用途：先看当前项目状态、规模指标、主要风险，以及“该跳去哪份文档”。
+- `docs/development-checklist.md`
+  用途：看全项目复评结论、开发硬规则和 90 天执行清单。
+- `docs/p0-productization-checklist.md`
+  用途：看 P0 阻断项、当前基线和本轮必须完成的验收口径。
+- `docs/runtime-state-inventory.md`
+  用途：看 JSON / DB / 对象存储边界，确认哪些运行时状态已经 DB-only，以及当前工作树 `data/` 目录下可见的 `23` 个文件如何对应 DB canonical path。
+- `docs/strict-testing-baseline.md`
+  用途：看 `verify:strict`、browser smoke、production-like regression、CI 测试门。
 - `docs/staging-production-release-runbook.md`
+  用途：看 staging / production 发布、远端 smoke、失败回滚与手工工作流。
+- `docs/p0-optimization-task-cards.md`
+  用途：把 P0 收口工作直接拆成 issue / task card。
 - `docs/week7-challenge-regression-checklist.md`
+  用途：看 challenge 专项回归检查点。
 - `docs/week8-gray-release-runbook.md`
+  用途：看灰度发布的阶段性 runbook。
 - `docs/week9-task-cards.md`
+  用途：看周度任务拆分参考。
 
 ## 16. 免责声明
 

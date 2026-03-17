@@ -1,4 +1,6 @@
 import crypto from "crypto";
+import { isDbEnabled, query, queryOne } from "./db";
+import { shouldAllowDbBootstrapFromJsonFallback } from "./runtime-guardrails";
 import { readJson, writeJson } from "./storage";
 
 export type AiQualityKind = "assist" | "coach" | "explanation" | "writing" | "assignment_review";
@@ -31,9 +33,26 @@ export type AiQualityCalibrationSnapshot = {
   config: AiQualityCalibrationConfig;
 };
 
+type DbCalibrationRuntimeRow = {
+  id: string;
+  config: string | Partial<AiQualityCalibrationConfig>;
+  updated_at: string;
+  updated_by: string | null;
+};
+
+type DbCalibrationHistoryRow = {
+  id: string;
+  reason: string;
+  created_at: string;
+  created_by: string | null;
+  config: string | Partial<AiQualityCalibrationConfig>;
+};
+
 const CALIBRATION_FILE = "ai-quality-calibration.json";
 const CALIBRATION_HISTORY_FILE = "ai-quality-calibration-history.json";
 const CALIBRATION_HISTORY_LIMIT = 60;
+const CALIBRATION_RUNTIME_ROW_ID = "runtime";
+const CALIBRATION_CACHE_TTL_MS = 8_000;
 
 const DEFAULT_CALIBRATION: AiQualityCalibrationConfig = {
   globalBias: 0,
@@ -51,6 +70,11 @@ const DEFAULT_CALIBRATION: AiQualityCalibrationConfig = {
   updatedAt: new Date(0).toISOString(),
   updatedBy: undefined
 };
+
+let calibrationCache = isDbEnabled() ? normalizeCalibration(DEFAULT_CALIBRATION) : readCalibrationFromFile();
+let calibrationHistoryCache = isDbEnabled() ? [] : readCalibrationHistoryFromFile();
+let calibrationStateSyncedAt = 0;
+let calibrationStateSyncing: Promise<void> | null = null;
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.round(value * 100) / 100));
@@ -124,33 +148,161 @@ function normalizeSnapshot(
   return next;
 }
 
-function readCalibrationHistory() {
+function readCalibrationFromFile() {
+  const raw = readJson<AiQualityCalibrationConfig>(CALIBRATION_FILE, DEFAULT_CALIBRATION);
+  return normalizeCalibration(raw);
+}
+
+function sortSnapshots(items: AiQualityCalibrationSnapshot[]) {
+  return items
+    .slice()
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, CALIBRATION_HISTORY_LIMIT);
+}
+
+function readCalibrationHistoryFromFile() {
   const raw = readJson<Array<Partial<AiQualityCalibrationSnapshot>>>(CALIBRATION_HISTORY_FILE, []);
   if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item) => normalizeSnapshot(item))
-    .filter((item): item is AiQualityCalibrationSnapshot => Boolean(item))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return sortSnapshots(
+    raw
+      .map((item) => normalizeSnapshot(item))
+      .filter((item): item is AiQualityCalibrationSnapshot => Boolean(item))
+  );
 }
 
 function writeCalibrationHistory(items: AiQualityCalibrationSnapshot[]) {
   writeJson(CALIBRATION_HISTORY_FILE, items.slice(0, CALIBRATION_HISTORY_LIMIT));
 }
 
-function snapshotCurrentCalibration(params: { reason: string; createdBy?: string; config?: AiQualityCalibrationConfig }) {
+function parseDbConfig(value: string | Partial<AiQualityCalibrationConfig> | null | undefined) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as Partial<AiQualityCalibrationConfig>;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "object") {
+    return value;
+  }
+  return null;
+}
+
+function mapDbCalibrationRow(row: DbCalibrationRuntimeRow | null) {
+  if (!row) {
+    return normalizeCalibration(DEFAULT_CALIBRATION);
+  }
+
+  const config = normalizeCalibration(parseDbConfig(row.config));
+  return {
+    ...config,
+    updatedAt: row.updated_at || config.updatedAt,
+    updatedBy: row.updated_by?.trim() || config.updatedBy
+  };
+}
+
+function mapDbHistoryRows(rows: DbCalibrationHistoryRow[]) {
+  return sortSnapshots(
+    rows
+      .map((row) =>
+        normalizeSnapshot({
+          id: row.id,
+          reason: row.reason,
+          createdAt: row.created_at,
+          createdBy: row.created_by ?? undefined,
+          config: normalizeCalibration(parseDbConfig(row.config))
+        })
+      )
+      .filter((item): item is AiQualityCalibrationSnapshot => Boolean(item))
+  );
+}
+
+async function persistCalibrationConfigToDb(config: AiQualityCalibrationConfig) {
+  await query(
+    `INSERT INTO ai_quality_calibration_runtime (id, config, updated_at, updated_by)
+     VALUES ($1, $2::jsonb, $3, $4)
+     ON CONFLICT (id) DO UPDATE
+     SET config = EXCLUDED.config,
+         updated_at = EXCLUDED.updated_at,
+         updated_by = EXCLUDED.updated_by`,
+    [CALIBRATION_RUNTIME_ROW_ID, JSON.stringify(config), config.updatedAt, config.updatedBy ?? null]
+  );
+}
+
+async function persistCalibrationSnapshotsToDb(items: AiQualityCalibrationSnapshot[]) {
+  for (const item of items) {
+    await query(
+      `INSERT INTO ai_quality_calibration_history (id, reason, created_at, created_by, config)
+       VALUES ($1, $2, $3, $4, $5::jsonb)
+       ON CONFLICT (id) DO NOTHING`,
+      [item.id, item.reason, item.createdAt, item.createdBy ?? null, JSON.stringify(item.config)]
+    );
+  }
+}
+
+async function syncCalibrationStateFromDb(force = false) {
+  if (!isDbEnabled()) return;
+
+  const now = Date.now();
+  if (!force && calibrationStateSyncedAt && now - calibrationStateSyncedAt < CALIBRATION_CACHE_TTL_MS) {
+    return;
+  }
+  if (calibrationStateSyncing) {
+    return calibrationStateSyncing;
+  }
+
+  calibrationStateSyncing = (async () => {
+    try {
+      const [runtimeRow, historyRows] = await Promise.all([
+        queryOne<DbCalibrationRuntimeRow>(
+          "SELECT id, config, updated_at, updated_by FROM ai_quality_calibration_runtime WHERE id = $1",
+          [CALIBRATION_RUNTIME_ROW_ID]
+        ),
+        query<DbCalibrationHistoryRow>(
+          `SELECT id, reason, created_at, created_by, config
+           FROM ai_quality_calibration_history
+           ORDER BY created_at DESC
+           LIMIT $1`,
+          [CALIBRATION_HISTORY_LIMIT]
+        )
+      ]);
+
+      if (!runtimeRow) {
+        const fallbackConfig = shouldAllowDbBootstrapFromJsonFallback()
+          ? readCalibrationFromFile()
+          : normalizeCalibration(DEFAULT_CALIBRATION);
+        const fallbackHistory = shouldAllowDbBootstrapFromJsonFallback() ? readCalibrationHistoryFromFile() : [];
+        await persistCalibrationConfigToDb(fallbackConfig);
+        if (fallbackHistory.length) {
+          await persistCalibrationSnapshotsToDb(fallbackHistory);
+        }
+        calibrationCache = fallbackConfig;
+        calibrationHistoryCache = fallbackHistory;
+      } else {
+        calibrationCache = mapDbCalibrationRow(runtimeRow);
+        calibrationHistoryCache = mapDbHistoryRows(historyRows);
+      }
+      calibrationStateSyncedAt = Date.now();
+    } catch {
+      // Keep last known cache when DB reads fail.
+    } finally {
+      calibrationStateSyncing = null;
+    }
+  })();
+
+  return calibrationStateSyncing;
+}
+
+function createCalibrationSnapshot(params: { reason: string; createdBy?: string; config?: AiQualityCalibrationConfig }) {
   const source = params.config ?? getAiQualityCalibration();
-  const now = new Date().toISOString();
-  const history = readCalibrationHistory();
-  const next: AiQualityCalibrationSnapshot = {
+  return {
     id: `cal-snap-${crypto.randomBytes(6).toString("hex")}`,
     reason: params.reason.trim() || "manual_update",
-    createdAt: now,
+    createdAt: new Date().toISOString(),
     createdBy: params.createdBy?.trim() || undefined,
     config: normalizeCalibration(source)
   };
-  history.unshift(next);
-  writeCalibrationHistory(history);
-  return next;
 }
 
 function hashToPercent(input: string) {
@@ -177,25 +329,43 @@ function isCalibrationApplied(params: {
 }
 
 export function getAiQualityCalibration() {
-  const raw = readJson<AiQualityCalibrationConfig>(CALIBRATION_FILE, DEFAULT_CALIBRATION);
-  return normalizeCalibration(raw);
+  if (isDbEnabled()) {
+    void syncCalibrationStateFromDb();
+  }
+  return calibrationCache;
 }
 
 export function listAiQualityCalibrationSnapshots(limit = 20) {
+  if (isDbEnabled()) {
+    void syncCalibrationStateFromDb();
+  }
   const capped = Number.isFinite(limit) ? Math.max(1, Math.min(100, Math.round(limit))) : 20;
-  return readCalibrationHistory().slice(0, capped);
+  return calibrationHistoryCache.slice(0, capped);
 }
 
-export function upsertAiQualityCalibration(
+export async function refreshAiQualityCalibrationState() {
+  await syncCalibrationStateFromDb(true);
+  return {
+    calibration: getAiQualityCalibration(),
+    snapshots: listAiQualityCalibrationSnapshots(CALIBRATION_HISTORY_LIMIT)
+  };
+}
+
+export async function upsertAiQualityCalibration(
   patch: AiQualityCalibrationPatch,
   options?: { updatedBy?: string; reason?: string }
 ) {
+  if (isDbEnabled()) {
+    await syncCalibrationStateFromDb(true);
+  }
+
   const current = getAiQualityCalibration();
-  snapshotCurrentCalibration({
+  const snapshot = createCalibrationSnapshot({
     reason: options?.reason ?? "manual_update",
     createdBy: options?.updatedBy,
     config: current
   });
+  const nextHistory = sortSnapshots([snapshot, ...calibrationHistoryCache.filter((item) => item.id !== snapshot.id)]);
 
   const next: AiQualityCalibrationConfig = {
     globalBias: Number.isFinite(patch.globalBias)
@@ -220,29 +390,60 @@ export function upsertAiQualityCalibration(
     updatedAt: new Date().toISOString(),
     updatedBy: options?.updatedBy?.trim() || current.updatedBy
   };
-  writeJson(CALIBRATION_FILE, next);
+
+  if (!isDbEnabled()) {
+    writeCalibrationHistory(nextHistory);
+    writeJson(CALIBRATION_FILE, next);
+    calibrationHistoryCache = nextHistory;
+    calibrationCache = next;
+    return next;
+  }
+
+  await persistCalibrationSnapshotsToDb([snapshot]);
+  await persistCalibrationConfigToDb(next);
+  calibrationHistoryCache = nextHistory;
+  calibrationCache = next;
+  calibrationStateSyncedAt = Date.now();
   return next;
 }
 
-export function rollbackAiQualityCalibration(
+export async function rollbackAiQualityCalibration(
   snapshotId: string,
   options?: { updatedBy?: string; reason?: string }
 ) {
-  const target = readCalibrationHistory().find((item) => item.id === snapshotId);
+  if (isDbEnabled()) {
+    await syncCalibrationStateFromDb(true);
+  }
+
+  const target = calibrationHistoryCache.find((item) => item.id === snapshotId);
   if (!target) return null;
   const current = getAiQualityCalibration();
-  snapshotCurrentCalibration({
+  const snapshot = createCalibrationSnapshot({
     reason: options?.reason ?? `rollback_before:${snapshotId}`,
     createdBy: options?.updatedBy,
     config: current
   });
+  const nextHistory = sortSnapshots([snapshot, ...calibrationHistoryCache.filter((item) => item.id !== snapshot.id)]);
 
   const next: AiQualityCalibrationConfig = {
     ...normalizeCalibration(target.config),
     updatedAt: new Date().toISOString(),
     updatedBy: options?.updatedBy?.trim() || target.createdBy
   };
-  writeJson(CALIBRATION_FILE, next);
+
+  if (!isDbEnabled()) {
+    writeCalibrationHistory(nextHistory);
+    writeJson(CALIBRATION_FILE, next);
+    calibrationHistoryCache = nextHistory;
+    calibrationCache = next;
+    return next;
+  }
+
+  await persistCalibrationSnapshotsToDb([snapshot]);
+  await persistCalibrationConfigToDb(next);
+  calibrationHistoryCache = nextHistory;
+  calibrationCache = next;
+  calibrationStateSyncedAt = Date.now();
   return next;
 }
 

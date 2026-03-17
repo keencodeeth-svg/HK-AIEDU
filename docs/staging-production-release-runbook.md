@@ -1,6 +1,6 @@
 # Staging / Production 发布手册
 
-更新时间：2026-03-12
+更新时间：2026-03-17
 
 适用目标：
 - staging 预发验证
@@ -19,9 +19,26 @@
 本地代码检查：
 
 ```bash
-npm run lint
-npm run build
-npm test
+npm run verify:strict
+npm run test:smoke:production-like:local
+```
+
+如果本次变更直接影响浏览器关键流程、对象存储读写链路或 production-like 浏览器回归，再额外执行：
+
+```bash
+npm run test:browser:production-like:local
+```
+
+如果本次变更涉及学校排课 AI 预演 / 应用 / 回滚、模板、教师规则、禁排时段或相关运行时状态，再额外执行：
+
+```bash
+npm run test:school-schedules:production-like:local
+```
+
+如果当前机器没有可用 Docker daemon，但本机已有可复用 PostgreSQL，可改用：
+
+```bash
+PRODUCTION_LIKE_USE_EXISTING_DB=1 npm run test:smoke:production-like:local
 ```
 
 环境检查：
@@ -29,6 +46,8 @@ npm test
 - 已配置对象存储根或外部对象存储
 - 生产环境必须关闭 `ALLOW_JSON_FALLBACK`
 - staging / production 环境已配置 `READINESS_PROBE_TOKEN`
+- 已准备远端 smoke 使用的管理员账号
+- 已准备远端 smoke 读取的学校 ID（默认 `school-default`，可通过 `API_TEST_SMOKE_SCHOOL_ID` 覆盖）
 - 已准备本次发布的 commit / tag / rollback 目标版本
 
 推荐记录：
@@ -59,6 +78,9 @@ curl -fsS -H "x-readiness-token: $READINESS_PROBE_TOKEN" https://staging.example
 ```bash
 API_TEST_BASE_URL=https://staging.example.com \
 API_TEST_READINESS_TOKEN=$READINESS_PROBE_TOKEN \
+API_TEST_ADMIN_EMAIL=admin@demo.com \
+API_TEST_ADMIN_PASSWORD=Admin123 \
+API_TEST_SMOKE_SCHOOL_ID=school-default \
 npm run test:smoke:remote
 ```
 
@@ -97,6 +119,9 @@ curl -fsS -H "x-readiness-token: $READINESS_PROBE_TOKEN" https://prod.example.co
 ```bash
 API_TEST_BASE_URL=https://prod.example.com \
 API_TEST_READINESS_TOKEN=$READINESS_PROBE_TOKEN \
+API_TEST_ADMIN_EMAIL=admin@demo.com \
+API_TEST_ADMIN_PASSWORD=Admin123 \
+API_TEST_SMOKE_SCHOOL_ID=school-default \
 npm run test:smoke:remote
 ```
 
@@ -113,6 +138,10 @@ npm run test:smoke:remote
 
 前置条件：
 - GitHub `staging` / `production` environment 中都已配置 `READINESS_PROBE_TOKEN` secret
+- 如默认管理员账号或学校 ID 不适用，额外配置：
+  - `API_TEST_ADMIN_PASSWORD` secret
+  - `API_TEST_ADMIN_EMAIL` variable
+  - `API_TEST_SMOKE_SCHOOL_ID` variable
 
 使用方式：
 1. 进入 Actions -> `Release Smoke`
@@ -135,6 +164,13 @@ npm run test:smoke:remote
 - 学生登录
 - `GET /api/auth/me`
 - 学生登出
+- 管理员登录
+- `GET /api/school/schedules?schoolId=$API_TEST_SMOKE_SCHOOL_ID`
+- 管理员登出
+
+远端 smoke 前提：
+- 目标环境存在可登录管理员账号；未显式传参时默认使用 `admin@demo.com` / `Admin123`
+- 目标环境存在可读取学校数据；未显式传参时默认使用 `school-default`
 
 限制：
 - 远端模式默认只允许 `smoke` / `health`
@@ -159,6 +195,9 @@ curl -fsS https://target.example.com/api/health
 curl -fsS -H "x-readiness-token: $READINESS_PROBE_TOKEN" https://target.example.com/api/health/readiness
 API_TEST_BASE_URL=https://target.example.com \
 API_TEST_READINESS_TOKEN=$READINESS_PROBE_TOKEN \
+API_TEST_ADMIN_EMAIL=admin@demo.com \
+API_TEST_ADMIN_PASSWORD=Admin123 \
+API_TEST_SMOKE_SCHOOL_ID=school-default \
 npm run test:smoke:remote
 ```
 

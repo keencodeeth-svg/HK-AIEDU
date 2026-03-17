@@ -6,6 +6,7 @@ function createLocalTestEmail(prefix) {
 
 export async function runSmokeSuite(context) {
   const { apiFetch, cookieJar, baseUrl } = context;
+  const smokeSchoolId = process.env.API_TEST_SMOKE_SCHOOL_ID || "school-default";
 
   const liveness = await apiFetch("/api/health", { useCookies: false });
   assert.equal(liveness.status, 200, `GET /api/health failed: ${liveness.raw}`);
@@ -67,4 +68,34 @@ export async function runSmokeSuite(context) {
     referrer: `${baseUrl}/smoke`
   });
   assert.equal(logout.status, 200, `Smoke logout failed: ${logout.raw}`);
+
+  const adminEmail = process.env.API_TEST_ADMIN_EMAIL || "admin@demo.com";
+  const adminPassword = process.env.API_TEST_ADMIN_PASSWORD || "Admin123";
+  const adminLogin = await apiFetch("/api/auth/login", {
+    method: "POST",
+    useCookies: false,
+    json: {
+      email: adminEmail,
+      password: adminPassword,
+      role: "admin"
+    }
+  });
+  assert.equal(adminLogin.status, 200, `Smoke admin login failed: ${adminLogin.raw}`);
+  assert.ok(cookieJar.has("mvp_session"), "Smoke admin login should set session cookie");
+
+  const schoolSchedules = await apiFetch(`/api/school/schedules?schoolId=${encodeURIComponent(smokeSchoolId)}`);
+  assert.equal(schoolSchedules.status, 200, `GET /api/school/schedules failed in smoke: ${schoolSchedules.raw}`);
+  assert.equal(schoolSchedules.body?.code, 0, "School schedules smoke response should use standard envelope");
+  assert.ok(Array.isArray(schoolSchedules.body?.data?.classes), "School schedules smoke should expose classes array");
+  assert.ok(Array.isArray(schoolSchedules.body?.data?.sessions), "School schedules smoke should expose sessions array");
+  assert.ok(
+    typeof schoolSchedules.body?.data?.summary?.totalSessions === "number",
+    "School schedules smoke should expose summary.totalSessions"
+  );
+
+  const adminLogout = await apiFetch("/api/auth/logout", {
+    method: "POST",
+    referrer: `${baseUrl}/smoke`
+  });
+  assert.equal(adminLogout.status, 200, `Smoke admin logout failed: ${adminLogout.raw}`);
 }

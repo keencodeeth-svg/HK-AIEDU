@@ -15,18 +15,17 @@ const HIGH_FREQUENCY_STATE_FILES = new Set([
   "exam-submissions.json",
   "focus-sessions.json",
   "mastery-records.json",
+  "memory-reviews.json",
   "notifications.json",
   "parent-action-receipts.json",
-  "sessions.json"
-]);
-
-const MIGRATION_PRIORITY_STATE_FILES = new Set([
-  "memory-reviews.json",
   "question-attempts.json",
   "review-tasks.json",
+  "sessions.json",
   "study-plans.json",
   "wrong-review-items.json"
 ]);
+
+const MIGRATION_PRIORITY_STATE_FILES = new Set<string>();
 
 function parseBooleanEnv(value: string | undefined) {
   if (!value) return null;
@@ -43,7 +42,7 @@ function isBuildPhase() {
 
 function isApiTestRuntime() {
   if (process.env.NODE_ENV === "test") return true;
-  if (process.env.API_TEST_SCOPE?.trim()) return true;
+  if ((process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE)?.trim()) return true;
   if (process.env.API_TEST_ALLOW_CUSTOM_ORIGIN_HEADER === "true") return true;
   return false;
 }
@@ -62,6 +61,13 @@ export function shouldEnforceRuntimeGuardrails() {
   const explicit = parseBooleanEnv(process.env.RUNTIME_GUARDRAILS_ENFORCE);
   if (explicit !== null) return explicit;
   return isProductionRuntime() && !isApiTestRuntime();
+}
+
+export function shouldAllowDbBootstrapFromJsonFallback() {
+  if (shouldEnforceRuntimeGuardrails()) return false;
+  const explicitAllowJsonFallback = parseBooleanEnv(process.env.ALLOW_JSON_FALLBACK);
+  if (explicitAllowJsonFallback === false) return false;
+  return true;
 }
 
 export function getRuntimeGuardrailIssues() {

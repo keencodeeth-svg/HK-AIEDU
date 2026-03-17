@@ -288,3 +288,82 @@ test("recordAiCallLog and getAiCallMetricsSummary aggregate file-backed call met
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("db-backed task policies ignore legacy json bootstrap when guardrails disable fallback", async () => {
+  restoreEnv();
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "hk-ai-policy-guarded-"));
+  const runtimeDir = path.join(root, "runtime");
+  const seedDir = path.join(root, "seed");
+  await fs.mkdir(runtimeDir, { recursive: true });
+  await fs.mkdir(seedDir, { recursive: true });
+
+  process.env.NODE_ENV = "production";
+  process.env.DATA_DIR = runtimeDir;
+  process.env.DATA_SEED_DIR = seedDir;
+  process.env.DATABASE_URL = "postgres://demo:demo@localhost:5432/demo";
+  process.env.ALLOW_JSON_FALLBACK = "false";
+  process.env.RUNTIME_GUARDRAILS_ENFORCE = "true";
+  process.env.LLM_PROVIDER_CHAIN = "mock";
+
+  await fs.writeFile(
+    path.join(runtimeDir, "ai-task-policies.json"),
+    JSON.stringify(
+      {
+        assist: {
+          providerChain: ["deepseek"],
+          timeoutMs: 19000,
+          maxRetries: 4,
+          budgetLimit: 4000,
+          minQualityScore: 88,
+          updatedAt: "2026-03-17T00:00:00.000Z",
+          updatedBy: "legacy-json"
+        }
+      },
+      null,
+      2
+    )
+  );
+
+  resetAiPolicyModules();
+
+  const dbState = {
+    policyRows: [] as Array<Record<string, unknown>>,
+    inserts: [] as Array<{ taskType: string }>
+  };
+
+  const dbMod = require("../../lib/db") as {
+    isDbEnabled: () => boolean;
+    query: (text: string, params?: unknown[]) => Promise<unknown[]>;
+    queryOne?: (text: string, params?: unknown[]) => Promise<unknown>;
+  };
+
+  dbMod.isDbEnabled = () => true;
+  dbMod.query = async (text: string, params: unknown[] = []) => {
+    if (text.includes("FROM ai_task_policies")) {
+      return dbState.policyRows;
+    }
+    if (text.includes("INSERT INTO ai_task_policies")) {
+      dbState.inserts.push({ taskType: String(params[0]) });
+      return [];
+    }
+    if (text.includes("FROM ai_call_logs")) {
+      return [];
+    }
+    throw new Error(`unexpected query: ${text}`);
+  };
+
+  const mod = require("../../lib/ai-task-policies") as AiTaskPoliciesModule;
+
+  try {
+    await mod.refreshAiTaskPolicies();
+
+    const assist = mod.getAiTaskPolicy("assist");
+    assert.equal(assist.source, "default");
+    assert.deepEqual(assist.providerChain, ["mock"]);
+    assert.equal(assist.timeoutMs, 8000);
+    assert.equal(dbState.inserts.length, 0);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

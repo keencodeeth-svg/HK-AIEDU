@@ -6,6 +6,7 @@ import { createRuntime } from "./api-test/runtime.mjs";
 import { runAdminContentSuite } from "./api-test/suites/admin-content.mjs";
 import { runCoreAuthSuite } from "./api-test/suites/core-auth.mjs";
 import { runLearningSuite } from "./api-test/suites/learning.mjs";
+import { runSchoolScheduleSuite } from "./api-test/suites/school-schedules.mjs";
 import { runSmokeSuite } from "./api-test/suites/smoke.mjs";
 import { runTeacherExamSuite } from "./api-test/suites/teacher-exam.mjs";
 
@@ -39,7 +40,7 @@ function createMutableStateSnapshot() {
 
 async function run() {
   const remoteSelfTest = process.env.API_TEST_REMOTE_SELF_TEST === "true";
-  const scope = (process.env.API_TEST_SCOPE ?? "full").toLowerCase();
+  const scope = (process.env.API_TEST_SUITE ?? process.env.API_TEST_SCOPE ?? "full").toLowerCase();
   const requestedMode = process.env.API_TEST_SERVER_MODE;
   const isStartMode = requestedMode === "start";
   const restoreMutableState = runtime.isRemote ? () => {} : createMutableStateSnapshot();
@@ -107,6 +108,11 @@ async function run() {
     if (scope === "smoke") {
       await runSmokeSuite(context);
       console.log("API smoke tests passed.");
+      return;
+    }
+    if (scope === "school-schedules") {
+      await runSchoolScheduleSuite(context);
+      console.log("School schedule API regression tests passed.");
       return;
     }
     await runCoreAuthSuite(context);
