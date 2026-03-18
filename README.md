@@ -604,6 +604,15 @@ CI 工作流：`.github/workflows/ci.yml`
 - 本地要复现 CI 的 DB/object-storage 路径时，执行：`npm run test:smoke:production-like:local`
 - 本地要复现 CI 的 DB/object-storage 浏览器路径时，执行：`npm run test:browser:production-like:local`
 - 学校排课 AI 预演 / 应用 / 回滚的深 API 回归，可执行：`npm run test:school-schedules:production-like:local`
+- 低内存 Linux 主机发布，优先使用预构建脚本而不是远端 `next build`：
+
+```bash
+DEPLOY_REMOTE_HOST=root@8.136.122.236 \
+DEPLOY_EXTERNAL_HEALTH_URL=https://8.136.122.236/api/health \
+npm run deploy:remote:prebuilt
+```
+
+- 这条脚本默认先本地 `npm run build`，然后上传预构建包到远端，只在服务器执行 `npm ci --omit=dev`、`db:migrate`、PM2 canary 和切流
 - 提交到主干后的 CI 还会再跑一遍 production-like 三层回归，先验证最小 smoke，再验证浏览器 smoke 与学校排课深回归
 - 已部署环境发布后建议执行：
 
@@ -669,7 +678,7 @@ npm run db:migrate
 - `docs/strict-testing-baseline.md`
   用途：看 `verify:strict`、browser smoke、production-like regression、CI 测试门。
 - `docs/staging-production-release-runbook.md`
-  用途：看 staging / production 发布、远端 smoke、失败回滚与手工工作流。
+  用途：看 staging / production 发布、预构建远端发布脚本、远端 smoke、失败回滚与手工工作流。
 - `docs/p0-optimization-task-cards.md`
   用途：把 P0 收口工作直接拆成 issue / task card。
 - `docs/week7-challenge-regression-checklist.md`

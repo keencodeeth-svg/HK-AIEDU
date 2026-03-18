@@ -39,6 +39,7 @@
     "infra:postgres:up": "docker compose -f docker-compose.local.yml up -d postgres",
     "infra:postgres:down": "docker compose -f docker-compose.local.yml down",
     "infra:postgres:logs": "docker compose -f docker-compose.local.yml logs -f postgres",
+    "deploy:remote:prebuilt": "bash scripts/deploy-prebuilt-remote.sh",
     "test:smoke:production-like:local": "bash scripts/run-production-like-smoke-local.sh",
     "test:school-schedules:production-like:local": "PRODUCTION_LIKE_TEST_SCRIPT=test:school-schedules:production-like bash scripts/run-production-like-smoke-local.sh",
     "export:users": "node scripts/export-users.mjs",

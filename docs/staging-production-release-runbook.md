@@ -1,6 +1,6 @@
 # Staging / Production 发布手册
 
-更新时间：2026-03-17
+更新时间：2026-03-18
 
 适用目标：
 - staging 预发验证
@@ -59,8 +59,39 @@ PRODUCTION_LIKE_USE_EXISTING_DB=1 npm run test:smoke:production-like:local
 
 ## 3. Staging 发布步骤
 
-1. 部署新版本到 staging。
-2. 执行迁移：
+1. 优先使用仓库内预构建发布脚本，避免在低内存主机上远端 `next build`：
+
+```bash
+DEPLOY_REMOTE_HOST=root@staging.example.com \
+DEPLOY_EXTERNAL_HEALTH_URL=https://staging.example.com/api/health \
+npm run deploy:remote:prebuilt
+```
+
+脚本默认行为：
+- 本地先执行 `npm run build`
+- 打包当前工作区，但排除 `node_modules` 与 `.next/cache`
+- 上传 release 包到远端并恢复远端 `.env.production`
+- 远端仅执行 `npm ci --omit=dev`、`db:migrate`、`3001` canary、`3000` 正式切流
+- 若 `.env.production` 内存在 `READINESS_PROBE_TOKEN`，会额外校验 readiness
+
+脚本前提：
+- 工作区默认必须干净；如要显式部署未提交改动，需设置 `DEPLOY_ALLOW_DIRTY=1`
+- 远端需要保留稳定的环境文件，默认路径 `/var/www/HK-AIEDU/.env.production`
+- 远端已安装 `pm2`
+
+常用覆盖项：
+
+```bash
+DEPLOY_REMOTE_HOST=root@staging.example.com \
+DEPLOY_REMOTE_ENV_SOURCE=/srv/hk-ai-edu/.env.production \
+DEPLOY_PM2_APP_NAME=hk-ai-edu-staging \
+DEPLOY_CANARY_APP_NAME=hk-ai-edu-staging-canary \
+DEPLOY_REMOTE_PRODUCTION_PORT=3100 \
+DEPLOY_REMOTE_CANARY_PORT=3101 \
+npm run deploy:remote:prebuilt
+```
+
+2. 确认迁移已执行；若这次不是通过脚本发布，再手工执行：
 
 ```bash
 npm run db:migrate
@@ -100,8 +131,15 @@ node scripts/test-api-routes.mjs
 ## 4. Production 发布步骤
 
 1. 确认 staging smoke 通过，且未发现阻塞项。
-2. 部署相同 commit 到 production。
-3. 执行迁移：
+2. 使用同一条预构建脚本部署相同 commit 到 production：
+
+```bash
+DEPLOY_REMOTE_HOST=root@prod.example.com \
+DEPLOY_EXTERNAL_HEALTH_URL=https://prod.example.com/api/health \
+npm run deploy:remote:prebuilt
+```
+
+3. 确认迁移已执行；若这次不是通过脚本发布，再手工执行：
 
 ```bash
 npm run db:migrate
