@@ -4,7 +4,9 @@ import type {
   AssignmentLessonLink,
   AssignmentReviewPayload,
   AssignmentStageCopy,
-  SubmitResult
+  AssignmentRefreshStatus,
+  SubmitResult,
+  UploadItem
 } from "./types";
 
 export async function readJsonSafe(response: Response): Promise<any> {
@@ -103,6 +105,177 @@ export function buildAssignmentStageCopy({
   return {
     title: "答案已完成，可以提交",
     description: "提交后会立即生成成绩与解析，下方还会同步老师点评和 AI 复盘。"
+  };
+}
+
+export function shouldLoadStudentAssignmentReview(data: AssignmentDetail) {
+  return data.progress?.status === "completed";
+}
+
+export function shouldLoadStudentAssignmentUploads(data: AssignmentDetail) {
+  return data.assignment?.submissionType === "upload" || data.assignment?.submissionType === "essay";
+}
+
+export function buildStudentAssignmentSnapshotNotice(
+  label: string,
+  message: string,
+  hasSnapshot: boolean
+) {
+  return hasSnapshot
+    ? `${label}刷新失败，已展示最近一次成功数据：${message}`
+    : `${label}加载失败：${message}`;
+}
+
+export function mergeStudentAssignmentSubmitResult(
+  data: AssignmentDetail | null,
+  result: SubmitResult
+) {
+  if (!data) {
+    return data;
+  }
+
+  return {
+    ...data,
+    progress: {
+      ...(data.progress ?? {}),
+      status: "completed",
+      score: result.score,
+      total: result.total
+    }
+  };
+}
+
+export function getStudentAssignmentUploadSuccessMessage(
+  savedCount: number,
+  refreshStatus: AssignmentRefreshStatus
+) {
+  const baseMessage = `已上传 ${savedCount} 份文件`;
+
+  if (refreshStatus === "ok") {
+    return `${baseMessage}，确认后即可提交。`;
+  }
+  if (refreshStatus === "stale") {
+    return `${baseMessage}，系统正在同步最新上传列表。`;
+  }
+
+  return `${baseMessage}，但上传列表刷新失败，请稍后重试。`;
+}
+
+export function getStudentAssignmentDeleteUploadSuccessMessage(
+  refreshStatus: AssignmentRefreshStatus
+) {
+  if (refreshStatus === "ok") {
+    return "已删除上传文件，可重新上传后再提交。";
+  }
+  if (refreshStatus === "stale") {
+    return "文件已删除，系统正在同步最新上传列表。";
+  }
+
+  return "文件已删除，但上传列表刷新失败，请稍后重试。";
+}
+
+export function getStudentAssignmentSubmitSuccessMessage(
+  refreshStatus: AssignmentRefreshStatus
+) {
+  const baseMessage = "提交成功";
+
+  if (refreshStatus === "ok") {
+    return `${baseMessage}，已为你定位到下方结果与反馈区。`;
+  }
+  if (refreshStatus === "stale") {
+    return `${baseMessage}，系统正在同步最新反馈。`;
+  }
+
+  return `${baseMessage}，但老师反馈刷新失败，请稍后重新进入查看。`;
+}
+
+type DeriveStudentAssignmentPageStateArgs = {
+  data: AssignmentDetail | null;
+  answers: Record<string, string>;
+  result: SubmitResult | null;
+  review: AssignmentReviewPayload | null;
+  uploads: UploadItem[];
+  submissionText: string;
+};
+
+export function deriveStudentAssignmentPageState({
+  data,
+  answers,
+  result,
+  review,
+  uploads,
+  submissionText
+}: DeriveStudentAssignmentPageStateArgs) {
+  if (!data) {
+    return {
+      alreadyCompleted: false,
+      isUpload: false,
+      isEssay: false,
+      isQuiz: false,
+      maxUploads: 3,
+      hasUploads: false,
+      hasText: false,
+      answeredCount: 0,
+      canSubmit: false,
+      hasFeedbackContent: false,
+      stageCopy: { title: "", description: "" },
+      statusLabel: ""
+    };
+  }
+
+  const isUpload = data.assignment.submissionType === "upload";
+  const isEssay = data.assignment.submissionType === "essay";
+  const isQuiz = !isUpload && !isEssay;
+  const maxUploads = data.assignment.maxUploads ?? 3;
+  const hasUploads = uploads.length > 0;
+  const hasText = Boolean(submissionText.trim());
+  const answeredCount = data.questions.reduce(
+    (count, question) => (answers[question.id] ? count + 1 : count),
+    0
+  );
+  const alreadyCompleted = data.progress?.status === "completed" && !result;
+  const canSubmit = alreadyCompleted
+    ? false
+    : isUpload
+      ? hasUploads
+      : isEssay
+        ? hasUploads || hasText
+        : data.questions.length > 0 && answeredCount === data.questions.length;
+  const hasFeedbackContent = Boolean(
+    result ||
+      review?.review ||
+      review?.rubrics?.length ||
+      review?.aiReview ||
+      (review?.questions?.length && isQuiz)
+  );
+  const stageCopy = buildAssignmentStageCopy({
+    data,
+    result,
+    review,
+    alreadyCompleted,
+    isUpload,
+    isEssay,
+    uploadsCount: uploads.length,
+    maxUploads,
+    hasUploads,
+    hasText,
+    answeredCount
+  });
+  const statusLabel = result ? "已提交" : alreadyCompleted ? "已完成" : canSubmit ? "待提交" : "进行中";
+
+  return {
+    alreadyCompleted,
+    isUpload,
+    isEssay,
+    isQuiz,
+    maxUploads,
+    hasUploads,
+    hasText,
+    answeredCount,
+    canSubmit,
+    hasFeedbackContent,
+    stageCopy,
+    statusLabel
   };
 }
 

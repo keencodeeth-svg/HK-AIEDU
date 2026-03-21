@@ -1,4 +1,10 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
+import type {
+  ModuleItem,
+  ModuleResourceFileLike,
+  ModuleResourcePayload,
+  ModuleResourceType
+} from "./types";
 
 export function readFileAsBase64(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -25,6 +31,105 @@ export function resolveTeacherModulesModuleId(currentModuleId: string, modules: 
     return currentModuleId;
   }
   return modules[0]?.id ?? "";
+}
+
+export function resolveTeacherModulesParentId(currentParentId: string, modules: Array<{ id: string }>) {
+  if (currentParentId && modules.some((item) => item.id === currentParentId)) {
+    return currentParentId;
+  }
+  return "";
+}
+
+export function removeTeacherModulesClassSnapshot<T extends { id: string }>(
+  previousClasses: T[],
+  staleClassId: string
+) {
+  const classes = previousClasses.filter((item) => item.id !== staleClassId);
+  return {
+    classes,
+    classId: resolveTeacherModulesClassId("", classes)
+  };
+}
+
+export function removeTeacherModulesModuleSnapshot<T extends { id: string }>(
+  previousModules: T[],
+  staleModuleId: string
+) {
+  const modules = previousModules.filter((item) => item.id !== staleModuleId);
+  return {
+    modules,
+    moduleId: resolveTeacherModulesModuleId("", modules)
+  };
+}
+
+export function getTeacherModulesResourceValidationMessage({
+  title,
+  resourceType,
+  resourceUrl,
+  resourceFile
+}: {
+  title: string;
+  resourceType: ModuleResourceType;
+  resourceUrl: string;
+  resourceFile: ModuleResourceFileLike | null;
+}) {
+  if (!title) {
+    return "请填写资源标题";
+  }
+  if (resourceType === "file" && !resourceFile) {
+    return "请选择文件";
+  }
+  if (resourceType === "link" && !resourceUrl) {
+    return "请输入资源链接";
+  }
+  return null;
+}
+
+export function buildTeacherModulesResourcePayload({
+  title,
+  resourceType,
+  resourceUrl,
+  resourceFile,
+  contentBase64
+}: {
+  title: string;
+  resourceType: ModuleResourceType;
+  resourceUrl: string;
+  resourceFile: ModuleResourceFileLike | null;
+  contentBase64?: string;
+}): ModuleResourcePayload {
+  if (resourceType === "link") {
+    return {
+      title,
+      resourceType,
+      linkUrl: resourceUrl
+    };
+  }
+
+  return {
+    title,
+    resourceType,
+    fileName: resourceFile?.name,
+    mimeType: resourceFile?.type || "application/octet-stream",
+    size: resourceFile?.size,
+    contentBase64
+  };
+}
+
+export function resolveTeacherModulesSwapPair(
+  modules: ModuleItem[],
+  index: number,
+  direction: "up" | "down"
+) {
+  const nextIndex = direction === "up" ? index - 1 : index + 1;
+  if (nextIndex < 0 || nextIndex >= modules.length) {
+    return null;
+  }
+
+  return {
+    current: modules[index]!,
+    target: modules[nextIndex]!
+  };
 }
 
 export function isMissingTeacherModulesClassError(error: unknown) {

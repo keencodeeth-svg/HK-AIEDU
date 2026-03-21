@@ -1,309 +1,39 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
 import StatePanel from "@/components/StatePanel";
 import { SUBJECT_LABELS } from "@/lib/constants";
-import { formatLoadedTime, isAuthError, requestJson } from "@/lib/client-request";
-import type {
-  AnnouncementClassListResponse,
-  AnnouncementClassOption,
-  AnnouncementItem,
-  AnnouncementListResponse,
-  AnnouncementSubmitResponse,
-  AuthMeResponse,
-  AppUserRole
-} from "./types";
-import {
-  getAnnouncementClassListRequestMessage,
-  getAnnouncementsListRequestMessage,
-  getAnnouncementSubmitRequestMessage,
-  isMissingAnnouncementClassError,
-  resolveAnnouncementClassId
-} from "./utils";
-
-type LoadStatus = "loaded" | "auth" | "error" | "stale";
+import { useAnnouncementsPage } from "./useAnnouncementsPage";
 
 export default function AnnouncementsPage() {
-  const bootstrapRequestIdRef = useRef(0);
-  const announcementsRequestIdRef = useRef(0);
-  const classesRequestIdRef = useRef(0);
-  const hasAnnouncementsSnapshotRef = useRef(false);
-  const hasClassesSnapshotRef = useRef(false);
-  const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([]);
-  const [userRole, setUserRole] = useState<AppUserRole>(null);
-  const [classes, setClasses] = useState<AnnouncementClassOption[]>([]);
-  const [classId, setClassId] = useState("");
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [pageError, setPageError] = useState<string | null>(null);
-  const [classesError, setClassesError] = useState<string | null>(null);
-  const [pageLoading, setPageLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [classesLoading, setClassesLoading] = useState(false);
-  const [authRequired, setAuthRequired] = useState(false);
-  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
-
-  const clearSubmitNotice = useCallback(() => {
-    setMessage(null);
-    setSubmitError(null);
-  }, []);
-
-  const clearAnnouncementsState = useCallback(() => {
-    hasAnnouncementsSnapshotRef.current = false;
-    setAnnouncements([]);
-  }, []);
-
-  const clearClassesState = useCallback(() => {
-    hasClassesSnapshotRef.current = false;
-    setClasses([]);
-    setClassId("");
-    setClassesError(null);
-    setClassesLoading(false);
-  }, []);
-
-  const clearPageState = useCallback(() => {
-    clearAnnouncementsState();
-    clearClassesState();
-    clearSubmitNotice();
-    setUserRole(null);
-    setPageError(null);
-    setLastLoadedAt(null);
-  }, [clearAnnouncementsState, clearClassesState, clearSubmitNotice]);
-
-  const handleAuthRequired = useCallback(() => {
-    bootstrapRequestIdRef.current += 1;
-    announcementsRequestIdRef.current += 1;
-    classesRequestIdRef.current += 1;
-    clearPageState();
-    setPageLoading(false);
-    setSubmitting(false);
-    setAuthRequired(true);
-  }, [clearPageState]);
-
-  const loadAnnouncements = useCallback(async (): Promise<LoadStatus> => {
-    const requestId = announcementsRequestIdRef.current + 1;
-    announcementsRequestIdRef.current = requestId;
-    setPageError(null);
-
-    try {
-      const payload = await requestJson<AnnouncementListResponse>("/api/announcements");
-      if (announcementsRequestIdRef.current !== requestId) {
-        return "stale";
-      }
-
-      hasAnnouncementsSnapshotRef.current = true;
-      setAnnouncements(payload.data ?? []);
-      setAuthRequired(false);
-      setLastLoadedAt(new Date().toISOString());
-      return "loaded";
-    } catch (error) {
-      if (announcementsRequestIdRef.current !== requestId) {
-        return "stale";
-      }
-
-      if (isAuthError(error)) {
-        handleAuthRequired();
-        return "auth";
-      }
-
-      if (!hasAnnouncementsSnapshotRef.current) {
-        clearAnnouncementsState();
-      }
-      setAuthRequired(false);
-      setPageError(getAnnouncementsListRequestMessage(error, "加载公告列表失败"));
-      return "error";
-    }
-  }, [clearAnnouncementsState, handleAuthRequired]);
-
-  const loadTeacherClasses = useCallback(async (): Promise<LoadStatus> => {
-    const requestId = classesRequestIdRef.current + 1;
-    classesRequestIdRef.current = requestId;
-    setClassesLoading(true);
-    setClassesError(null);
-
-    try {
-      const payload = await requestJson<AnnouncementClassListResponse>("/api/teacher/classes");
-      if (classesRequestIdRef.current !== requestId) {
-        return "stale";
-      }
-
-      const nextClasses = payload.data ?? [];
-      hasClassesSnapshotRef.current = true;
-      setClasses(nextClasses);
-      setClassId((currentClassId) => resolveAnnouncementClassId(nextClasses, currentClassId));
-      setAuthRequired(false);
-      return "loaded";
-    } catch (error) {
-      if (classesRequestIdRef.current !== requestId) {
-        return "stale";
-      }
-
-      if (isAuthError(error)) {
-        handleAuthRequired();
-        return "auth";
-      }
-
-      if (!hasClassesSnapshotRef.current) {
-        clearClassesState();
-      }
-      setAuthRequired(false);
-      setClassesError(getAnnouncementClassListRequestMessage(error, "加载教师班级失败"));
-      return "error";
-    } finally {
-      if (classesRequestIdRef.current === requestId) {
-        setClassesLoading(false);
-      }
-    }
-  }, [clearClassesState, handleAuthRequired]);
-
-  const loadPage = useCallback(async () => {
-    const requestId = bootstrapRequestIdRef.current + 1;
-    bootstrapRequestIdRef.current = requestId;
-    setPageLoading(true);
-    setPageError(null);
-
-    try {
-      const [authResult, announcementsResult] = await Promise.allSettled([
-        requestJson<AuthMeResponse>("/api/auth/me"),
-        requestJson<AnnouncementListResponse>("/api/announcements")
-      ]);
-
-      if (bootstrapRequestIdRef.current !== requestId) {
-        return;
-      }
-
-      const authFailed =
-        (authResult.status === "rejected" && isAuthError(authResult.reason)) ||
-        (announcementsResult.status === "rejected" && isAuthError(announcementsResult.reason));
-      if (authFailed) {
-        handleAuthRequired();
-        return;
-      }
-
-      if (authResult.status === "fulfilled") {
-        setUserRole(authResult.value.user?.role ?? null);
-      } else {
-        clearPageState();
-        setAuthRequired(false);
-        setPageError(getAnnouncementsListRequestMessage(authResult.reason, "加载公告页失败"));
-        return;
-      }
-
-      if (announcementsResult.status === "fulfilled") {
-        hasAnnouncementsSnapshotRef.current = true;
-        setAnnouncements(announcementsResult.value.data ?? []);
-        setLastLoadedAt(new Date().toISOString());
-      } else {
-        if (!hasAnnouncementsSnapshotRef.current) {
-          clearAnnouncementsState();
-        }
-        setPageError(getAnnouncementsListRequestMessage(announcementsResult.reason, "加载公告列表失败"));
-      }
-
-      const nextRole = authResult.value.user?.role ?? null;
-      setAuthRequired(false);
-      if (nextRole === "teacher") {
-        void loadTeacherClasses();
-      } else {
-        classesRequestIdRef.current += 1;
-        clearClassesState();
-      }
-    } catch (error) {
-      if (bootstrapRequestIdRef.current !== requestId) {
-        return;
-      }
-
-      if (isAuthError(error)) {
-        handleAuthRequired();
-      } else {
-        clearPageState();
-        setAuthRequired(false);
-        setPageError(getAnnouncementsListRequestMessage(error, "加载公告页失败"));
-      }
-    } finally {
-      if (bootstrapRequestIdRef.current === requestId) {
-        setPageLoading(false);
-      }
-    }
-  }, [clearAnnouncementsState, clearClassesState, clearPageState, handleAuthRequired, loadTeacherClasses]);
-
-  useEffect(() => {
-    void loadPage();
-  }, [loadPage]);
-
-  const updateClassId = useCallback(
-    (value: string) => {
-      clearSubmitNotice();
-      setClassId(value);
-    },
-    [clearSubmitNotice]
-  );
-
-  const updateTitle = useCallback(
-    (value: string) => {
-      clearSubmitNotice();
-      setTitle(value);
-    },
-    [clearSubmitNotice]
-  );
-
-  const updateContent = useCallback(
-    (value: string) => {
-      clearSubmitNotice();
-      setContent(value);
-    },
-    [clearSubmitNotice]
-  );
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
-    clearSubmitNotice();
-
-    try {
-      await requestJson<AnnouncementSubmitResponse>("/api/announcements", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ classId, title, content })
-      });
-      setTitle("");
-      setContent("");
-
-      const loadStatus = await loadAnnouncements();
-      if (loadStatus === "auth") {
-        return;
-      }
-      if (loadStatus === "loaded") {
-        setMessage("公告已发布。");
-      } else if (loadStatus === "stale") {
-        setMessage("公告已发布，系统正在同步最新公告。");
-      } else {
-        setMessage("公告已发布，但公告列表刷新失败，请稍后重试。");
-      }
-    } catch (error) {
-      if (isAuthError(error)) {
-        handleAuthRequired();
-      } else {
-        setAuthRequired(false);
-        if (isMissingAnnouncementClassError(error)) {
-          const classStatus = await loadTeacherClasses();
-          if (classStatus === "auth") {
-            return;
-          }
-        }
-        setSubmitError(getAnnouncementSubmitRequestMessage(error, "发布失败"));
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  const hasPageData = Boolean(announcements.length || userRole === "teacher" || classes.length);
+  const {
+    announcements,
+    userRole,
+    classes,
+    classId,
+    title,
+    content,
+    message,
+    submitError,
+    pageError,
+    classesError,
+    pageLoading,
+    submitting,
+    classesLoading,
+    authRequired,
+    hasPageData,
+    lastLoadedAtLabel,
+    canSubmit,
+    loadAnnouncements,
+    loadTeacherClasses,
+    loadPage,
+    updateClassId,
+    updateTitle,
+    updateContent,
+    handleSubmit
+  } = useAnnouncementsPage();
 
   if (pageLoading && !hasPageData && !authRequired) {
     return <StatePanel title="公告中心加载中" description="正在同步账号身份、公告列表与教师班级。" tone="loading" />;
@@ -348,7 +78,7 @@ export default function AnnouncementsPage() {
         </div>
         <div className="workflow-toolbar">
           <span className="chip">公告</span>
-          {lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(lastLoadedAt)}</span> : null}
+          {lastLoadedAtLabel ? <span className="chip">更新于 {lastLoadedAtLabel}</span> : null}
         </div>
       </div>
 
@@ -433,7 +163,7 @@ export default function AnnouncementsPage() {
               </label>
               {submitError ? <div className="status-note error">{submitError}</div> : null}
               {message ? <div className="status-note success">{message}</div> : null}
-              <button className="button primary" type="submit" disabled={submitting || !classId || !title.trim() || !content.trim()}>
+              <button className="button primary" type="submit" disabled={submitting || !canSubmit}>
                 {submitting ? "发布中..." : "发布公告"}
               </button>
             </form>

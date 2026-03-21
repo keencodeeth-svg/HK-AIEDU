@@ -1,5 +1,9 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
-import type { LibraryDetailItem, LibraryKnowledgePoint } from "./types";
+import type {
+  LibraryDetailAuthUser,
+  LibraryDetailItem,
+  LibraryKnowledgePoint
+} from "./types";
 
 function getLibraryDetailRequest(error: unknown) {
   return getRequestErrorMessage(error, "").trim().toLowerCase();
@@ -32,6 +36,10 @@ export function isMissingLibraryItemError(error: unknown) {
   return (getRequestStatus(error) ?? 0) === 404 && getLibraryDetailRequest(error) === "not found";
 }
 
+export function getLibraryDetailNoStoreRequestInit(): RequestInit {
+  return { cache: "no-store" };
+}
+
 export function resolveLibrarySelectedKnowledgePointIds(
   item: Pick<LibraryDetailItem, "grade" | "knowledgePointIds" | "subject"> | null,
   knowledgePoints: Pick<LibraryKnowledgePoint, "grade" | "id" | "subject">[],
@@ -49,4 +57,64 @@ export function resolveLibrarySelectedKnowledgePointIds(
   const candidates = selectedKnowledgePointIds.length ? selectedKnowledgePointIds : item.knowledgePointIds ?? [];
 
   return Array.from(new Set(candidates.filter((id) => allowedIds.has(id))));
+}
+
+export function filterLibraryKnowledgePointsForItem<
+  T extends Pick<LibraryKnowledgePoint, "grade" | "id" | "subject">
+>(
+  item: Pick<LibraryDetailItem, "grade" | "subject"> | null,
+  knowledgePoints: T[]
+) {
+  if (!item) {
+    return [];
+  }
+
+  return knowledgePoints.filter((kp) => kp.subject === item.subject && kp.grade === item.grade);
+}
+
+export function canEditLibraryKnowledgePoints(user: LibraryDetailAuthUser) {
+  return user?.role === "admin" || user?.role === "teacher";
+}
+
+function resolveLibraryQuoteOffsets(textContent: string | undefined, quote: string) {
+  const startOffset = textContent ? textContent.indexOf(quote) : -1;
+  return {
+    startOffset: startOffset >= 0 ? startOffset : undefined,
+    endOffset: startOffset >= 0 ? startOffset + quote.length : undefined
+  };
+}
+
+export function buildLibrarySelectionCaptureState(textContent: string | undefined, rawSelection: string) {
+  const quote = rawSelection.trim();
+  if (!quote) {
+    return null;
+  }
+
+  const { startOffset, endOffset } = resolveLibraryQuoteOffsets(textContent, quote);
+
+  return {
+    quote,
+    startOffset,
+    endOffset,
+    message:
+      typeof startOffset === "number"
+        ? `已捕获选中片段（${startOffset}-${endOffset}）`
+        : "已捕获选中片段"
+  };
+}
+
+export function buildLibraryAnnotationPayload(
+  item: Pick<LibraryDetailItem, "textContent"> | null,
+  quote: string,
+  note: string
+) {
+  const trimmedQuote = quote.trim();
+  const { startOffset, endOffset } = resolveLibraryQuoteOffsets(item?.textContent, trimmedQuote);
+
+  return {
+    quote: trimmedQuote,
+    startOffset,
+    endOffset,
+    note: note.trim() || undefined
+  };
 }

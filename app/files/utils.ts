@@ -1,4 +1,5 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
+import type { CourseFile } from "./types";
 
 type FilesClassLike = {
   id: string;
@@ -90,4 +91,33 @@ export function resolveFilesClassId(classes: FilesClassLike[], classId: string) 
   }
 
   return classes[0]?.id ?? "";
+}
+
+export function resolveFilesStateAfterMissingClass<T extends FilesClassLike>(
+  classes: T[],
+  missingClassId: string,
+  currentClassId: string
+) {
+  const nextClasses = classes.filter((item) => item.id !== missingClassId);
+  const nextPreferredClassId = currentClassId === missingClassId ? "" : currentClassId;
+
+  return {
+    nextClasses,
+    nextClassId: resolveFilesClassId(nextClasses, nextPreferredClassId)
+  };
+}
+
+export function getFilesNoStoreRequestInit(): RequestInit {
+  return { cache: "no-store" };
+}
+
+export function groupCourseFilesByFolder(files: CourseFile[]) {
+  return files.reduce<Record<string, CourseFile[]>>((acc, file) => {
+    const key = file.folder?.trim() || "默认";
+    if (!acc[key]) {
+      acc[key] = [];
+    }
+    acc[key].push(file);
+    return acc;
+  }, {});
 }

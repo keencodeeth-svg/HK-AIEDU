@@ -1,4 +1,4 @@
-import type { TodayTask } from "../types";
+import type { TodayTask, TodayTaskPayload } from "../types";
 
 export type StudentExamItem = {
   id: string;
@@ -42,4 +42,12 @@ export type StudentSelfAssessmentSummary = {
   total: number;
   mustDo: number;
   highPriority: number;
+};
+
+export type StudentExamListResponse = {
+  data?: StudentExamItem[];
+};
+
+export type TodayTasksResponse = {
+  data?: TodayTaskPayload;
 };

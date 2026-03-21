@@ -65,6 +65,57 @@ type LibraryListResponse = {
   }>;
 };
 
+type CourseFilesResponse = {
+  data?: Array<{
+    id: string;
+    title: string;
+    fileName?: string;
+    folder?: string;
+  }>;
+};
+
+type AnnouncementsResponse = {
+  data?: Array<{
+    id: string;
+    classId: string;
+    className?: string;
+    title: string;
+    content: string;
+  }>;
+};
+
+type InboxThreadsResponse = {
+  data?: Array<{
+    id: string;
+    subject: string;
+    unreadCount: number;
+    lastMessage?: {
+      content: string;
+      createdAt: string;
+    } | null;
+  }>;
+};
+
+type InboxThreadDetailResponse = {
+  data?: {
+    thread: {
+      id: string;
+      subject: string;
+    };
+    participants: Array<{
+      id: string;
+      name: string;
+      role: string;
+    }>;
+    messages: Array<{
+      id: string;
+      senderId?: string;
+      content: string;
+      createdAt: string;
+    }>;
+  };
+};
+
 function uniqueId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -372,6 +423,27 @@ async function createAssignment(
   const assignmentId = result.body?.data?.id;
   expect(assignmentId, "created assignment should expose id").toBeTruthy();
   return assignmentId as string;
+}
+
+async function createModule(
+  page: Page,
+  params: {
+    classId: string;
+    title: string;
+    description?: string;
+    orderIndex?: number;
+  }
+) {
+  const result = await postJson<{ data?: { id?: string } }>(page, "/api/teacher/modules", {
+    classId: params.classId,
+    title: params.title,
+    description: params.description ?? "",
+    orderIndex: params.orderIndex ?? 0
+  });
+  expectApiOk(result, "module creation failed");
+  const moduleId = result.body?.data?.id;
+  expect(moduleId, "created module should expose id").toBeTruthy();
+  return moduleId as string;
 }
 
 async function createExam(
@@ -827,6 +899,555 @@ test.describe("browser smoke", () => {
     await page.getByRole("link", { name: "下载附件" }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe(uploadFileName);
+  });
+
+  test("teacher can upload a module resource and student can access it from module detail", async ({ page }) => {
+    const studentEmail = `${uniqueId("module-resource-student")}@local.test`;
+    const teacherEmail = `${uniqueId("module-resource-teacher")}@local.test`;
+    const className = `PW Module Class ${uniqueId("cls")}`;
+    const moduleTitle = `PW Module ${uniqueId("mod")}`;
+    const resourceTitle = `PW Module Resource ${uniqueId("res")}`;
+    const resourceFileName = `${resourceTitle}.pdf`;
+    const resourceBuffer = Buffer.from(
+      "%PDF-1.4\n% Playwright module resource smoke\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<<>>\n%%EOF",
+      "utf8"
+    );
+
+    await page.goto("/register?role=student");
+    await registerStudent(page, {
+      email: studentEmail,
+      name: "Module Resource Student"
+    });
+
+    await page.goto("/login?role=teacher");
+    await registerTeacherByApi(page, {
+      email: teacherEmail,
+      name: "Module Resource Teacher"
+    });
+    const classId = await createClass(page, {
+      name: className
+    });
+    await addStudentToClass(page, {
+      classId,
+      email: studentEmail
+    });
+    const moduleId = await createModule(page, {
+      classId,
+      title: moduleTitle,
+      description: "Playwright module resource smoke."
+    });
+
+    await page.goto("/teacher/modules");
+    await expect(page.getByRole("heading", { name: "课程模块管理" })).toBeVisible({ timeout: 15_000 });
+    await page.getByLabel("班级").selectOption(classId);
+    await expect(page.locator("body")).toContainText(moduleTitle, { timeout: 15_000 });
+
+    await page.getByLabel("选择模块").selectOption(moduleId);
+    await page.getByLabel("资源标题").fill(resourceTitle);
+    await page.locator('input[type="file"]').first().setInputFiles({
+      name: resourceFileName,
+      mimeType: "application/pdf",
+      buffer: resourceBuffer
+    });
+    await page.getByRole("button", { name: "添加资源" }).click();
+
+    await expect(page.getByText("资源已添加").first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator("body")).toContainText(resourceTitle, { timeout: 15_000 });
+    await expect(page.locator("body")).toContainText(resourceFileName, { timeout: 15_000 });
+
+    await page.goto("/login?role=student");
+    await page.getByLabel("邮箱").fill(studentEmail);
+    await page.getByLabel("密码").fill(PASSWORD);
+    await Promise.all([page.waitForURL("**/student"), page.getByRole("button", { name: "登录" }).click()]);
+
+    await page.goto("/student/modules");
+    await expect(page.getByRole("heading", { name: "课程模块" })).toBeVisible({ timeout: 15_000 });
+    await page.getByRole("button", { name: "展开模块" }).first().click();
+
+    const moduleCard = page.locator(".card", { hasText: moduleTitle }).first();
+    await expect(moduleCard).toContainText(moduleTitle, { timeout: 15_000 });
+    await moduleCard.getByRole("link", { name: "进入" }).click();
+
+    await expect(page.getByRole("heading", { name: moduleTitle })).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator("body")).toContainText(resourceTitle, { timeout: 15_000 });
+    await expect(page.locator("body")).toContainText(resourceFileName, { timeout: 15_000 });
+
+    const downloadLink = page.getByRole("link", { name: "下载资料" }).first();
+    await expect(downloadLink).toBeVisible({ timeout: 15_000 });
+    await expect(downloadLink).toHaveAttribute("download", resourceFileName);
+    const href = await downloadLink.getAttribute("href");
+    expect(href, "module resource download href should exist").toBeTruthy();
+    expect(href).toContain("data:application/pdf;base64,");
+  });
+
+  test("teacher can upload a course file and student can access it from files center", async ({ page }) => {
+    const studentEmail = `${uniqueId("course-file-student")}@local.test`;
+    const teacherEmail = `${uniqueId("course-file-teacher")}@local.test`;
+    const className = `PW Course File Class ${uniqueId("cls")}`;
+    const folderName = `第一单元/${uniqueId("folder")}`;
+    const fileTitle = `PW Course File ${uniqueId("file")}`;
+    const fileName = `${fileTitle}.pdf`;
+    const fileBuffer = Buffer.from(
+      "%PDF-1.4\n% Playwright course file smoke\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<<>>\n%%EOF",
+      "utf8"
+    );
+
+    await page.goto("/register?role=student");
+    await registerStudent(page, {
+      email: studentEmail,
+      name: "Course File Student"
+    });
+
+    await page.goto("/login?role=teacher");
+    await registerTeacherByApi(page, {
+      email: teacherEmail,
+      name: "Course File Teacher"
+    });
+    const classId = await createClass(page, {
+      name: className
+    });
+    await addStudentToClass(page, {
+      classId,
+      email: studentEmail
+    });
+
+    await page.goto("/files");
+    await expect(page.getByRole("heading", { name: "课程文件中心" })).toBeVisible({ timeout: 15_000 });
+    await page.getByLabel("选择班级").selectOption(classId);
+    await page.getByLabel("文件夹（可选）").fill(folderName);
+    await page.getByLabel("标题").fill(fileTitle);
+    await page.getByLabel("选择文件").setInputFiles({
+      name: fileName,
+      mimeType: "application/pdf",
+      buffer: fileBuffer
+    });
+    await page.getByRole("button", { name: "上传文件" }).click();
+
+    await expect(page.getByText("文件已上传")).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(async () => {
+        const result = await getJson<CourseFilesResponse>(page, `/api/files?classId=${classId}`);
+        return result.body?.data?.find((item) => item.title === fileTitle && item.fileName === fileName)?.fileName ?? null;
+      }, {
+        message: "teacher upload should become queryable from files API",
+        timeout: 15_000
+      })
+      .toBe(fileName);
+
+    await page.goto("/login?role=student");
+    await page.getByLabel("邮箱").fill(studentEmail);
+    await page.getByLabel("密码").fill(PASSWORD);
+    await Promise.all([page.waitForURL("**/student"), page.getByRole("button", { name: "登录" }).click()]);
+
+    await expect
+      .poll(async () => {
+        const result = await getJson<CourseFilesResponse>(page, `/api/files?classId=${classId}`);
+        return result.body?.data?.find((item) => item.title === fileTitle)?.folder ?? null;
+      }, {
+        message: "student should be able to query uploaded course file",
+        timeout: 15_000
+      })
+      .toBe(folderName);
+
+    await page.goto("/files");
+    await expect(page.getByRole("heading", { name: "课程文件中心" })).toBeVisible({ timeout: 15_000 });
+    await page.getByLabel("选择班级").selectOption(classId);
+    await expect(page.locator("body")).toContainText(folderName, { timeout: 15_000 });
+
+    const fileCard = page.locator(".card", { hasText: fileTitle }).first();
+    await expect(fileCard).toContainText(fileTitle, { timeout: 15_000 });
+
+    const downloadLink = fileCard.getByRole("link", { name: "下载文件" });
+    await expect(downloadLink).toBeVisible({ timeout: 15_000 });
+    await expect(downloadLink).toHaveAttribute("download", fileName);
+    const href = await downloadLink.getAttribute("href");
+    expect(href, "course file download href should exist").toBeTruthy();
+    expect(href).toContain("data:application/pdf;base64,");
+  });
+
+  test("teacher can publish an announcement and student can read it", async ({ page }) => {
+    const studentEmail = `${uniqueId("announcement-student")}@local.test`;
+    const teacherEmail = `${uniqueId("announcement-teacher")}@local.test`;
+    const className = `PW Announcement Class ${uniqueId("cls")}`;
+    const announcementTitle = `PW Announcement ${uniqueId("notice")}`;
+    const announcementContent = `请完成公告回归验证：${uniqueId("content")}`;
+
+    await page.goto("/register?role=student");
+    await registerStudent(page, {
+      email: studentEmail,
+      name: "Announcement Student"
+    });
+
+    await page.goto("/login?role=teacher");
+    await registerTeacherByApi(page, {
+      email: teacherEmail,
+      name: "Announcement Teacher"
+    });
+    const classId = await createClass(page, {
+      name: className
+    });
+    await addStudentToClass(page, {
+      classId,
+      email: studentEmail
+    });
+
+    await page.goto("/announcements");
+    await expect(page.getByRole("heading", { name: "班级公告" })).toBeVisible({ timeout: 15_000 });
+    await page.getByLabel("选择班级").selectOption(classId);
+    await page.getByLabel("公告标题").fill(announcementTitle);
+    await page.getByLabel("公告内容").fill(announcementContent);
+    await page.getByRole("button", { name: "发布公告" }).click();
+
+    await expect(page.getByText("公告已发布").first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".card", { hasText: announcementTitle }).first()).toContainText(
+      announcementContent,
+      { timeout: 15_000 }
+    );
+
+    await page.goto("/login?role=student");
+    await page.getByLabel("邮箱").fill(studentEmail);
+    await page.getByLabel("密码").fill(PASSWORD);
+    await Promise.all([page.waitForURL("**/student"), page.getByRole("button", { name: "登录" }).click()]);
+
+    await expect
+      .poll(async () => {
+        const result = await getJson<AnnouncementsResponse>(page, "/api/announcements");
+        expectApiOk(result, "student announcements fetch failed");
+        return (
+          result.body?.data?.find(
+            (item) =>
+              item.classId === classId &&
+              item.title === announcementTitle &&
+              item.content === announcementContent
+          )?.className ?? null
+        );
+      }, {
+        message: "student should be able to query published announcement",
+        timeout: 15_000
+      })
+      .toBe(className);
+
+    await page.goto("/announcements");
+    await expect(page.getByRole("heading", { name: "班级公告" })).toBeVisible({ timeout: 15_000 });
+
+    const announcementCard = page.locator(".card", { hasText: announcementTitle }).first();
+    await expect(announcementCard).toContainText(className, { timeout: 15_000 });
+    await expect(announcementCard).toContainText(announcementContent, { timeout: 15_000 });
+  });
+
+  test("teacher can publish an announcement and parent can read it", async ({ page }) => {
+    const studentEmail = `${uniqueId("announcement-parent-student")}@local.test`;
+    const parentEmail = `${uniqueId("announcement-parent")}@local.test`;
+    const teacherEmail = `${uniqueId("announcement-parent-teacher")}@local.test`;
+    const className = `PW Parent Announcement Class ${uniqueId("cls")}`;
+    const announcementTitle = `PW Parent Announcement ${uniqueId("notice")}`;
+    const announcementContent = `请家长确认公告同步：${uniqueId("content")}`;
+
+    await page.goto("/register?role=student");
+    await registerStudent(page, {
+      email: studentEmail,
+      name: "Announcement Parent Student"
+    });
+    await loginByApi(page, {
+      email: studentEmail,
+      role: "student"
+    });
+    const observerCode = await getObserverCode(page);
+
+    await page.goto("/register?role=parent");
+    await registerParent(page, {
+      email: parentEmail,
+      name: "Announcement Parent",
+      observerCode
+    });
+
+    await page.goto("/login?role=teacher");
+    await registerTeacherByApi(page, {
+      email: teacherEmail,
+      name: "Announcement Parent Teacher"
+    });
+    const classId = await createClass(page, {
+      name: className
+    });
+    await addStudentToClass(page, {
+      classId,
+      email: studentEmail
+    });
+
+    await page.goto("/announcements");
+    await expect(page.getByRole("heading", { name: "班级公告" })).toBeVisible({ timeout: 15_000 });
+    await page.getByLabel("选择班级").selectOption(classId);
+    await page.getByLabel("公告标题").fill(announcementTitle);
+    await page.getByLabel("公告内容").fill(announcementContent);
+    await page.getByRole("button", { name: "发布公告" }).click();
+
+    await expect(page.getByText("公告已发布").first()).toBeVisible({ timeout: 15_000 });
+
+    await page.goto("/login?role=parent");
+    await page.getByLabel("邮箱").fill(parentEmail);
+    await page.getByLabel("密码").fill(PASSWORD);
+    await Promise.all([page.waitForURL("**/parent"), page.getByRole("button", { name: "登录" }).click()]);
+
+    await expect
+      .poll(async () => {
+        const result = await getJson<AnnouncementsResponse>(page, "/api/announcements");
+        expectApiOk(result, "parent announcements fetch failed");
+        return (
+          result.body?.data?.find(
+            (item) =>
+              item.classId === classId &&
+              item.title === announcementTitle &&
+              item.content === announcementContent
+          )?.className ?? null
+        );
+      }, {
+        message: "parent should be able to query published announcement",
+        timeout: 15_000
+      })
+      .toBe(className);
+
+    await page.goto("/announcements");
+    await expect(page.getByRole("heading", { name: "班级公告" })).toBeVisible({ timeout: 15_000 });
+
+    const announcementCard = page.locator(".card", { hasText: announcementTitle }).first();
+    await expect(announcementCard).toContainText(className, { timeout: 15_000 });
+    await expect(announcementCard).toContainText(announcementContent, { timeout: 15_000 });
+  });
+
+  test("teacher can start an inbox thread and student can reply", async ({ page }) => {
+    const studentEmail = `${uniqueId("inbox-student")}@local.test`;
+    const teacherEmail = `${uniqueId("inbox-teacher")}@local.test`;
+    const className = `PW Inbox Class ${uniqueId("cls")}`;
+    const threadSubject = `PW Inbox Subject ${uniqueId("thread")}`;
+    const teacherMessage = `请确认已收到课堂沟通：${uniqueId("teacher-msg")}`;
+    const studentReply = `学生已收到并回复：${uniqueId("student-reply")}`;
+
+    await page.goto("/register?role=student");
+    await registerStudent(page, {
+      email: studentEmail,
+      name: "Inbox Student"
+    });
+
+    await page.goto("/login?role=teacher");
+    await registerTeacherByApi(page, {
+      email: teacherEmail,
+      name: "Inbox Teacher"
+    });
+    const classId = await createClass(page, {
+      name: className
+    });
+    await addStudentToClass(page, {
+      classId,
+      email: studentEmail
+    });
+
+    await page.goto("/inbox");
+    await expect(page.getByRole("heading", { name: "收件箱" })).toBeVisible({ timeout: 15_000 });
+    await page.getByLabel("选择班级").selectOption(classId);
+    await page.getByLabel("主题").fill(threadSubject);
+    await page.getByLabel("内容").fill(teacherMessage);
+    await page.getByRole("button", { name: "发送消息" }).click();
+
+    await expect(page.getByText("消息已发送").first()).toBeVisible({ timeout: 15_000 });
+
+    let threadId = "";
+    await expect
+      .poll(async () => {
+        const result = await getJson<InboxThreadsResponse>(page, "/api/inbox/threads");
+        expectApiOk(result, "teacher inbox threads fetch failed");
+        threadId = result.body?.data?.find((thread) => thread.subject === threadSubject)?.id ?? "";
+        return threadId;
+      }, {
+        message: "teacher-created inbox thread should become queryable",
+        timeout: 15_000
+      })
+      .not.toBe("");
+
+    await page.goto("/login?role=student");
+    await page.getByLabel("邮箱").fill(studentEmail);
+    await page.getByLabel("密码").fill(PASSWORD);
+    await Promise.all([page.waitForURL("**/student"), page.getByRole("button", { name: "登录" }).click()]);
+
+    await expect
+      .poll(async () => {
+        const result = await getJson<InboxThreadsResponse>(page, "/api/inbox/threads");
+        expectApiOk(result, "student inbox threads fetch failed");
+        return result.body?.data?.find((thread) => thread.subject === threadSubject)?.unreadCount ?? null;
+      }, {
+        message: "student should see the teacher inbox thread as unread",
+        timeout: 15_000
+      })
+      .toBeGreaterThan(0);
+
+    await page.goto("/inbox");
+    await expect(page.getByRole("heading", { name: "收件箱" })).toBeVisible({ timeout: 15_000 });
+    const threadButton = page.locator(".inbox-thread-item", { hasText: threadSubject }).first();
+    await expect(threadButton).toBeVisible({ timeout: 15_000 });
+    await threadButton.click();
+
+    await expect(page.locator(".inbox-message-list")).toContainText(teacherMessage, { timeout: 15_000 });
+    await page.getByPlaceholder("输入回复...").fill(studentReply);
+    await page.getByRole("button", { name: "发送回复" }).click();
+
+    await expect(page.getByText("回复已发送").first()).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(async () => {
+        const result = await getJson<InboxThreadDetailResponse>(page, `/api/inbox/threads/${threadId}`);
+        expectApiOk(result, "student inbox thread detail fetch failed");
+        return result.body?.data?.messages?.some((message) => message.content === studentReply) ?? false;
+      }, {
+        message: "student reply should be persisted into inbox thread detail",
+        timeout: 15_000
+      })
+      .toBe(true);
+
+    await page.goto("/login?role=teacher");
+    await page.getByLabel("邮箱").fill(teacherEmail);
+    await page.getByLabel("密码").fill(PASSWORD);
+    await Promise.all([page.waitForURL("**/teacher"), page.getByRole("button", { name: "登录" }).click()]);
+
+    await expect
+      .poll(async () => {
+        const result = await getJson<InboxThreadDetailResponse>(page, `/api/inbox/threads/${threadId}`);
+        expectApiOk(result, "teacher inbox thread detail fetch failed");
+        return result.body?.data?.messages?.some((message) => message.content === studentReply) ?? false;
+      }, {
+        message: "teacher should be able to query the student reply",
+        timeout: 15_000
+      })
+      .toBe(true);
+
+    await page.goto("/inbox");
+    await expect(page.getByRole("heading", { name: "收件箱" })).toBeVisible({ timeout: 15_000 });
+    const teacherThreadButton = page.locator(".inbox-thread-item", { hasText: threadSubject }).first();
+    await expect(teacherThreadButton).toBeVisible({ timeout: 15_000 });
+    await teacherThreadButton.click();
+    await expect(page.locator(".inbox-message-list")).toContainText(studentReply, { timeout: 15_000 });
+  });
+
+  test("teacher can start an inbox thread with parent copy and parent can reply", async ({ page }) => {
+    const studentEmail = `${uniqueId("inbox-parent-student")}@local.test`;
+    const parentEmail = `${uniqueId("inbox-parent")}@local.test`;
+    const teacherEmail = `${uniqueId("inbox-parent-teacher")}@local.test`;
+    const className = `PW Inbox Parent Class ${uniqueId("cls")}`;
+    const threadSubject = `PW Parent Inbox Subject ${uniqueId("thread")}`;
+    const teacherMessage = `请家长确认已收到沟通：${uniqueId("teacher-msg")}`;
+    const parentReply = `家长已收到并回复：${uniqueId("parent-reply")}`;
+
+    await page.goto("/register?role=student");
+    await registerStudent(page, {
+      email: studentEmail,
+      name: "Inbox Parent Student"
+    });
+    await loginByApi(page, {
+      email: studentEmail,
+      role: "student"
+    });
+    const observerCode = await getObserverCode(page);
+
+    await page.goto("/register?role=parent");
+    await registerParent(page, {
+      email: parentEmail,
+      name: "Inbox Parent",
+      observerCode
+    });
+
+    await page.goto("/login?role=teacher");
+    await registerTeacherByApi(page, {
+      email: teacherEmail,
+      name: "Inbox Parent Teacher"
+    });
+    const classId = await createClass(page, {
+      name: className
+    });
+    await addStudentToClass(page, {
+      classId,
+      email: studentEmail
+    });
+
+    await page.goto("/inbox");
+    await expect(page.getByRole("heading", { name: "收件箱" })).toBeVisible({ timeout: 15_000 });
+    await page.getByLabel("选择班级").selectOption(classId);
+    await page.getByLabel("主题").fill(threadSubject);
+    await page.getByLabel("内容").fill(teacherMessage);
+    await page.getByLabel("同时抄送家长").check();
+    await page.getByRole("button", { name: "发送消息" }).click();
+
+    await expect(page.getByText("消息已发送").first()).toBeVisible({ timeout: 15_000 });
+
+    let threadId = "";
+    await expect
+      .poll(async () => {
+        const result = await getJson<InboxThreadsResponse>(page, "/api/inbox/threads");
+        expectApiOk(result, "teacher inbox threads fetch for parent-copy flow failed");
+        threadId = result.body?.data?.find((thread) => thread.subject === threadSubject)?.id ?? "";
+        return threadId;
+      }, {
+        message: "teacher-created parent-copy inbox thread should become queryable",
+        timeout: 15_000
+      })
+      .not.toBe("");
+
+    await page.goto("/login?role=parent");
+    await page.getByLabel("邮箱").fill(parentEmail);
+    await page.getByLabel("密码").fill(PASSWORD);
+    await Promise.all([page.waitForURL("**/parent"), page.getByRole("button", { name: "登录" }).click()]);
+
+    await expect
+      .poll(async () => {
+        const result = await getJson<InboxThreadsResponse>(page, "/api/inbox/threads");
+        expectApiOk(result, "parent inbox threads fetch failed");
+        return result.body?.data?.find((thread) => thread.subject === threadSubject)?.unreadCount ?? null;
+      }, {
+        message: "parent should see the teacher inbox thread as unread",
+        timeout: 15_000
+      })
+      .toBeGreaterThan(0);
+
+    await page.goto("/inbox");
+    await expect(page.getByRole("heading", { name: "收件箱" })).toBeVisible({ timeout: 15_000 });
+    const parentThreadButton = page.locator(".inbox-thread-item", { hasText: threadSubject }).first();
+    await expect(parentThreadButton).toBeVisible({ timeout: 15_000 });
+    await parentThreadButton.click();
+
+    await expect(page.locator(".inbox-message-list")).toContainText(teacherMessage, { timeout: 15_000 });
+    await page.getByPlaceholder("输入回复...").fill(parentReply);
+    await page.getByRole("button", { name: "发送回复" }).click();
+
+    await expect(page.getByText("回复已发送").first()).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(async () => {
+        const result = await getJson<InboxThreadDetailResponse>(page, `/api/inbox/threads/${threadId}`);
+        expectApiOk(result, "parent inbox thread detail fetch failed");
+        return result.body?.data?.messages?.some((message) => message.content === parentReply) ?? false;
+      }, {
+        message: "parent reply should be persisted into inbox thread detail",
+        timeout: 15_000
+      })
+      .toBe(true);
+
+    await page.goto("/login?role=teacher");
+    await page.getByLabel("邮箱").fill(teacherEmail);
+    await page.getByLabel("密码").fill(PASSWORD);
+    await Promise.all([page.waitForURL("**/teacher"), page.getByRole("button", { name: "登录" }).click()]);
+
+    await expect
+      .poll(async () => {
+        const result = await getJson<InboxThreadDetailResponse>(page, `/api/inbox/threads/${threadId}`);
+        expectApiOk(result, "teacher inbox thread detail fetch for parent reply failed");
+        return result.body?.data?.messages?.some((message) => message.content === parentReply) ?? false;
+      }, {
+        message: "teacher should be able to query the parent reply",
+        timeout: 15_000
+      })
+      .toBe(true);
+
+    await page.goto("/inbox");
+    await expect(page.getByRole("heading", { name: "收件箱" })).toBeVisible({ timeout: 15_000 });
+    const teacherThreadButton = page.locator(".inbox-thread-item", { hasText: threadSubject }).first();
+    await expect(teacherThreadButton).toBeVisible({ timeout: 15_000 });
+    await teacherThreadButton.click();
+    await expect(page.locator(".inbox-message-list")).toContainText(parentReply, { timeout: 15_000 });
   });
 
   test("admin can triage and resolve an account recovery request", async ({ page }) => {

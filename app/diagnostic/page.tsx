@@ -1,51 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
 import Link from "next/link";
 import Card from "@/components/Card";
 import EduIcon from "@/components/EduIcon";
 import MathText from "@/components/MathText";
 import StatePanel from "@/components/StatePanel";
 import { GRADE_OPTIONS, SUBJECT_LABELS, SUBJECT_OPTIONS } from "@/lib/constants";
-import { getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
-import { toPng } from "html-to-image";
-import { getDiagnosticStartRequestMessage, getDiagnosticSubmitRequestMessage } from "./utils";
-
-type Question = {
-  id: string;
-  stem: string;
-  options: string[];
-  knowledgePointId: string;
-};
-
-type DiagnosticStartResponse = {
-  subject?: string;
-  grade?: string;
-  questions?: Question[];
-};
-
-type DiagnosticResult = {
-  total: number;
-  correct: number;
-  accuracy: number;
-  breakdown?: { knowledgePointId: string; title: string; total: number; correct: number; accuracy: number }[];
-  wrongReasons?: { reason: string; count: number }[];
-};
+import { useDiagnosticPage } from "./useDiagnosticPage";
 
 export default function DiagnosticPage() {
-  const startRequestIdRef = useRef(0);
-  const submitRequestIdRef = useRef(0);
-  const [subject, setSubject] = useState("math");
-  const [grade, setGrade] = useState("4");
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [index, setIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [reasons, setReasons] = useState<Record<string, string>>({});
-  const [result, setResult] = useState<DiagnosticResult | null>(null);
-  const [loadingQuestions, setLoadingQuestions] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [pageError, setPageError] = useState<string | null>(null);
-  const [authRequired, setAuthRequired] = useState(false);
+  const diagnosticPage = useDiagnosticPage();
 
   const reasonOptions = [
     "概念不清",
@@ -54,131 +18,11 @@ export default function DiagnosticPage() {
     "方法不会",
     "记忆不牢"
   ];
-  const reportRef = useRef<HTMLDivElement | null>(null);
 
-  function clearDiagnosticState() {
-    setQuestions([]);
-    setIndex(0);
-    setAnswers({});
-    setReasons({});
-    setResult(null);
-    setPageError(null);
-    setLoadingQuestions(false);
-    setSubmitting(false);
-  }
+  const current = diagnosticPage.questions[diagnosticPage.index];
+  const busy = diagnosticPage.loadingQuestions || diagnosticPage.submitting;
 
-  function handleAuthRequired() {
-    startRequestIdRef.current += 1;
-    submitRequestIdRef.current += 1;
-    clearDiagnosticState();
-    setAuthRequired(true);
-  }
-
-  async function startDiagnostic() {
-    const requestId = startRequestIdRef.current + 1;
-    startRequestIdRef.current = requestId;
-    setLoadingQuestions(true);
-    setPageError(null);
-    setQuestions([]);
-    setIndex(0);
-    setAnswers({});
-    setReasons({});
-    setResult(null);
-
-    try {
-      const payload = await requestJson<DiagnosticStartResponse>("/api/diagnostic/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, grade })
-      });
-      if (requestId !== startRequestIdRef.current) {
-        return;
-      }
-      const nextQuestions = payload.questions ?? [];
-      setQuestions(nextQuestions);
-      setAuthRequired(false);
-      if (!nextQuestions.length) {
-        setPageError("当前暂无可用的诊断题目，请稍后重试。");
-      }
-    } catch (error) {
-      if (requestId !== startRequestIdRef.current) {
-        return;
-      }
-      if (isAuthError(error)) {
-        handleAuthRequired();
-      } else {
-        setAuthRequired(false);
-        setPageError(getDiagnosticStartRequestMessage(error, "开始诊断失败"));
-      }
-    } finally {
-      if (requestId === startRequestIdRef.current) {
-        setLoadingQuestions(false);
-      }
-    }
-  }
-
-  async function submitDiagnostic() {
-    const requestId = submitRequestIdRef.current + 1;
-    submitRequestIdRef.current = requestId;
-    setSubmitting(true);
-    setPageError(null);
-    const payload = Object.entries(answers).map(([questionId, answer]) => ({
-      questionId,
-      answer,
-      reason: reasons[questionId]
-    }));
-    try {
-      const data = await requestJson<DiagnosticResult>("/api/diagnostic/submit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, grade, answers: payload })
-      });
-      if (requestId !== submitRequestIdRef.current) {
-        return;
-      }
-      setResult({
-        total: data.total,
-        correct: data.correct,
-        accuracy: data.accuracy,
-        breakdown: data.breakdown,
-        wrongReasons: data.wrongReasons
-      });
-      setAuthRequired(false);
-    } catch (error) {
-      if (requestId !== submitRequestIdRef.current) {
-        return;
-      }
-      if (isAuthError(error)) {
-        handleAuthRequired();
-      } else {
-        setAuthRequired(false);
-        setPageError(getDiagnosticSubmitRequestMessage(error, "提交诊断失败"));
-      }
-    } finally {
-      if (requestId === submitRequestIdRef.current) {
-        setSubmitting(false);
-      }
-    }
-  }
-
-  async function exportImage() {
-    if (!reportRef.current) return;
-    setPageError(null);
-    try {
-      const dataUrl = await toPng(reportRef.current, { backgroundColor: "#ffffff" });
-      const link = document.createElement("a");
-      link.download = "diagnostic-report.png";
-      link.href = dataUrl;
-      link.click();
-    } catch (error) {
-      setPageError(getRequestErrorMessage(error, "导出图片失败"));
-    }
-  }
-
-  const current = questions[index];
-  const busy = loadingQuestions || submitting;
-
-  if (authRequired) {
+  if (diagnosticPage.authRequired) {
     return (
       <StatePanel
         title="请先登录学生账号"
@@ -203,7 +47,9 @@ export default function DiagnosticPage() {
         <span className="chip">学习体检</span>
       </div>
 
-      {pageError ? <StatePanel title="本次操作存在异常" description={pageError} tone="error" compact /> : null}
+      {diagnosticPage.pageError ? (
+        <StatePanel title="本次操作存在异常" description={diagnosticPage.pageError} tone="error" compact />
+      ) : null}
 
       <Card title="诊断测评" tag="测评">
         <div className="feature-card">
@@ -214,8 +60,8 @@ export default function DiagnosticPage() {
           <label>
             <div className="section-title">学科</div>
             <select
-              value={subject}
-              onChange={(event) => setSubject(event.target.value)}
+              value={diagnosticPage.subject}
+              onChange={(event) => diagnosticPage.setSubject(event.target.value)}
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             >
               {SUBJECT_OPTIONS.map((item) => (
@@ -228,8 +74,8 @@ export default function DiagnosticPage() {
           <label>
             <div className="section-title">年级</div>
             <select
-              value={grade}
-              onChange={(event) => setGrade(event.target.value)}
+              value={diagnosticPage.grade}
+              onChange={(event) => diagnosticPage.setGrade(event.target.value)}
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             >
               {GRADE_OPTIONS.map((item) => (
@@ -240,17 +86,24 @@ export default function DiagnosticPage() {
             </select>
           </label>
         </div>
-        <button className="button primary" style={{ marginTop: 12 }} onClick={startDiagnostic} disabled={busy}>
-          {loadingQuestions ? "生成题目中..." : "开始诊断"}
+        <button
+          className="button primary"
+          style={{ marginTop: 12 }}
+          onClick={diagnosticPage.startDiagnostic}
+          disabled={busy}
+        >
+          {diagnosticPage.loadingQuestions ? "生成题目中..." : "开始诊断"}
         </button>
       </Card>
 
       {current ? (
-        <Card title={`第 ${index + 1} 题`} tag="答题">
+        <Card title={`第 ${diagnosticPage.index + 1} 题`} tag="答题">
           <div className="pill-list" style={{ marginBottom: 10 }}>
-            <span className="pill">进度 {index + 1}/{questions.length}</span>
-            <span className="pill">学科 {SUBJECT_LABELS[subject] ?? subject}</span>
-            <span className="pill">年级 {grade}</span>
+            <span className="pill">
+              进度 {diagnosticPage.index + 1}/{diagnosticPage.questions.length}
+            </span>
+            <span className="pill">学科 {SUBJECT_LABELS[diagnosticPage.subject] ?? diagnosticPage.subject}</span>
+            <span className="pill">年级 {diagnosticPage.grade}</span>
           </div>
           <MathText as="p" text={current.stem} />
           <div className="grid" style={{ gap: 8, marginTop: 12 }}>
@@ -260,8 +113,10 @@ export default function DiagnosticPage() {
                   type="radio"
                   name={current.id}
                   value={option}
-                  checked={answers[current.id] === option}
-                  onChange={() => setAnswers((prev) => ({ ...prev, [current.id]: option }))}
+                  checked={diagnosticPage.answers[current.id] === option}
+                  onChange={() =>
+                    diagnosticPage.setAnswers((prev) => ({ ...prev, [current.id]: option }))
+                  }
                   style={{ marginRight: 8 }}
                 />
                 <MathText text={option} />
@@ -271,8 +126,10 @@ export default function DiagnosticPage() {
           <label style={{ display: "block", marginTop: 12 }}>
             <div className="section-title">错因（可选）</div>
             <select
-              value={reasons[current.id] ?? ""}
-              onChange={(event) => setReasons((prev) => ({ ...prev, [current.id]: event.target.value }))}
+              value={diagnosticPage.reasons[current.id] ?? ""}
+              onChange={(event) =>
+                diagnosticPage.setReasons((prev) => ({ ...prev, [current.id]: event.target.value }))
+              }
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             >
               <option value="">未选择</option>
@@ -286,38 +143,42 @@ export default function DiagnosticPage() {
           <div className="cta-row">
             <button
               className="button secondary"
-              disabled={index === 0 || busy}
-              onClick={() => setIndex((prev) => Math.max(prev - 1, 0))}
+              disabled={diagnosticPage.index === 0 || busy}
+              onClick={() => diagnosticPage.setIndex((prev) => Math.max(prev - 1, 0))}
             >
               上一题
             </button>
-            {index < questions.length - 1 ? (
-              <button className="button primary" onClick={() => setIndex((prev) => prev + 1)} disabled={busy}>
+            {diagnosticPage.index < diagnosticPage.questions.length - 1 ? (
+              <button
+                className="button primary"
+                onClick={() => diagnosticPage.setIndex((prev) => prev + 1)}
+                disabled={busy}
+              >
                 下一题
               </button>
             ) : (
-              <button className="button primary" onClick={submitDiagnostic} disabled={busy}>
-                {submitting ? "提交中..." : "提交诊断"}
+              <button className="button primary" onClick={diagnosticPage.submitDiagnostic} disabled={busy}>
+                {diagnosticPage.submitting ? "提交中..." : "提交诊断"}
               </button>
             )}
           </div>
         </Card>
       ) : null}
 
-      {result ? (
+      {diagnosticPage.result ? (
         <Card title="诊断结果" tag="报告">
           <div className="feature-card">
             <EduIcon name="chart" />
             <p>生成掌握度分布与错因总结。</p>
           </div>
-          <div ref={reportRef}>
+          <div ref={diagnosticPage.reportRef}>
             <p>
-              正确 {result.correct} / {result.total}，正确率 {result.accuracy}%。
+              正确 {diagnosticPage.result.correct} / {diagnosticPage.result.total}，正确率 {diagnosticPage.result.accuracy}%。
             </p>
-            {result.breakdown?.length ? (
+            {diagnosticPage.result.breakdown?.length ? (
               <div className="grid" style={{ gap: 8, marginTop: 12 }}>
                 <div className="badge">知识点掌握</div>
-                {result.breakdown.map((item) => (
+                {diagnosticPage.result.breakdown.map((item) => (
                   <div className="card" key={item.knowledgePointId}>
                     <div className="section-title">{item.title}</div>
                     <p>
@@ -327,10 +188,10 @@ export default function DiagnosticPage() {
                 ))}
               </div>
             ) : null}
-            {result.wrongReasons?.length ? (
+            {diagnosticPage.result.wrongReasons?.length ? (
               <div className="grid" style={{ gap: 8, marginTop: 12 }}>
                 <div className="badge">错因分布</div>
-                {result.wrongReasons.map((item) => (
+                {diagnosticPage.result.wrongReasons.map((item) => (
                   <div key={item.reason}>
                     {item.reason}：{item.count} 次
                   </div>
@@ -342,7 +203,7 @@ export default function DiagnosticPage() {
             <button className="button secondary" onClick={() => window.print()} disabled={busy}>
               导出 PDF
             </button>
-            <button className="button secondary" onClick={exportImage} disabled={busy}>
+            <button className="button secondary" onClick={diagnosticPage.exportImage} disabled={busy}>
               导出图片
             </button>
             <Link className="button secondary" href="/plan">

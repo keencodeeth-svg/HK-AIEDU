@@ -1,43 +1,23 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { pushAppToast } from "@/components/AppToastHub";
-import { type TutorLaunchIntent } from "@/lib/tutor-launch";
-import {
-  ANSWER_MODE_OPTIONS,
-  DEFAULT_ANSWER_MODE,
-  DEFAULT_GRADE,
-  DEFAULT_SUBJECT,
-  LEARNING_MODE_OPTIONS,
-  MAX_IMAGE_COUNT
-} from "./config";
-import type { TutorAnswerMode } from "./types";
+import { useEffect } from "react";
+import { MAX_IMAGE_COUNT } from "./config";
 import { buildTutorStageState } from "./tutorStageState";
 import { useTutorEntrySync } from "./useTutorEntrySync";
 import { useTutorHistory } from "./useTutorHistory";
 import { useTutorImageFlow } from "./useTutorImageFlow";
+import { useTutorPageActions } from "./useTutorPageActions";
+import { useTutorPageState } from "./useTutorPageState";
 import { useTutorShareResult } from "./useTutorShareResult";
 import { useTutorSolveFlow } from "./useTutorSolveFlow";
 import { useTutorVariantTraining } from "./useTutorVariantTraining";
-import { copyToClipboard } from "./utils";
+import { resolveTutorModeLabels } from "./tutorPageUtils";
 
 export function useTutorPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const questionInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const answerSectionRef = useRef<HTMLDivElement | null>(null);
-  const [launchMessage, setLaunchMessage] = useState<string | null>(null);
-  const [launchIntent, setLaunchIntent] = useState<TutorLaunchIntent | null>(null);
-  const [authRequired, setAuthRequired] = useState(false);
-  const [question, setQuestion] = useState("");
-  const [subject, setSubject] = useState(DEFAULT_SUBJECT);
-  const [grade, setGrade] = useState(DEFAULT_GRADE);
-  const [answerMode, setAnswerMode] = useState<TutorAnswerMode>(DEFAULT_ANSWER_MODE);
-
-  const handleAuthRequired = useCallback(() => {
-    setAuthRequired(true);
-  }, []);
+  const pageState = useTutorPageState();
 
   const {
     history,
@@ -59,33 +39,9 @@ export function useTutorPage() {
     deleteHistory,
     reuseHistoryItem: applyHistoryReuse
   } = useTutorHistory({
-    onAuthRequired: handleAuthRequired,
+    onAuthRequired: pageState.handleAuthRequired,
     onReuseHistoryItem: (item) => {
-      const nextQuestion = item.meta?.recognizedQuestion?.trim() || item.question.trim();
-      if (item.meta?.subject) {
-        setSubject(item.meta.subject);
-      }
-      if (item.meta?.grade) {
-        setGrade(item.meta.grade);
-      }
-      if (item.meta?.answerMode) {
-        setAnswerMode(item.meta.answerMode);
-      }
-      setLearningMode(item.meta?.learningMode === "study" ? "study" : "direct");
-      resetShareFeedback();
-      resetVariantTraining();
-      setLaunchIntent((item.meta?.origin ?? "text") === "image" ? "image" : "text");
-      setActionMessage("已从历史记录回填到提问区，可继续追问或重新求解。");
-      clearSelectedImages();
-      setQuestion(nextQuestion);
-      setStudyThinking("");
-      setStudyHintCount(0);
-      setEditableQuestion(nextQuestion);
-      setAnswer(null);
-      setResultOrigin(null);
-      setError(null);
-      focusComposerInput();
-      pushAppToast("已回填到提问区，可继续追问或重新求解");
+      handleReuseHistoryItem(item);
     }
   });
   const {
@@ -117,15 +73,15 @@ export function useTutorPage() {
     handleImageAsk: runImageAskFlow,
     handleRefineSolve: runRefineSolveFlow
   } = useTutorSolveFlow({
-    question,
-    subject,
-    grade,
-    answerMode,
+    question: pageState.question,
+    subject: pageState.subject,
+    grade: pageState.grade,
+    answerMode: pageState.answerMode,
     saveHistory,
     refreshHistory,
-    setLaunchIntent,
-    setLaunchMessage,
-    onAuthRequired: handleAuthRequired
+    setLaunchIntent: pageState.setLaunchIntent,
+    setLaunchMessage: pageState.setLaunchMessage,
+    onAuthRequired: pageState.handleAuthRequired
   });
   const {
     selectedImages,
@@ -142,10 +98,10 @@ export function useTutorPage() {
     requestImageAssist
   } = useTutorImageFlow({
     activeAction,
-    question,
-    subject,
-    grade,
-    onLaunchIntentChange: setLaunchIntent,
+    question: pageState.question,
+    subject: pageState.subject,
+    grade: pageState.grade,
+    onLaunchIntentChange: pageState.setLaunchIntent,
     onActionMessageChange: setActionMessage,
     onError: setError
   });
@@ -162,13 +118,13 @@ export function useTutorPage() {
     handleShareResult
   } = useTutorShareResult({
     answer,
-    question,
+    question: pageState.question,
     editableQuestion,
-    subject,
-    grade,
+    subject: pageState.subject,
+    grade: pageState.grade,
     resultOrigin,
     resultAnswerMode,
-    onAuthRequired: handleAuthRequired
+    onAuthRequired: pageState.handleAuthRequired
   });
   const {
     variantPack,
@@ -188,115 +144,78 @@ export function useTutorPage() {
     handleVariantSubmit
   } = useTutorVariantTraining({
     answer,
-    question,
+    question: pageState.question,
     editableQuestion,
-    subject,
-    grade,
+    subject: pageState.subject,
+    grade: pageState.grade,
     onError: setError,
-    onAuthRequired: handleAuthRequired
+    onAuthRequired: pageState.handleAuthRequired
   });
 
   useTutorEntrySync({
     searchParams,
-    questionInputRef,
-    setLaunchIntent,
-    setLaunchMessage,
+    questionInputRef: pageState.questionInputRef,
+    setLaunchIntent: pageState.setLaunchIntent,
+    setLaunchMessage: pageState.setLaunchMessage,
     setShowFavorites,
-    setSubject,
-    setGrade,
-    setAnswerMode
+    setSubject: pageState.setSubject,
+    setGrade: pageState.setGrade,
+    setAnswerMode: pageState.setAnswerMode
   });
 
   useEffect(() => {
     if (!answer) return;
     requestAnimationFrame(() => {
-      answerSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      pageState.answerSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
-  }, [answer]);
+  }, [answer, pageState.answerSectionRef]);
 
-  function focusComposerInput() {
-    requestAnimationFrame(() => {
-      document.getElementById("tutor-composer-anchor")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      questionInputRef.current?.focus();
-    });
-  }
+  const {
+    focusComposerInput,
+    handleStartOver,
+    handleReuseHistoryItem,
+    handleCopy,
+    handleAsk,
+    handleStartStudyMode,
+    handleSubmitStudyThinking,
+    handleRevealStudyAnswer,
+    handleImageAsk,
+    handleRefineSolve
+  } = useTutorPageActions({
+    questionInputRef: pageState.questionInputRef,
+    selectedImagesCount: selectedImages.length,
+    requestImageAssist,
+    resetShareFeedback,
+    resetVariantTraining,
+    clearSelectedImages,
+    runAskFlow,
+    runStartStudyModeFlow,
+    runSubmitStudyThinkingFlow,
+    runRevealStudyAnswerFlow,
+    runImageAskFlow,
+    runRefineSolveFlow,
+    setLaunchIntent: pageState.setLaunchIntent,
+    setLaunchMessage: pageState.setLaunchMessage,
+    setActionMessage,
+    setLearningMode,
+    setSubject: pageState.setSubject,
+    setGrade: pageState.setGrade,
+    setAnswerMode: pageState.setAnswerMode,
+    setAnswer,
+    setStudyThinking,
+    setStudyHintCount,
+    setEditableQuestion,
+    setQuestion: pageState.setQuestion,
+    setResultOrigin,
+    setError
+  });
 
-  function handleStartOver() {
-    resetShareFeedback();
-    resetVariantTraining();
-    setLaunchIntent("text");
-    setLaunchMessage(null);
-    setActionMessage(null);
-    setAnswer(null);
-    setStudyThinking("");
-    setStudyHintCount(0);
-    setEditableQuestion("");
-    setQuestion("");
-    setResultOrigin(null);
-    clearSelectedImages();
-    setError(null);
-    focusComposerInput();
-    pushAppToast("已清空当前结果，可以开始新一轮提问");
-  }
-
-  async function handleCopy(value: string, message: string) {
-    if (!value.trim()) {
-      pushAppToast("暂无可复制内容", "error");
-      return;
-    }
-    try {
-      await copyToClipboard(value.trim());
-      pushAppToast(message);
-    } catch {
-      pushAppToast("复制失败，请稍后重试", "error");
-    }
-  }
-
-  function handleAsk() {
-    resetShareFeedback();
-    resetVariantTraining();
-    void runAskFlow();
-  }
-
-  function handleStartStudyMode() {
-    resetShareFeedback();
-    resetVariantTraining();
-    void runStartStudyModeFlow({
-      selectedImagesCount: selectedImages.length,
-      requestImageAssist
-    });
-  }
-
-  function handleSubmitStudyThinking() {
-    resetShareFeedback();
-    void runSubmitStudyThinkingFlow();
-  }
-
-  function handleRevealStudyAnswer() {
-    resetShareFeedback();
-    void runRevealStudyAnswerFlow();
-  }
-
-  function handleImageAsk() {
-    resetShareFeedback();
-    resetVariantTraining();
-    void runImageAskFlow({
-      selectedImagesCount: selectedImages.length,
-      requestImageAssist
-    });
-  }
-
-  function handleRefineSolve() {
-    resetShareFeedback();
-    resetVariantTraining();
-    void runRefineSolveFlow();
-  }
-
-  const selectedLearningMode = LEARNING_MODE_OPTIONS.find((item) => item.value === learningMode) ?? LEARNING_MODE_OPTIONS[0];
-  const selectedAnswerMode = ANSWER_MODE_OPTIONS.find((item) => item.value === answerMode) ?? ANSWER_MODE_OPTIONS[1];
-  const resolvedAnswerMode = ANSWER_MODE_OPTIONS.find((item) => item.value === resultAnswerMode) ?? selectedAnswerMode;
-  const selectedModeLabel = learningMode === "study" ? selectedLearningMode.label : selectedAnswerMode.label;
-  const resolvedModeLabel = studyResult ? "学习模式" : resolvedAnswerMode.label;
+  const { selectedModeLabel, resolvedModeLabel } = resolveTutorModeLabels({
+    learningMode,
+    answerMode: pageState.answerMode,
+    resultAnswerMode,
+    studyResult
+  });
   const { stageCopy, tutorFlowSteps } = buildTutorStageState({
     loading,
     activeAction,
@@ -307,20 +226,20 @@ export function useTutorPage() {
     editableQuestion,
     selectedImagesCount: selectedImages.length,
     selectedCropCount,
-    question,
+    question: pageState.question,
     learningMode,
     canLoadVariants,
-    launchIntent
+    launchIntent: pageState.launchIntent
   });
 
   return {
-    authRequired,
-    answerSectionRef,
+    authRequired: pageState.authRequired,
+    answerSectionRef: pageState.answerSectionRef,
     stageOverviewProps: {
-      launchMessage,
+      launchMessage: pageState.launchMessage,
       learningMode,
-      subject,
-      grade,
+      subject: pageState.subject,
+      grade: pageState.grade,
       resolvedModeLabel,
       selectedModeLabel,
       selectedImagesCount: selectedImages.length,
@@ -331,27 +250,27 @@ export function useTutorPage() {
       tutorFlowSteps
     },
     composerCardProps: {
-      subject,
-      grade,
+      subject: pageState.subject,
+      grade: pageState.grade,
       learningMode,
-      answerMode,
-      question,
+      answerMode: pageState.answerMode,
+      question: pageState.question,
       studyThinking,
-      launchIntent,
+      launchIntent: pageState.launchIntent,
       selectedImages,
       cropSelections,
       previewItems,
       selectedCropCount,
-      questionInputRef,
+      questionInputRef: pageState.questionInputRef,
       loading,
       activeAction,
       actionMessage: actionMessage && !answer ? actionMessage : null,
       error,
-      onSubjectChange: setSubject,
-      onGradeChange: setGrade,
+      onSubjectChange: pageState.setSubject,
+      onGradeChange: pageState.setGrade,
       onLearningModeChange: setLearningMode,
-      onAnswerModeChange: setAnswerMode,
-      onQuestionChange: setQuestion,
+      onAnswerModeChange: pageState.setAnswerMode,
+      onQuestionChange: pageState.setQuestion,
       onStudyThinkingChange: setStudyThinking,
       onImageSelect: handleImageSelect,
       onClearSelectedImages: clearSelectedImages,
@@ -367,8 +286,8 @@ export function useTutorPage() {
     answerCardProps: answer
       ? {
           answer,
-          subject,
-          grade,
+          subject: pageState.subject,
+          grade: pageState.grade,
           resolvedModeLabel,
           resultOrigin,
           resultAnswerMode,
@@ -403,7 +322,7 @@ export function useTutorPage() {
           onRevealStudyAnswer: handleRevealStudyAnswer,
           onEditableQuestionChange: setEditableQuestion,
           onRefineSolve: handleRefineSolve,
-          onSyncEditableQuestion: () => setQuestion(editableQuestion.trim()),
+          onSyncEditableQuestion: () => pageState.setQuestion(editableQuestion.trim()),
           onCopyEditableQuestion: () => {
             void handleCopy(editableQuestion, "已复制题目");
           },

@@ -42,6 +42,8 @@ export type ObserverCodeMutationResponse = ObserverCodeResponse & {
   error?: string;
 };
 
+export type ObserverCodeLoadResult = "ok" | "failed" | "auth";
+
 export type StudentProfileFormState = {
   grade: string;
   subjects: string[];

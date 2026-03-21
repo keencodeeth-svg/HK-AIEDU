@@ -1,5 +1,5 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
-import type { NotificationItem } from "./types";
+import type { NotificationItem, ReadFilter } from "./types";
 
 const TYPE_LABELS: Record<string, string> = {
   assignment: "作业",
@@ -48,11 +48,57 @@ export function isMissingNotificationError(error: unknown) {
   return (getRequestStatus(error) ?? 0) === 404 && getRequestErrorMessage(error, "").trim().toLowerCase() === "not found";
 }
 
+export function getNotificationCounts(list: NotificationItem[]) {
+  const unreadCount = list.filter((item) => !item.readAt).length;
+
+  return {
+    unreadCount,
+    readCount: Math.max(0, list.length - unreadCount)
+  };
+}
+
+export function getNotificationTypeOptions(list: NotificationItem[]) {
+  return Array.from(new Set(list.map((item) => item.type)));
+}
+
 export function resolveNotificationsTypeFilter(list: NotificationItem[], typeFilter: string) {
   if (typeFilter === "all") {
     return "all";
   }
 
-  const types = new Set(list.map((item) => item.type));
+  const types = new Set(getNotificationTypeOptions(list));
   return types.has(typeFilter) ? typeFilter : "all";
+}
+
+export function hasActiveNotificationFilters(readFilter: ReadFilter, typeFilter: string, keyword: string) {
+  return readFilter !== "all" || typeFilter !== "all" || keyword.trim().length > 0;
+}
+
+export function filterNotifications(
+  list: NotificationItem[],
+  readFilter: ReadFilter,
+  typeFilter: string,
+  keyword: string
+) {
+  const keywordLower = keyword.trim().toLowerCase();
+
+  return list.filter((item) => {
+    if (readFilter === "unread" && item.readAt) return false;
+    if (readFilter === "read" && !item.readAt) return false;
+    if (typeFilter !== "all" && item.type !== typeFilter) return false;
+    if (!keywordLower) return true;
+
+    return [item.title, item.content, getNotificationTypeLabel(item.type)]
+      .join(" ")
+      .toLowerCase()
+      .includes(keywordLower);
+  });
+}
+
+export function markNotificationAsRead(list: NotificationItem[], id: string, readAt: string) {
+  return list.map((item) => (item.id === id ? { ...item, readAt: item.readAt ?? readAt } : item));
+}
+
+export function markAllNotificationsAsRead(list: NotificationItem[], readAt: string) {
+  return list.map((item) => (item.readAt ? item : { ...item, readAt }));
 }

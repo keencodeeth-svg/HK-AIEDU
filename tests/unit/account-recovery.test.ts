@@ -39,6 +39,8 @@ function restoreEnv() {
 function resetRecoveryModules() {
   const targets = [
     "../../lib/account-recovery",
+    "../../lib/account-recovery-attempts",
+    "../../lib/account-recovery-shared",
     "../../lib/admin-log",
     "../../lib/auth",
     "../../lib/storage",

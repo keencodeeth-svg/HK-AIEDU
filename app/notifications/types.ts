@@ -8,6 +8,8 @@ export type NotificationItem = {
 };
 
 export type ReadFilter = "all" | "unread" | "read";
+export type NotificationLoadMode = "initial" | "refresh";
+export type NotificationLoadStatus = "ok" | "auth" | "error" | "stale";
 
 export type NotificationsResponse = {
   data?: NotificationItem[];

@@ -1,78 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import Card from "@/components/Card";
 import { parseAdminAuditDetail } from "@/lib/admin-audit";
-import { formatLoadedTime, getRequestErrorMessage, isAuthError, requestJson } from "@/lib/client-request";
-
-type AdminLog = {
-  id: string;
-  adminId: string | null;
-  action: string;
-  entityType: string;
-  entityId?: string | null;
-  detail?: string | null;
-  createdAt: string;
-};
+import { formatLoadedTime } from "@/lib/client-request";
+import { useAdminLogsPage } from "./useAdminLogsPage";
 
 function formatAuditJson(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
 export default function AdminLogsPage() {
-  const [logs, setLogs] = useState<AdminLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [pageError, setPageError] = useState<string | null>(null);
-  const [authRequired, setAuthRequired] = useState(false);
-  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
-  const [actionInput, setActionInput] = useState("");
-  const [entityTypeInput, setEntityTypeInput] = useState("");
-  const [searchInput, setSearchInput] = useState("");
-  const [appliedAction, setAppliedAction] = useState("");
-  const [appliedEntityType, setAppliedEntityType] = useState("");
-  const [appliedQuery, setAppliedQuery] = useState("");
-
-  const load = useCallback(
-    async (mode: "initial" | "refresh" = "initial") => {
-      if (mode === "refresh") {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-      setPageError(null);
-      setAuthRequired(false);
-
-      try {
-        const params = new URLSearchParams();
-        params.set("limit", "100");
-        if (appliedAction.trim()) {
-          params.set("action", appliedAction.trim());
-        }
-        if (appliedEntityType.trim()) {
-          params.set("entityType", appliedEntityType.trim());
-        }
-        if (appliedQuery.trim()) {
-          params.set("query", appliedQuery.trim());
-        }
-
-        const payload = await requestJson<{ data?: AdminLog[] }>(`/api/admin/logs?${params.toString()}`);
-        setLogs(payload.data ?? []);
-        setLastLoadedAt(new Date().toISOString());
-      } catch (error) {
-        setAuthRequired(isAuthError(error));
-        setPageError(getRequestErrorMessage(error, "加载管理日志失败"));
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [appliedAction, appliedEntityType, appliedQuery]
-  );
-
-  useEffect(() => {
-    void load("initial");
-  }, [load]);
+  const logsPage = useAdminLogsPage();
 
   return (
     <div className="grid" style={{ gap: 18 }}>
@@ -82,10 +20,10 @@ export default function AdminLogsPage() {
           <div className="section-sub">记录管理端关键操作。</div>
         </div>
         <div className="cta-row" style={{ alignItems: "center", gap: 8 }}>
-          {lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(lastLoadedAt)}</span> : null}
+          {logsPage.lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(logsPage.lastLoadedAt)}</span> : null}
           <span className="chip">安全</span>
-          <button className="button secondary" type="button" onClick={() => void load("refresh")} disabled={refreshing}>
-            {refreshing ? "刷新中..." : "刷新"}
+          <button className="button secondary" type="button" onClick={() => void logsPage.load("refresh")} disabled={logsPage.refreshing}>
+            {logsPage.refreshing ? "刷新中..." : "刷新"}
           </button>
         </div>
       </div>
@@ -95,8 +33,8 @@ export default function AdminLogsPage() {
           <label>
             <div className="section-title">操作类型</div>
             <input
-              value={actionInput}
-              onChange={(event) => setActionInput(event.target.value)}
+              value={logsPage.actionInput}
+              onChange={(event) => logsPage.setActionInput(event.target.value)}
               placeholder="如 update_ai_quality_calibration"
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             />
@@ -104,8 +42,8 @@ export default function AdminLogsPage() {
           <label>
             <div className="section-title">资源类型</div>
             <input
-              value={entityTypeInput}
-              onChange={(event) => setEntityTypeInput(event.target.value)}
+              value={logsPage.entityTypeInput}
+              onChange={(event) => logsPage.setEntityTypeInput(event.target.value)}
               placeholder="如 ai_quality_calibration"
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             />
@@ -113,8 +51,8 @@ export default function AdminLogsPage() {
           <label>
             <div className="section-title">关键字</div>
             <input
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
+              value={logsPage.searchInput}
+              onChange={(event) => logsPage.setSearchInput(event.target.value)}
               placeholder="支持工单号、管理员、详情关键字"
               style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
             />
@@ -124,27 +62,16 @@ export default function AdminLogsPage() {
           <button
             className="button primary"
             type="button"
-            onClick={() => {
-              setAppliedAction(actionInput);
-              setAppliedEntityType(entityTypeInput);
-              setAppliedQuery(searchInput);
-            }}
-            disabled={loading || refreshing}
+            onClick={logsPage.applyFilters}
+            disabled={logsPage.loading || logsPage.refreshing}
           >
             查询
           </button>
           <button
             className="button ghost"
             type="button"
-            onClick={() => {
-              setActionInput("");
-              setEntityTypeInput("");
-              setSearchInput("");
-              setAppliedAction("");
-              setAppliedEntityType("");
-              setAppliedQuery("");
-            }}
-            disabled={loading || refreshing}
+            onClick={logsPage.clearFilters}
+            disabled={logsPage.loading || logsPage.refreshing}
           >
             清空
           </button>
@@ -152,12 +79,16 @@ export default function AdminLogsPage() {
       </Card>
 
       <Card title="操作日志" tag="审计">
-        {loading ? <p>加载中...</p> : null}
-        {!loading && authRequired ? <div style={{ color: "#b42318", fontSize: 13 }}>需要管理员登录后查看日志。</div> : null}
-        {!loading && !authRequired && pageError ? <div style={{ color: "#b42318", fontSize: 13 }}>{pageError}</div> : null}
-        {!loading && !pageError && logs.length === 0 ? <p>暂无匹配日志。</p> : null}
+        {logsPage.loading ? <p>加载中...</p> : null}
+        {!logsPage.loading && logsPage.authRequired ? (
+          <div style={{ color: "#b42318", fontSize: 13 }}>需要管理员登录后查看日志。</div>
+        ) : null}
+        {!logsPage.loading && !logsPage.authRequired && logsPage.pageError ? (
+          <div style={{ color: "#b42318", fontSize: 13 }}>{logsPage.pageError}</div>
+        ) : null}
+        {!logsPage.loading && !logsPage.pageError && logsPage.logs.length === 0 ? <p>暂无匹配日志。</p> : null}
         <div className="grid" style={{ gap: 10 }}>
-          {logs.map((log) => {
+          {logsPage.logs.map((log) => {
             const auditDetail = parseAdminAuditDetail(log.detail);
             return (
               <div className="card" key={log.id}>

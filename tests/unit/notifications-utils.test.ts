@@ -15,9 +15,15 @@ Module._resolveFilename = function resolveFilename(request, parent, isMain, opti
 };
 
 const {
+  filterNotifications,
   getNotificationActionRequestMessage,
+  getNotificationCounts,
+  getNotificationTypeOptions,
   getNotificationsRequestMessage,
+  hasActiveNotificationFilters,
   isMissingNotificationError,
+  markAllNotificationsAsRead,
+  markNotificationAsRead,
   resolveNotificationsTypeFilter
 } = require("../../app/notifications/utils") as typeof import("../../app/notifications/utils");
 Module._resolveFilename = originalResolveFilename;
@@ -70,4 +76,72 @@ test("notifications helpers clear stale type filter after refresh", () => {
   assert.equal(resolveNotificationsTypeFilter(nextList, "assignment"), "assignment");
   assert.equal(resolveNotificationsTypeFilter(nextList, "review"), "all");
   assert.equal(resolveNotificationsTypeFilter(nextList, "all"), "all");
+});
+
+test("notifications helpers derive counts, options, and filtered list deterministically", () => {
+  const list = [
+    {
+      id: "notification-1",
+      title: "作业提醒",
+      content: "请完成数学作业",
+      type: "assignment",
+      createdAt: "2026-03-17T08:00:00.000Z"
+    },
+    {
+      id: "notification-2",
+      title: "系统公告",
+      content: "今晚维护",
+      type: "announcement",
+      createdAt: "2026-03-17T09:00:00.000Z",
+      readAt: "2026-03-17T09:30:00.000Z"
+    },
+    {
+      id: "notification-3",
+      title: "批改反馈",
+      content: "英语作文已批改",
+      type: "review",
+      createdAt: "2026-03-17T10:00:00.000Z"
+    }
+  ];
+
+  assert.deepEqual(getNotificationCounts(list), { unreadCount: 2, readCount: 1 });
+  assert.deepEqual(getNotificationTypeOptions(list), ["assignment", "announcement", "review"]);
+  assert.equal(hasActiveNotificationFilters("all", "all", ""), false);
+  assert.equal(hasActiveNotificationFilters("unread", "all", ""), true);
+  assert.deepEqual(
+    filterNotifications(list, "unread", "all", "批改").map((item) => item.id),
+    ["notification-3"]
+  );
+  assert.deepEqual(
+    filterNotifications(list, "all", "announcement", "公告").map((item) => item.id),
+    ["notification-2"]
+  );
+});
+
+test("notifications helpers apply local read snapshots without mutating unrelated items", () => {
+  const list = [
+    {
+      id: "notification-1",
+      title: "作业提醒",
+      content: "请完成数学作业",
+      type: "assignment",
+      createdAt: "2026-03-17T08:00:00.000Z"
+    },
+    {
+      id: "notification-2",
+      title: "系统公告",
+      content: "今晚维护",
+      type: "announcement",
+      createdAt: "2026-03-17T09:00:00.000Z",
+      readAt: "2026-03-17T09:30:00.000Z"
+    }
+  ];
+
+  const markedList = markNotificationAsRead(list, "notification-1", "2026-03-17T10:00:00.000Z");
+  assert.equal(markedList[0].readAt, "2026-03-17T10:00:00.000Z");
+  assert.equal(markedList[1].readAt, "2026-03-17T09:30:00.000Z");
+
+  const markAllList = markAllNotificationsAsRead(list, "2026-03-17T11:00:00.000Z");
+  assert.equal(markAllList[0].readAt, "2026-03-17T11:00:00.000Z");
+  assert.equal(markAllList[1].readAt, "2026-03-17T09:30:00.000Z");
 });

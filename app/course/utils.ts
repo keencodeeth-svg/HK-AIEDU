@@ -98,6 +98,20 @@ export function resolveCourseClassId(classes: CourseClass[], classId: string) {
   return classes[0]?.id ?? "";
 }
 
+export function resolveCourseStateAfterMissingClass(classes: CourseClass[], missingClassId: string, currentClassId: string) {
+  const nextClasses = classes.filter((item) => item.id !== missingClassId);
+  const nextPreferredClassId = currentClassId === missingClassId ? "" : currentClassId;
+
+  return {
+    nextClasses,
+    nextClassId: resolveCourseClassId(nextClasses, nextPreferredClassId)
+  };
+}
+
+export function getCourseNoStoreRequestInit(): RequestInit {
+  return { cache: "no-store" };
+}
+
 export function formatSubmissionType(submissionType: string) {
   if (submissionType === "essay") {
     return "作文";

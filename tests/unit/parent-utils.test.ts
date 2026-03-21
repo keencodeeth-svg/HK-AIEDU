@@ -15,6 +15,8 @@ Module._resolveFilename = function resolveFilename(request, parent, isMain, opti
 };
 
 const {
+  buildParentCorrectionsReminderText,
+  deriveParentTaskBuckets,
   getParentAssignmentsRequestMessage,
   getParentReceiptSubmitRequestMessage,
   getParentReportRequestMessage,
@@ -76,5 +78,87 @@ test("parent helpers map receipt validation errors and prune stale notes", () =>
       "weekly_report:daily-practice": "今晚完成",
       "assignment_plan:review-today": "跟进错题"
     }
+  );
+});
+
+test("parent helpers derive correction task buckets by pending and due windows", () => {
+  const now = Date.parse("2026-03-19T12:00:00.000Z");
+  const tasks = [
+    {
+      id: "due-soon",
+      status: "pending",
+      dueDate: "2026-03-20T12:00:00.000Z"
+    },
+    {
+      id: "overdue",
+      status: "pending",
+      dueDate: "2026-03-18T11:59:59.000Z"
+    },
+    {
+      id: "later",
+      status: "pending",
+      dueDate: "2026-03-24T12:00:00.000Z"
+    },
+    {
+      id: "done",
+      status: "done",
+      dueDate: "2026-03-20T12:00:00.000Z"
+    }
+  ];
+
+  assert.deepEqual(
+    deriveParentTaskBuckets(tasks, now),
+    {
+      pendingTasks: tasks.slice(0, 3),
+      dueSoonTasks: [tasks[0]],
+      overdueTasks: [tasks[1]]
+    }
+  );
+});
+
+test("parent helpers build corrections reminder text from summary and due soon tasks", () => {
+  const dueSoonTasks = [
+    {
+      id: "1",
+      status: "pending",
+      dueDate: "2026-03-20T12:00:00.000Z",
+      question: { stem: "分数加法" }
+    },
+    {
+      id: "2",
+      status: "pending",
+      dueDate: "2026-03-21T12:00:00.000Z",
+      question: { stem: "古诗默写" }
+    },
+    {
+      id: "3",
+      status: "pending",
+      dueDate: "2026-03-21T18:00:00.000Z"
+    },
+    {
+      id: "4",
+      status: "pending",
+      dueDate: "2026-03-21T23:00:00.000Z",
+      question: { stem: "这条不应出现" }
+    }
+  ];
+
+  const reminderText = buildParentCorrectionsReminderText({
+    summary: { pending: 5 },
+    pendingTasks: dueSoonTasks,
+    dueSoonTasks,
+    overdueTasks: [{ id: "late", status: "pending", dueDate: "2026-03-18T12:00:00.000Z" }]
+  });
+
+  assert.equal(
+    reminderText,
+    [
+      "本周订正任务：待完成 5 题。",
+      "已逾期 1 题，请尽快完成。",
+      "近 2 天到期 4 题。",
+      `- 分数加法（截止 ${new Date("2026-03-20T12:00:00.000Z").toLocaleDateString("zh-CN")}）`,
+      `- 古诗默写（截止 ${new Date("2026-03-21T12:00:00.000Z").toLocaleDateString("zh-CN")}）`,
+      `- 题目（截止 ${new Date("2026-03-21T18:00:00.000Z").toLocaleDateString("zh-CN")}）`
+    ].join("\n")
   );
 });

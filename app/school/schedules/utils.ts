@@ -92,6 +92,12 @@ export function toOptionalNumber(value: string) {
   return next ? Number(next) : undefined;
 }
 
+export function toggleSortedWeekdaySelection(weekdays: string[], weekday: string) {
+  return weekdays.includes(weekday)
+    ? weekdays.filter((item) => item !== weekday)
+    : [...weekdays, weekday].sort((left, right) => Number(left) - Number(right));
+}
+
 export function addMinutesToTime(time: string, minutes: number) {
   const [hourPart, minutePart] = time.split(":").map(Number);
   if (!Number.isFinite(hourPart) || !Number.isFinite(minutePart) || !Number.isFinite(minutes)) {
@@ -124,6 +130,35 @@ export function applyTemplateToAiForm(template: SchoolScheduleTemplate): AiSched
     lunchBreakMinutes: String(template.lunchBreakMinutes),
     campus: template.campus ?? "主校区",
     weekdays: template.weekdays.map((item) => String(item))
+  };
+}
+
+export function buildAiRequestBodyFromForm(aiForm: AiScheduleFormState) {
+  const weeklyLessonsPerClass = Number(aiForm.weeklyLessonsPerClass);
+  const lessonDurationMinutes = Number(aiForm.lessonDurationMinutes);
+  const periodsPerDay = Number(aiForm.periodsPerDay);
+  const shortBreakMinutes = Number(aiForm.shortBreakMinutes);
+  const lunchBreakMinutes = Number(aiForm.lunchBreakMinutes);
+  const lunchBreakAfterPeriod = aiForm.lunchBreakAfterPeriod ? Number(aiForm.lunchBreakAfterPeriod) : undefined;
+
+  if (!aiForm.weekdays.length) {
+    throw new Error("请至少选择 1 个排课日。");
+  }
+  if (!Number.isFinite(weeklyLessonsPerClass) || weeklyLessonsPerClass < 1) {
+    throw new Error("请填写有效的每班每周总节数。");
+  }
+
+  return {
+    weeklyLessonsPerClass,
+    lessonDurationMinutes,
+    periodsPerDay,
+    weekdays: aiForm.weekdays.map((item) => Number(item)),
+    dayStartTime: aiForm.dayStartTime,
+    shortBreakMinutes,
+    lunchBreakAfterPeriod,
+    lunchBreakMinutes,
+    mode: aiForm.mode,
+    campus: aiForm.campus
   };
 }
 

@@ -1,5 +1,12 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
-import type { ClassItem, DiscussionStageCopy, Topic } from "./types";
+import type {
+  ClassItem,
+  CurrentUser,
+  DiscussionLoadStatus,
+  DiscussionStageCopy,
+  DiscussionsDerivedState,
+  Topic
+} from "./types";
 
 type DiscussionStageCopyInput = {
   loading: boolean;
@@ -160,6 +167,10 @@ export function isMissingDiscussionClassError(error: unknown) {
   return getDiscussionRequestMessage(error) === "class not found";
 }
 
+export function getDiscussionNoStoreRequestInit(): RequestInit {
+  return { cache: "no-store" };
+}
+
 export function resolveDiscussionsClassId(classes: ClassItem[], classId: string) {
   if (classId && classes.some((item) => item.id === classId)) {
     return classId;
@@ -177,4 +188,80 @@ export function resolveDiscussionTopicId(
     }
   }
   return topics[0]?.id ?? "";
+}
+
+export function filterDiscussionTopics(topics: Topic[], keyword: string, pinnedOnly: boolean) {
+  const needle = keyword.trim().toLowerCase();
+  return topics.filter((topic) => {
+    if (pinnedOnly && !topic.pinned) {
+      return false;
+    }
+    if (!needle) {
+      return true;
+    }
+    return [topic.title, topic.content, topic.authorName ?? ""]
+      .join(" ")
+      .toLowerCase()
+      .includes(needle);
+  });
+}
+
+type DiscussionsDerivedStateInput = {
+  user: CurrentUser | null;
+  classes: ClassItem[];
+  classId: string;
+  topics: Topic[];
+  activeTopic: Topic | null;
+  keyword: string;
+  pinnedOnly: boolean;
+  loading: boolean;
+};
+
+export function getDiscussionsDerivedState({
+  user,
+  classes,
+  classId,
+  topics,
+  activeTopic,
+  keyword,
+  pinnedOnly,
+  loading
+}: DiscussionsDerivedStateInput): DiscussionsDerivedState {
+  const teacherMode = user?.role === "teacher";
+
+  return {
+    teacherMode,
+    currentClass: classes.find((item) => item.id === classId) ?? null,
+    pinnedTopicCount: topics.filter((item) => item.pinned).length,
+    filteredTopics: filterDiscussionTopics(topics, keyword, pinnedOnly),
+    hasTopicFilters: Boolean(keyword.trim()) || pinnedOnly,
+    stageCopy: getDiscussionStageCopy({
+      loading,
+      classesCount: classes.length,
+      topicsCount: topics.length,
+      activeTopic,
+      teacherMode
+    }),
+    hasDiscussionData: Boolean(user || classes.length || topics.length || activeTopic)
+  };
+}
+
+export function getDiscussionCreateSuccessMessage(status: DiscussionLoadStatus) {
+  if (status === "error") {
+    return "话题已发布，但最新列表同步失败，请稍后重试。";
+  }
+  if (status === "stale") {
+    return "话题已发布，讨论区正在同步最新内容。";
+  }
+  return "话题已发布，并已自动打开详情，方便继续查看学生回复。";
+}
+
+export function getDiscussionReplySuccessMessage(status: DiscussionLoadStatus) {
+  if (status === "error") {
+    return "回复已发送，但讨论记录同步失败，请稍后重试。";
+  }
+  if (status === "stale") {
+    return "回复已发送，讨论区正在同步最新内容。";
+  }
+  return "回复已发送，讨论记录已经更新。";
 }

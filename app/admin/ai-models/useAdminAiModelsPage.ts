@@ -29,9 +29,9 @@ import type {
 import {
   EMPTY_DRAFT,
   EVAL_DATASET_OPTIONS,
-  parseChainInput,
   toChainInput
 } from "./utils";
+import { useAdminAiModelsActions } from "./useAdminAiModelsActions";
 
 type ConfigResponse = {
   data?: ConfigData | null;
@@ -43,14 +43,6 @@ type PoliciesResponse = {
 
 type MetricsResponse = {
   data?: AiMetrics | null;
-};
-
-type EvalReportResponse = {
-  data?: EvalReport | null;
-};
-
-type ProbeApiResponse = {
-  data?: ProbeResponse | null;
 };
 
 type QualityCalibrationResponse = {
@@ -451,464 +443,61 @@ export function useAdminAiModelsPage() {
     [effectivePreview, providerHealthMap]
   );
 
-  function addProvider(provider: string) {
-    setDraftChain((prev) => (prev.includes(provider) ? prev : [...prev, provider]));
-  }
-
-  function removeProvider(provider: string) {
-    setDraftChain((prev) => prev.filter((item) => item !== provider));
-  }
-
-  function moveProvider(provider: string, offset: -1 | 1) {
-    setDraftChain((prev) => {
-      const index = prev.findIndex((item) => item === provider);
-      if (index < 0) {
-        return prev;
-      }
-      const nextIndex = index + offset;
-      if (nextIndex < 0 || nextIndex >= prev.length) {
-        return prev;
-      }
-      const next = [...prev];
-      const [picked] = next.splice(index, 1);
-      next.splice(nextIndex, 0, picked);
-      return next;
-    });
-  }
-
-  async function saveChain() {
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await runWithStepUp(
-        async () => {
-          const payload = await requestJson<ConfigResponse>("/api/admin/ai/config", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ providerChain: draftChain })
-          });
-          const data = payload.data ?? null;
-          setConfig(data);
-          setDraftChain(data?.runtimeProviderChain ?? []);
-          hasConfigSnapshotRef.current = true;
-          setBootstrapNotice(null);
-          setMessage("AI 模型链已保存");
-        },
-        (nextError) => {
-          if (isAuthError(nextError)) {
-            setAuthRequired(true);
-            return;
-          }
-          setError(getRequestErrorMessage(nextError, "保存失败"));
-        }
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function resetToEnv() {
-    const confirmed = window.confirm(
-      "确认切回环境变量中的 AI 模型链配置吗？当前运行时链路会被清空。"
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await runWithStepUp(
-        async () => {
-          const payload = await requestJson<ConfigResponse>("/api/admin/ai/config", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ reset: true, confirmAction: true })
-          });
-          const data = payload.data ?? null;
-          setConfig(data);
-          setDraftChain(data?.runtimeProviderChain ?? []);
-          hasConfigSnapshotRef.current = true;
-          setBootstrapNotice(null);
-          setMessage("已切回环境变量配置");
-        },
-        (nextError) => {
-          if (isAuthError(nextError)) {
-            setAuthRequired(true);
-            return;
-          }
-          setError(getRequestErrorMessage(nextError, "重置失败"));
-        }
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function runProbe(providers?: string[]) {
-    setTesting(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const payload = await requestJson<ProbeApiResponse>("/api/admin/ai/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          providers: providers ?? effectivePreview,
-          capability: testCapability
-        })
-      });
-      setProbe(payload.data ?? null);
-      setMessage("连通性测试完成");
-    } catch (nextError) {
-      if (isAuthError(nextError)) {
-        setAuthRequired(true);
-      } else {
-        setError(getRequestErrorMessage(nextError, "连通性测试失败"));
-      }
-    } finally {
-      setTesting(false);
-    }
-  }
-
-  async function saveTaskPolicy() {
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await runWithStepUp(
-        async () => {
-          const payload = await requestJson<PoliciesResponse>(
-            "/api/admin/ai/policies",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                taskType: selectedTaskType,
-                providerChain: parseChainInput(policyDraft.providerChain),
-                timeoutMs: policyDraft.timeoutMs,
-                maxRetries: policyDraft.maxRetries,
-                budgetLimit: policyDraft.budgetLimit,
-                minQualityScore: policyDraft.minQualityScore
-              })
-            }
-          );
-          syncPoliciesPayload(payload.data);
-          hasPoliciesSnapshotRef.current = true;
-          setBootstrapNotice(null);
-          setMessage(`任务策略已保存：${selectedTaskType}`);
-          await loadMetrics();
-        },
-        (nextError) => {
-          if (isAuthError(nextError)) {
-            setAuthRequired(true);
-            return;
-          }
-          setError(getRequestErrorMessage(nextError, "保存任务策略失败"));
-        }
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function resetTaskPolicy() {
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await runWithStepUp(
-        async () => {
-          const payload = await requestJson<PoliciesResponse>(
-            "/api/admin/ai/policies",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                taskType: selectedTaskType,
-                reset: true
-              })
-            }
-          );
-          syncPoliciesPayload(payload.data);
-          hasPoliciesSnapshotRef.current = true;
-          setBootstrapNotice(null);
-          setMessage(`任务策略已重置：${selectedTaskType}`);
-          await loadMetrics();
-        },
-        (nextError) => {
-          if (isAuthError(nextError)) {
-            setAuthRequired(true);
-            return;
-          }
-          setError(getRequestErrorMessage(nextError, "重置任务策略失败"));
-        }
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function runOfflineEval() {
-    setEvalLoading(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const query = selectedEvalDatasets.length
-        ? `?datasets=${selectedEvalDatasets.join(",")}`
-        : "";
-      const payload = await requestJson<EvalReportResponse>(
-        `/api/admin/ai/evals${query}`,
-        { cache: "no-store" }
-      );
-      setEvalReport(payload.data ?? null);
-      setMessage("离线评测已完成");
-    } catch (nextError) {
-      if (isAuthError(nextError)) {
-        setAuthRequired(true);
-      } else {
-        setError(getRequestErrorMessage(nextError, "离线评测失败"));
-      }
-    } finally {
-      setEvalLoading(false);
-    }
-  }
-
-  async function applyEvalCalibrationSuggestion() {
-    if (!evalReport?.summary?.calibrationSuggestion) {
-      setError("请先运行离线评测，再应用校准建议");
-      return;
-    }
-
-    const suggestion = evalReport.summary.calibrationSuggestion;
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await runWithStepUp(
-        async () => {
-          const payload = await requestJson<QualityCalibrationResponse>(
-            "/api/admin/ai/quality-calibration",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                globalBias: suggestion.recommendedGlobalBias,
-                providerAdjustments: suggestion.providerAdjustments,
-                kindAdjustments: suggestion.kindAdjustments,
-                reason: "apply_eval_suggestion"
-              })
-            }
-          );
-          syncCalibrationPayload(payload.data ?? null);
-          hasCalibrationSnapshotRef.current = true;
-          setMessage("已应用离线评测校准建议");
-        },
-        (nextError) => {
-          if (isAuthError(nextError)) {
-            setAuthRequired(true);
-            return;
-          }
-          setError(getRequestErrorMessage(nextError, "应用校准建议失败"));
-        }
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function saveCalibrationRollout() {
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await runWithStepUp(
-        async () => {
-          const payload = await requestJson<QualityCalibrationResponse>(
-            "/api/admin/ai/quality-calibration",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                enabled: calibrationDraft.enabled,
-                rolloutPercent: calibrationDraft.rolloutPercent,
-                rolloutSalt: calibrationDraft.rolloutSalt,
-                reason: "update_rollout_control"
-              })
-            }
-          );
-          syncCalibrationPayload(payload.data ?? null);
-          hasCalibrationSnapshotRef.current = true;
-          setMessage("灰度开关配置已保存");
-        },
-        (nextError) => {
-          if (isAuthError(nextError)) {
-            setAuthRequired(true);
-            return;
-          }
-          setError(getRequestErrorMessage(nextError, "保存灰度配置失败"));
-        }
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function rollbackCalibration(snapshotId: string) {
-    const confirmed = window.confirm(
-      "确认回滚到这个 AI 质量校准快照吗？当前运行配置会被覆盖。"
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await runWithStepUp(
-        async () => {
-          const payload = await requestJson<QualityCalibrationResponse>(
-            "/api/admin/ai/quality-calibration",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                action: "rollback",
-                snapshotId,
-                reason: "manual_rollback",
-                confirmAction: true
-              })
-            }
-          );
-          syncCalibrationPayload(payload.data ?? null);
-          hasCalibrationSnapshotRef.current = true;
-          setMessage("已完成校准回滚");
-        },
-        (nextError) => {
-          if (isAuthError(nextError)) {
-            setAuthRequired(true);
-            return;
-          }
-          setError(getRequestErrorMessage(nextError, "回滚失败"));
-        }
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function toggleEvalDataset(dataset: EvalDatasetName) {
-    setSelectedEvalDatasets((prev) =>
-      prev.includes(dataset)
-        ? prev.filter((item) => item !== dataset)
-        : [...prev, dataset]
-    );
-  }
-
-  function toggleEvalGateDataset(dataset: EvalDatasetName) {
-    setEvalGateDraft((prev) => {
-      const next = prev.datasets.includes(dataset)
-        ? prev.datasets.filter((item) => item !== dataset)
-        : [...prev.datasets, dataset];
-      return {
-        ...prev,
-        datasets: next.length ? next : [dataset]
-      };
-    });
-  }
-
-  async function saveEvalGateConfig() {
-    setEvalGateSaving(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await runWithStepUp(
-        async () => {
-          const payload = await requestJson<EvalGateResponse>(
-            "/api/admin/ai/evals/gate",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                enabled: evalGateDraft.enabled,
-                datasets: evalGateDraft.datasets,
-                minPassRate: evalGateDraft.minPassRate,
-                minAverageScore: evalGateDraft.minAverageScore,
-                maxHighRiskCount: evalGateDraft.maxHighRiskCount,
-                autoRollbackOnFail: evalGateDraft.autoRollbackOnFail
-              })
-            }
-          );
-          syncEvalGatePayload(payload.data ?? null);
-          hasEvalGateSnapshotRef.current = true;
-          setMessage("评测门禁配置已保存");
-        },
-        (nextError) => {
-          if (isAuthError(nextError)) {
-            setAuthRequired(true);
-            return;
-          }
-          setError(getRequestErrorMessage(nextError, "保存评测门禁失败"));
-        }
-      );
-    } finally {
-      setEvalGateSaving(false);
-    }
-  }
-
-  async function runEvalGate() {
-    setEvalGateRunning(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await runWithStepUp(
-        async () => {
-          const payload = await requestJson<EvalGateResponse>(
-            "/api/admin/ai/evals/gate",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                action: "run",
-                force: true,
-                configOverride: {
-                  enabled: evalGateDraft.enabled,
-                  datasets: evalGateDraft.datasets,
-                  minPassRate: evalGateDraft.minPassRate,
-                  minAverageScore: evalGateDraft.minAverageScore,
-                  maxHighRiskCount: evalGateDraft.maxHighRiskCount,
-                  autoRollbackOnFail: evalGateDraft.autoRollbackOnFail
-                }
-              })
-            }
-          );
-          syncEvalGatePayload(payload.data ?? null);
-          hasEvalGateSnapshotRef.current = true;
-          const passed = Boolean(payload.data?.lastRun?.passed);
-          setMessage(
-            passed ? "评测门禁通过" : "评测门禁未通过，请根据失败规则调整"
-          );
-        },
-        (nextError) => {
-          if (isAuthError(nextError)) {
-            setAuthRequired(true);
-            return;
-          }
-          setError(getRequestErrorMessage(nextError, "执行评测门禁失败"));
-        }
-      );
-    } finally {
-      setEvalGateRunning(false);
-    }
-  }
-
-  const reload = useCallback(async () => {
-    setPageError(null);
-    await loadPage();
-  }, [loadPage]);
+  const {
+    addProvider,
+    removeProvider,
+    moveProvider,
+    saveChain,
+    resetToEnv,
+    runProbe,
+    saveTaskPolicy,
+    resetTaskPolicy,
+    toggleEvalDataset,
+    runOfflineEval,
+    applyEvalCalibrationSuggestion,
+    saveCalibrationRollout,
+    rollbackCalibration,
+    toggleEvalGateDataset,
+    saveEvalGateConfig,
+    runEvalGate,
+    reload
+  } = useAdminAiModelsActions({
+    runWithStepUp,
+    draftChain,
+    effectivePreview,
+    testCapability,
+    selectedTaskType,
+    policyDraft,
+    selectedEvalDatasets,
+    evalReport,
+    calibrationDraft,
+    evalGateDraft,
+    loadMetrics,
+    loadPage,
+    syncPoliciesPayload,
+    syncCalibrationPayload,
+    syncEvalGatePayload,
+    hasConfigSnapshotRef,
+    hasPoliciesSnapshotRef,
+    hasCalibrationSnapshotRef,
+    hasEvalGateSnapshotRef,
+    setDraftChain,
+    setSaving,
+    setTesting,
+    setAuthRequired,
+    setBootstrapNotice,
+    setError,
+    setMessage,
+    setConfig,
+    setProbe,
+    setEvalLoading,
+    setEvalReport,
+    setSelectedEvalDatasets,
+    setEvalGateDraft,
+    setEvalGateSaving,
+    setEvalGateRunning,
+    setPageError
+  });
 
   return {
     stepUpDialog,

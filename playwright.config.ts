@@ -3,6 +3,7 @@ import { defineConfig } from "@playwright/test";
 const PORT = 3100;
 const BASE_URL = `http://localhost:${PORT}`;
 const IS_PRODUCTION_LIKE = process.env.PLAYWRIGHT_FORCE_PRODUCTION_LIKE === "true";
+const PLAYWRIGHT_SERVER_MODE = process.env.PLAYWRIGHT_SERVER_MODE === "dev" ? "dev" : "start";
 
 function compactEnv(input: Record<string, string | undefined>) {
   return Object.fromEntries(
@@ -53,7 +54,10 @@ export default defineConfig({
     video: "off"
   },
   webServer: {
-    command: `npm run start -- --hostname 127.0.0.1 --port ${PORT}`,
+    command:
+      PLAYWRIGHT_SERVER_MODE === "dev"
+        ? `npm run dev -- --hostname 127.0.0.1 --port ${PORT}`
+        : `npm run start -- --hostname 127.0.0.1 --port ${PORT}`,
     url: BASE_URL,
     reuseExistingServer: process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === "true",
     timeout: 120_000,

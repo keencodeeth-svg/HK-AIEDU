@@ -1,17 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@/components/Card";
 import StatePanel from "@/components/StatePanel";
 import Stat from "@/components/Stat";
-import { formatLoadedTime, requestJson } from "@/lib/client-request";
-import type { SchoolClassRecord, SchoolUserRecord } from "@/lib/school-admin-types";
-import { getSchoolAdminRequestMessage, isSchoolAdminAuthRequiredError } from "../utils";
-
-type SchoolUsersResponse = { data?: SchoolUserRecord[] };
-type SchoolClassesResponse = { data?: SchoolClassRecord[] };
-type TeacherFilter = "all" | "assigned" | "unassigned" | "multi_class";
+import { formatLoadedTime } from "@/lib/client-request";
+import type { TeacherFilter } from "./useSchoolTeachersPage";
+import { useSchoolTeachersPage } from "./useSchoolTeachersPage";
 
 const fieldStyle = {
   width: "100%",
@@ -23,82 +18,13 @@ const fieldStyle = {
 } as const;
 
 export default function SchoolTeachersPage() {
-  const [teachers, setTeachers] = useState<SchoolUserRecord[]>([]);
-  const [classes, setClasses] = useState<SchoolClassRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [authRequired, setAuthRequired] = useState(false);
-  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
-  const [keyword, setKeyword] = useState("");
-  const [filter, setFilter] = useState<TeacherFilter>("all");
+  const teachersPage = useSchoolTeachersPage();
 
-  const loadData = useCallback(async (mode: "initial" | "refresh" = "initial") => {
-    if (mode === "refresh") {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-    setError(null);
-
-    try {
-      const [teacherPayload, classPayload] = await Promise.all([
-        requestJson<SchoolUsersResponse>("/api/school/users?role=teacher"),
-        requestJson<SchoolClassesResponse>("/api/school/classes")
-      ]);
-      setTeachers(teacherPayload.data ?? []);
-      setClasses(classPayload.data ?? []);
-      setAuthRequired(false);
-      setLastLoadedAt(new Date().toISOString());
-    } catch (nextError) {
-      if (isSchoolAdminAuthRequiredError(nextError)) {
-        setAuthRequired(true);
-        setTeachers([]);
-        setClasses([]);
-      } else {
-        setError(getSchoolAdminRequestMessage(nextError, "加载教师管理失败"));
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
-
-  const teacherClassMap = useMemo(() => {
-    const map = new Map<string, SchoolClassRecord[]>();
-    classes.forEach((item) => {
-      if (!item.teacherId) return;
-      const list = map.get(item.teacherId) ?? [];
-      list.push(item);
-      map.set(item.teacherId, list);
-    });
-    return map;
-  }, [classes]);
-
-  const filteredTeachers = useMemo(() => {
-    const keywordLower = keyword.trim().toLowerCase();
-    return teachers.filter((teacher) => {
-      const assignedClasses = teacherClassMap.get(teacher.id) ?? [];
-      if (filter === "assigned" && assignedClasses.length === 0) return false;
-      if (filter === "unassigned" && assignedClasses.length > 0) return false;
-      if (filter === "multi_class" && assignedClasses.length < 2) return false;
-      if (!keywordLower) return true;
-      return [teacher.name, teacher.email, ...assignedClasses.map((item) => item.name)].join(" ").toLowerCase().includes(keywordLower);
-    });
-  }, [filter, keyword, teacherClassMap, teachers]);
-
-  const assignedCount = useMemo(() => teachers.filter((teacher) => (teacherClassMap.get(teacher.id) ?? []).length > 0).length, [teacherClassMap, teachers]);
-  const multiClassCount = useMemo(() => teachers.filter((teacher) => (teacherClassMap.get(teacher.id) ?? []).length >= 2).length, [teacherClassMap, teachers]);
-
-  if (loading && !teachers.length && !authRequired) {
+  if (teachersPage.loading && !teachersPage.teachers.length && !teachersPage.authRequired) {
     return <StatePanel title="教师管理加载中" description="正在汇总教师账号与带班信息。" tone="loading" />;
   }
 
-  if (authRequired) {
+  if (teachersPage.authRequired) {
     return (
       <StatePanel
         title="需要学校管理员权限"
@@ -113,14 +39,14 @@ export default function SchoolTeachersPage() {
     );
   }
 
-  if (error && !teachers.length) {
+  if (teachersPage.error && !teachersPage.teachers.length) {
     return (
       <StatePanel
         title="教师管理加载失败"
-        description={error}
+        description={teachersPage.error}
         tone="error"
         action={
-          <button className="button secondary" type="button" onClick={() => void loadData()}>
+          <button className="button secondary" type="button" onClick={() => void teachersPage.loadData()}>
             重试
           </button>
         }
@@ -136,24 +62,47 @@ export default function SchoolTeachersPage() {
           <div className="section-sub">从组织层统一查看教师账号、带班分布和待分配状态。</div>
         </div>
         <div className="cta-row no-margin" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(lastLoadedAt)}</span> : null}
+          {teachersPage.lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(teachersPage.lastLoadedAt)}</span> : null}
           <span className="chip">Teachers</span>
-          <button className="button secondary" type="button" onClick={() => void loadData("refresh")} disabled={loading || refreshing}>
-            {refreshing ? "刷新中..." : "刷新"}
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() => void teachersPage.loadData("refresh")}
+            disabled={teachersPage.loading || teachersPage.refreshing}
+          >
+            {teachersPage.refreshing ? "刷新中..." : "刷新"}
           </button>
         </div>
       </div>
 
-      {error ? <StatePanel title="刷新存在异常" description={error} tone="error" compact /> : null}
+      {teachersPage.error ? <StatePanel title="刷新存在异常" description={teachersPage.error} tone="error" compact /> : null}
 
       <Card title="教师运营概览" tag="统计">
         <div className="grid grid-3">
-          <Stat label="教师总数" value={String(teachers.length)} helper={`当前筛选 ${filteredTeachers.length} 人`} />
-          <Stat label="已带班教师" value={String(assignedCount)} helper="带班覆盖" />
-          <Stat label="待分配教师" value={String(Math.max(teachers.length - assignedCount, 0))} helper="可继续补位" />
-          <Stat label="多班教师" value={String(multiClassCount)} helper="关注负载均衡" />
-          <Stat label="班级总数" value={String(classes.length)} helper="学校范围" />
-          <Stat label="平均每位教师班级" value={String(teachers.length ? Math.round((classes.filter((item) => item.teacherId).length / teachers.length) * 10) / 10 : 0)} helper="仅供排班参考" />
+          <Stat
+            label="教师总数"
+            value={String(teachersPage.teachers.length)}
+            helper={`当前筛选 ${teachersPage.filteredTeachers.length} 人`}
+          />
+          <Stat label="已带班教师" value={String(teachersPage.assignedCount)} helper="带班覆盖" />
+          <Stat
+            label="待分配教师"
+            value={String(Math.max(teachersPage.teachers.length - teachersPage.assignedCount, 0))}
+            helper="可继续补位"
+          />
+          <Stat label="多班教师" value={String(teachersPage.multiClassCount)} helper="关注负载均衡" />
+          <Stat label="班级总数" value={String(teachersPage.classes.length)} helper="学校范围" />
+          <Stat
+            label="平均每位教师班级"
+            value={String(
+              teachersPage.teachers.length
+                ? Math.round(
+                    (teachersPage.classes.filter((item) => item.teacherId).length / teachersPage.teachers.length) * 10
+                  ) / 10
+                : 0
+            )}
+            helper="仅供排班参考"
+          />
         </div>
       </Card>
 
@@ -162,8 +111,8 @@ export default function SchoolTeachersPage() {
           <label style={{ display: "grid", gap: 6 }}>
             <span className="section-sub">搜索教师 / 邮箱 / 班级</span>
             <input
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
+              value={teachersPage.keyword}
+              onChange={(event) => teachersPage.setKeyword(event.target.value)}
               placeholder="搜索教师姓名、邮箱或所带班级"
               aria-label="搜索教师"
               style={fieldStyle}
@@ -171,7 +120,11 @@ export default function SchoolTeachersPage() {
           </label>
           <label style={{ display: "grid", gap: 6 }}>
             <span className="section-sub">教师状态</span>
-            <select value={filter} onChange={(event) => setFilter(event.target.value as TeacherFilter)} style={fieldStyle}>
+            <select
+              value={teachersPage.filter}
+              onChange={(event) => teachersPage.setFilter(event.target.value as TeacherFilter)}
+              style={fieldStyle}
+            >
               <option value="all">全部教师</option>
               <option value="assigned">已带班</option>
               <option value="unassigned">待分配</option>
@@ -180,17 +133,16 @@ export default function SchoolTeachersPage() {
           </label>
         </div>
         <div className="cta-row" style={{ marginTop: 12 }}>
-          <button className="button ghost" type="button" onClick={() => { setKeyword(""); setFilter("all"); }}>
+          <button className="button ghost" type="button" onClick={teachersPage.clearFilters}>
             清空筛选
           </button>
         </div>
       </Card>
 
-      <Card title={`教师列表（${filteredTeachers.length}）`} tag="清单">
-        {filteredTeachers.length ? (
+      <Card title={`教师列表（${teachersPage.filteredTeachers.length}）`} tag="清单">
+        {teachersPage.filteredTeachers.length ? (
           <div className="grid" style={{ gap: 10 }}>
-            {filteredTeachers.map((teacher) => {
-              const assignedClasses = teacherClassMap.get(teacher.id) ?? [];
+            {teachersPage.filteredTeachers.map(({ teacher, assignedClasses }) => {
               return (
                 <div className="card" key={teacher.id}>
                   <div className="cta-row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
@@ -216,7 +168,7 @@ export default function SchoolTeachersPage() {
             description="试试调整关键词或切换教师状态。"
             tone="empty"
             action={
-              <button className="button secondary" type="button" onClick={() => { setKeyword(""); setFilter("all"); }}>
+              <button className="button secondary" type="button" onClick={teachersPage.clearFilters}>
                 清空筛选
               </button>
             }

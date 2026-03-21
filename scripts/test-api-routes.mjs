@@ -6,6 +6,7 @@ import { createRuntime } from "./api-test/runtime.mjs";
 import { runAdminContentSuite } from "./api-test/suites/admin-content.mjs";
 import { runCoreAuthSuite } from "./api-test/suites/core-auth.mjs";
 import { runLearningSuite } from "./api-test/suites/learning.mjs";
+import { runLocalDevSuite } from "./api-test/suites/local-dev.mjs";
 import { runSchoolScheduleSuite } from "./api-test/suites/school-schedules.mjs";
 import { runSmokeSuite } from "./api-test/suites/smoke.mjs";
 import { runTeacherExamSuite } from "./api-test/suites/teacher-exam.mjs";
@@ -108,6 +109,11 @@ async function run() {
     if (scope === "smoke") {
       await runSmokeSuite(context);
       console.log("API smoke tests passed.");
+      return;
+    }
+    if (scope === "local-dev") {
+      await runLocalDevSuite(context);
+      console.log("Local dev contract tests passed.");
       return;
     }
     if (scope === "school-schedules") {

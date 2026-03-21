@@ -15,11 +15,14 @@ Module._resolveFilename = function resolveFilename(request, parent, isMain, opti
 };
 
 const {
+  getFilesNoStoreRequestInit,
+  groupCourseFilesByFolder,
   getFilesBootstrapRequestMessage,
   getFilesListRequestMessage,
   getFilesSubmitRequestMessage,
   isMissingFilesClassError,
-  resolveFilesClassId
+  resolveFilesClassId,
+  resolveFilesStateAfterMissingClass
 } = require("../../app/files/utils") as typeof import("../../app/files/utils");
 Module._resolveFilename = originalResolveFilename;
 
@@ -59,4 +62,90 @@ test("files helpers keep selected class only when it still exists", () => {
   assert.equal(resolveFilesClassId(classes, "class-b"), "class-b");
   assert.equal(resolveFilesClassId(classes, "missing-class"), "class-a");
   assert.equal(resolveFilesClassId([], "class-a"), "");
+});
+
+test("files helpers remove stale class and preserve current fallback deterministically", () => {
+  const classes = [{ id: "class-a" }, { id: "class-b" }, { id: "class-c" }];
+
+  assert.deepEqual(resolveFilesStateAfterMissingClass(classes, "class-b", "class-b"), {
+    nextClasses: [{ id: "class-a" }, { id: "class-c" }],
+    nextClassId: "class-a"
+  });
+
+  assert.deepEqual(resolveFilesStateAfterMissingClass(classes, "class-b", "class-c"), {
+    nextClasses: [{ id: "class-a" }, { id: "class-c" }],
+    nextClassId: "class-c"
+  });
+});
+
+test("files helpers group resources by trimmed folder name and default bucket", () => {
+  assert.deepEqual(
+    groupCourseFilesByFolder([
+      {
+        id: "1",
+        classId: "class-a",
+        folder: " 第一单元 ",
+        title: "讲义",
+        resourceType: "file",
+        createdAt: "2026-03-19T12:00:00.000Z"
+      },
+      {
+        id: "2",
+        classId: "class-a",
+        folder: "",
+        title: "练习链接",
+        resourceType: "link",
+        createdAt: "2026-03-19T12:00:00.000Z"
+      },
+      {
+        id: "3",
+        classId: "class-a",
+        title: "补充图片",
+        resourceType: "file",
+        createdAt: "2026-03-19T12:00:00.000Z"
+      }
+    ]),
+    {
+      第一单元: [
+        {
+          id: "1",
+          classId: "class-a",
+          folder: " 第一单元 ",
+          title: "讲义",
+          resourceType: "file",
+          createdAt: "2026-03-19T12:00:00.000Z"
+        }
+      ],
+      默认: [
+        {
+          id: "2",
+          classId: "class-a",
+          folder: "",
+          title: "练习链接",
+          resourceType: "link",
+          createdAt: "2026-03-19T12:00:00.000Z"
+        },
+        {
+          id: "3",
+          classId: "class-a",
+          title: "补充图片",
+          resourceType: "file",
+          createdAt: "2026-03-19T12:00:00.000Z"
+        }
+      ]
+    }
+  );
+});
+
+test("files helpers expose no-store request init for dynamic bootstrap and list loads", () => {
+  assert.deepEqual(getFilesNoStoreRequestInit(), { cache: "no-store" });
+});
+
+test("files helpers return a fresh no-store request init object on each call", () => {
+  const first = getFilesNoStoreRequestInit();
+  const second = getFilesNoStoreRequestInit();
+
+  assert.notEqual(first, second);
+  assert.deepEqual(first, { cache: "no-store" });
+  assert.deepEqual(second, { cache: "no-store" });
 });

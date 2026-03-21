@@ -10,7 +10,6 @@ import ExamCreatePublishCard from "./_components/ExamCreatePublishCard";
 import ExamCreateScheduleCard from "./_components/ExamCreateScheduleCard";
 import ExamCreateScopeCard from "./_components/ExamCreateScopeCard";
 import {
-  formatLoadedTime,
   getDifficultyLabel,
   getPublishModeLabel
 } from "./utils";
@@ -103,7 +102,7 @@ export function useTeacherExamCreatePageView() {
     difficultyLabel: getDifficultyLabel(page.form.difficulty),
     questionCount: page.form.questionCount,
     targetLabel: page.targetLabel,
-    lastLoadedAtLabel: page.lastLoadedAt ? formatLoadedTime(page.lastLoadedAt) : null,
+    lastLoadedAtLabel: page.lastLoadedAtLabel || null,
     refreshing: page.configRefreshing,
     refreshDisabled: page.configLoading || page.configRefreshing || page.studentsLoading,
     refresh: () => {

@@ -1,0 +1,138 @@
+import { useCallback, useRef, useState } from "react";
+import type {
+  TeacherAssignmentAiReviewResult,
+  TeacherAssignmentReviewData,
+  TeacherAssignmentReviewItemState,
+  TeacherAssignmentReviewRubricState
+} from "./types";
+import { buildReviewItemState, buildReviewRubricState } from "./utils";
+
+export function useTeacherAssignmentReviewPageState() {
+  const loadRequestIdRef = useRef(0);
+  const aiRequestIdRef = useRef(0);
+  const saveRequestIdRef = useRef(0);
+  const hasSnapshotRef = useRef(false);
+
+  const [data, setData] = useState<TeacherAssignmentReviewData | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [overallComment, setOverallComment] = useState("");
+  const [itemState, setItemState] = useState<TeacherAssignmentReviewItemState>({});
+  const [rubricState, setRubricState] = useState<TeacherAssignmentReviewRubricState>({});
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiReview, setAiReview] = useState<TeacherAssignmentAiReviewResult | null>(null);
+
+  const clearReviewState = useCallback(() => {
+    hasSnapshotRef.current = false;
+    setData(null);
+    setOverallComment("");
+    setItemState({});
+    setRubricState({});
+    setAiReview(null);
+    setMessage(null);
+    setSaveError(null);
+    setAiError(null);
+  }, []);
+
+  const syncReviewState = useCallback((payload: TeacherAssignmentReviewData) => {
+    setData(payload);
+    setOverallComment(payload.review?.overallComment ?? "");
+    setItemState(buildReviewItemState(payload.reviewItems ?? []));
+    setRubricState(buildReviewRubricState(payload.reviewRubrics ?? [], payload.rubrics ?? []));
+    setAiReview(payload.aiReview?.result ?? null);
+  }, []);
+
+  const handleAuthRequired = useCallback(() => {
+    clearReviewState();
+    setLoadError(null);
+    setAuthRequired(true);
+  }, [clearReviewState]);
+
+  const handleQuestionWrongTagChange = useCallback((questionId: string, value: string) => {
+    setItemState((prev) => ({
+      ...prev,
+      [questionId]: {
+        wrongTag: value,
+        comment: prev[questionId]?.comment ?? ""
+      }
+    }));
+  }, []);
+
+  const handleQuestionCommentChange = useCallback((questionId: string, value: string) => {
+    setItemState((prev) => ({
+      ...prev,
+      [questionId]: {
+        wrongTag: prev[questionId]?.wrongTag ?? "",
+        comment: value
+      }
+    }));
+  }, []);
+
+  const handleRubricScoreChange = useCallback((rubricId: string, value: number) => {
+    setRubricState((prev) => ({
+      ...prev,
+      [rubricId]: {
+        score: value,
+        comment: prev[rubricId]?.comment ?? ""
+      }
+    }));
+  }, []);
+
+  const handleRubricCommentChange = useCallback((rubricId: string, value: string) => {
+    setRubricState((prev) => ({
+      ...prev,
+      [rubricId]: {
+        score: prev[rubricId]?.score ?? 0,
+        comment: value
+      }
+    }));
+  }, []);
+
+  return {
+    loadRequestIdRef,
+    aiRequestIdRef,
+    saveRequestIdRef,
+    hasSnapshotRef,
+    data,
+    authRequired,
+    loading,
+    refreshing,
+    overallComment,
+    itemState,
+    rubricState,
+    saving,
+    message,
+    loadError,
+    saveError,
+    aiError,
+    aiLoading,
+    aiReview,
+    setData,
+    setAuthRequired,
+    setLoading,
+    setRefreshing,
+    setOverallComment,
+    setItemState,
+    setRubricState,
+    setSaving,
+    setMessage,
+    setLoadError,
+    setSaveError,
+    setAiError,
+    setAiLoading,
+    setAiReview,
+    clearReviewState,
+    syncReviewState,
+    handleAuthRequired,
+    handleQuestionWrongTagChange,
+    handleQuestionCommentChange,
+    handleRubricScoreChange,
+    handleRubricCommentChange
+  };
+}

@@ -15,6 +15,12 @@ export type ModuleItem = {
 
 export type ModuleResourceType = "file" | "link";
 
+export type ModuleResourceFileLike = {
+  name: string;
+  type?: string;
+  size: number;
+};
+
 export type ModuleResourceItem = {
   id: string;
   title: string;

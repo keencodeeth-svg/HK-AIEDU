@@ -29,3 +29,37 @@ export function parseChainInput(value: string) {
     .map((item) => item.trim())
     .filter(Boolean);
 }
+
+export function addProviderToChain(chain: string[], provider: string) {
+  return chain.includes(provider) ? chain : [...chain, provider];
+}
+
+export function removeProviderFromChain(chain: string[], provider: string) {
+  return chain.includes(provider) ? chain.filter((item) => item !== provider) : chain;
+}
+
+export function moveProviderInChain(chain: string[], provider: string, offset: -1 | 1) {
+  const index = chain.findIndex((item) => item === provider);
+  if (index < 0) {
+    return chain;
+  }
+  const nextIndex = index + offset;
+  if (nextIndex < 0 || nextIndex >= chain.length) {
+    return chain;
+  }
+  const next = [...chain];
+  const [picked] = next.splice(index, 1);
+  next.splice(nextIndex, 0, picked);
+  return next;
+}
+
+export function toggleEvalDatasetSelection(datasets: EvalDatasetName[], dataset: EvalDatasetName) {
+  return datasets.includes(dataset)
+    ? datasets.filter((item) => item !== dataset)
+    : [...datasets, dataset];
+}
+
+export function toggleRequiredEvalDatasetSelection(datasets: EvalDatasetName[], dataset: EvalDatasetName) {
+  const next = toggleEvalDatasetSelection(datasets, dataset);
+  return next.length ? next : [dataset];
+}

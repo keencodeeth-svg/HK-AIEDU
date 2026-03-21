@@ -1,5 +1,5 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
-import type { ExamRiskLevel } from "./types";
+import type { ExamDetail, ExamRiskLevel, ExamStudent } from "./types";
 
 export function getRiskTone(level: ExamRiskLevel) {
   if (level === "high") {
@@ -37,4 +37,99 @@ export function getTeacherExamDetailRequestMessage(error: unknown, fallback: str
 
 export function isMissingTeacherExamDetailError(error: unknown) {
   return (getRequestStatus(error) ?? 0) === 404 && getRequestErrorMessage(error, "").trim().toLowerCase() === "not found";
+}
+
+export function formatTeacherExamDetailLoadedTime(value: string | null) {
+  if (!value) return "";
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+export function getTeacherExamDetailDueRelativeLabel(endAt: string, now: number) {
+  const diffMs = new Date(endAt).getTime() - now;
+  const diffHours = Math.ceil(diffMs / (60 * 60 * 1000));
+  if (diffHours < 0) return `已结束 ${Math.abs(diffHours)} 小时`;
+  if (diffHours <= 1) return "1 小时内结束";
+  if (diffHours < 24) return `${diffHours} 小时后结束`;
+  return `${Math.ceil(diffHours / 24)} 天后结束`;
+}
+
+export function rankTeacherExamStudents(students: ExamStudent[]) {
+  return [...students].sort((a, b) => {
+    if (b.riskScore !== a.riskScore) {
+      return b.riskScore - a.riskScore;
+    }
+    if ((a.status === "submitted") !== (b.status === "submitted")) {
+      return a.status === "submitted" ? -1 : 1;
+    }
+    return a.name.localeCompare(b.name, "zh-CN");
+  });
+}
+
+export function getTeacherExamDetailDerivedState(options: {
+  data: ExamDetail | null;
+  lastLoadedAt: string | null;
+  now: number;
+}) {
+  const rankedStudents = options.data?.students?.length
+    ? rankTeacherExamStudents(options.data.students)
+    : [];
+  const submittedRate = options.data?.summary.assigned
+    ? Math.round((options.data.summary.submitted / options.data.summary.assigned) * 100)
+    : 0;
+  const totalQuestionScore =
+    options.data?.questions.reduce((sum, question) => sum + question.score, 0) ?? 0;
+
+  return {
+    rankedStudents,
+    submittedRate,
+    topRiskStudent: rankedStudents[0] ?? null,
+    totalQuestionScore,
+    dueRelativeLabel: options.data
+      ? getTeacherExamDetailDueRelativeLabel(options.data.exam.endAt, options.now)
+      : "",
+    lastLoadedAtLabel: formatTeacherExamDetailLoadedTime(options.lastLoadedAt)
+  };
+}
+
+export function updateTeacherExamDetailStatus(
+  detail: ExamDetail | null,
+  nextStatus?: ExamDetail["exam"]["status"]
+) {
+  if (!detail) {
+    return detail;
+  }
+
+  return {
+    ...detail,
+    exam: {
+      ...detail.exam,
+      status: nextStatus ?? detail.exam.status
+    }
+  };
+}
+
+export function buildTeacherExamReviewPackMessage(
+  result:
+    | {
+        message?: string;
+        publishedStudents?: number;
+        targetedStudents?: number;
+        skippedLowRisk?: number;
+        skippedNoSubmission?: number;
+      }
+    | undefined,
+  dryRun: boolean
+) {
+  const summary =
+    result?.message ??
+    (dryRun
+      ? `预览完成：计划通知学生 ${result?.publishedStudents ?? 0} 人`
+      : `发布完成：已通知学生 ${result?.publishedStudents ?? 0} 人`);
+  const detail = `覆盖 ${result?.targetedStudents ?? 0} 人，跳过低风险 ${result?.skippedLowRisk ?? 0} 人，缺少提交 ${result?.skippedNoSubmission ?? 0} 人。`;
+  return `${summary} ${detail}`;
 }

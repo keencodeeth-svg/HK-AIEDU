@@ -187,3 +187,14 @@ export type LibraryAiGenerateResponse = {
 export type LibraryDeleteResponse = {
   error?: string;
 };
+
+export type LibraryListResponse = {
+  data?: LibraryItem[];
+  meta?: Partial<LibraryMeta>;
+  facets?: Partial<LibraryFacets>;
+  summary?: Partial<LibrarySummary>;
+};
+
+export type TeacherClassesResponse = {
+  data?: ClassItem[];
+};

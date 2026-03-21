@@ -15,9 +15,15 @@ Module._resolveFilename = function resolveFilename(request, parent, isMain, opti
 };
 
 const {
+  filterInboxThreads,
+  getComposeHint,
   getInboxCreateRequestMessage,
+  getInboxCreateSuccessMessage,
+  getInboxDerivedState,
   getInboxLoadRequestMessage,
+  getInboxNoStoreRequestInit,
   getInboxReplyRequestMessage,
+  getInboxReplySuccessMessage,
   isInboxThreadDetailCurrent,
   isMissingInboxClassError,
   isMissingInboxThreadError,
@@ -117,4 +123,94 @@ test("inbox helpers detect whether visible detail still matches the selected thr
     false
   );
   assert.equal(isInboxThreadDetailCurrent(null, "thread-1"), false);
+});
+
+test("inbox helpers filter threads and map sync success messages", () => {
+  const threads = [
+    {
+      id: "thread-1",
+      subject: "作业提醒",
+      updatedAt: "2026-03-17T08:00:00.000Z",
+      participants: [{ id: "u1", name: "张老师", role: "teacher" }],
+      lastMessage: { content: "明天交作业", createdAt: "2026-03-17T08:05:00.000Z" },
+      unreadCount: 0
+    },
+    {
+      id: "thread-2",
+      subject: "课堂反馈",
+      updatedAt: "2026-03-17T09:00:00.000Z",
+      participants: [{ id: "u2", name: "李老师", role: "teacher" }],
+      lastMessage: { content: "今天表现不错", createdAt: "2026-03-17T09:05:00.000Z" },
+      unreadCount: 1
+    }
+  ];
+
+  assert.deepEqual(filterInboxThreads(threads, "", false).map((item) => item.id), ["thread-1", "thread-2"]);
+  assert.deepEqual(filterInboxThreads(threads, "李老师", false).map((item) => item.id), ["thread-2"]);
+  assert.deepEqual(filterInboxThreads(threads, "作业", false).map((item) => item.id), ["thread-1"]);
+  assert.deepEqual(filterInboxThreads(threads, "", true).map((item) => item.id), ["thread-2"]);
+
+  assert.equal(getInboxCreateSuccessMessage("loaded"), "消息已发送");
+  assert.equal(getInboxCreateSuccessMessage("error"), "消息已发送，但会话列表刷新失败，请稍后重试。");
+  assert.equal(getInboxCreateSuccessMessage("stale"), "消息已发送，收件箱正在同步最新内容。");
+  assert.equal(getInboxReplySuccessMessage("loaded"), "回复已发送");
+  assert.equal(getInboxReplySuccessMessage("error"), "回复已发送，但会话刷新失败，请稍后重试。");
+  assert.equal(getInboxReplySuccessMessage("stale"), "回复已发送，收件箱正在同步最新内容。");
+});
+
+test("inbox helpers derive compose hints and page state deterministically", () => {
+  const threads = [
+    {
+      id: "thread-1",
+      subject: "作业提醒",
+      updatedAt: "2026-03-17T08:00:00.000Z",
+      participants: [{ id: "u1", name: "张老师", role: "teacher" }],
+      lastMessage: { content: "明天交作业", createdAt: "2026-03-17T08:05:00.000Z" },
+      unreadCount: 2
+    },
+    {
+      id: "thread-2",
+      subject: "课堂反馈",
+      updatedAt: "2026-03-17T09:00:00.000Z",
+      participants: [{ id: "u2", name: "李老师", role: "teacher" }],
+      lastMessage: { content: "今天表现不错", createdAt: "2026-03-17T09:05:00.000Z" },
+      unreadCount: 1
+    }
+  ];
+
+  assert.equal(getComposeHint("teacher"), "支持按班级发送给学生，并可选择同步给家长。");
+  assert.equal(getComposeHint("parent"), "按班级发送给任课老师，适合家校沟通与反馈。");
+  assert.equal(getComposeHint("student"), "按班级发送给任课老师，适合提问、反馈和沟通学习安排。");
+
+  const derived = getInboxDerivedState({
+    user: { id: "teacher-1", role: "teacher", name: "张老师" },
+    classes: [{ id: "class-1", name: "一班", subject: "math", grade: "4" }],
+    classId: "class-1",
+    threads,
+    activeThreadId: "thread-2",
+    threadDetail: {
+      thread: { id: "thread-2", subject: "课堂反馈" },
+      participants: [{ id: "u2", name: "李老师", role: "teacher" }],
+      messages: []
+    },
+    keyword: "李老师",
+    unreadOnly: true,
+    requestedThreadId: "thread-2"
+  });
+
+  assert.equal(derived.currentClass?.id, "class-1");
+  assert.equal(derived.activeThread?.id, "thread-2");
+  assert.equal(derived.unreadCount, 3);
+  assert.deepEqual(derived.filteredThreads.map((item) => item.id), ["thread-2"]);
+  assert.equal(derived.hasInboxData, true);
+  assert.equal(derived.requestedThreadMatched, true);
+});
+
+test("inbox helpers expose fresh no-store request init for dynamic session bootstrap", () => {
+  const first = getInboxNoStoreRequestInit();
+  const second = getInboxNoStoreRequestInit();
+
+  assert.notEqual(first, second);
+  assert.deepEqual(first, { cache: "no-store" });
+  assert.deepEqual(second, { cache: "no-store" });
 });

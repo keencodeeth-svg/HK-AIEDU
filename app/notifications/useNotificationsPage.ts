@@ -1,25 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  isAuthError,
-  requestJson
-} from "@/lib/client-request";
 import type {
   NotificationItem,
-  NotificationMutationResponse,
-  NotificationsResponse,
   ReadFilter
 } from "./types";
 import {
-  getNotificationActionRequestMessage,
-  getNotificationTypeLabel,
-  getNotificationsRequestMessage,
-  isMissingNotificationError,
-  resolveNotificationsTypeFilter
+  filterNotifications,
+  getNotificationCounts,
+  getNotificationTypeOptions,
+  hasActiveNotificationFilters
 } from "./utils";
-
-type LoadNotificationsStatus = "ok" | "auth" | "error" | "stale";
+import { useNotificationsActions } from "./useNotificationsActions";
+import { useNotificationsLoaders } from "./useNotificationsLoaders";
 
 export function useNotificationsPage() {
   const loadRequestIdRef = useRef(0);
@@ -60,219 +53,59 @@ export function useNotificationsPage() {
     setAuthRequired(true);
   }, [clearNotificationsState]);
 
-  const loadNotifications = useCallback(
-    async (mode: "initial" | "refresh" = "initial"): Promise<LoadNotificationsStatus> => {
-      const requestId = loadRequestIdRef.current + 1;
-      loadRequestIdRef.current = requestId;
-      const isRefresh = mode === "refresh";
-
-      if (isRefresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-        if (!hasNotificationsSnapshotRef.current) {
-          setList([]);
-        }
-      }
-      setError(null);
-
-      try {
-        const data = await requestJson<NotificationsResponse>("/api/notifications");
-        if (requestId !== loadRequestIdRef.current) {
-          return "stale";
-        }
-
-        const nextList = Array.isArray(data.data) ? data.data : [];
-        const nextTypeFilter = resolveNotificationsTypeFilter(nextList, typeFilterRef.current);
-
-        setAuthRequired(false);
-        hasNotificationsSnapshotRef.current = true;
-        setList(nextList);
-        if (nextTypeFilter !== typeFilterRef.current) {
-          typeFilterRef.current = nextTypeFilter;
-          setTypeFilter(nextTypeFilter);
-        }
-        setLastLoadedAt(new Date().toISOString());
-        return "ok";
-      } catch (nextError) {
-        if (requestId !== loadRequestIdRef.current) {
-          return "stale";
-        }
-
-        if (isAuthError(nextError)) {
-          handleAuthRequired();
-          return "auth";
-        } else {
-          if (!hasNotificationsSnapshotRef.current) {
-            clearNotificationsState();
-          }
-          setAuthRequired(false);
-          setError(getNotificationsRequestMessage(nextError, "加载失败"));
-          return "error";
-        }
-      } finally {
-        if (requestId === loadRequestIdRef.current) {
-          setLoading(false);
-          setRefreshing(false);
-        }
-      }
-    },
-    [clearNotificationsState, handleAuthRequired]
-  );
+  const {
+    loadNotifications,
+    refreshNotifications
+  } = useNotificationsLoaders({
+    loadRequestIdRef,
+    hasNotificationsSnapshotRef,
+    typeFilterRef,
+    clearNotificationsState,
+    handleAuthRequired,
+    setList,
+    setLoading,
+    setRefreshing,
+    setError,
+    setAuthRequired,
+    setTypeFilter,
+    setLastLoadedAt
+  });
 
   useEffect(() => {
     void loadNotifications();
   }, [loadNotifications]);
 
-  const unreadCount = useMemo(() => list.filter((item) => !item.readAt).length, [list]);
-  const readCount = Math.max(0, list.length - unreadCount);
-  const typeOptions = useMemo(() => Array.from(new Set(list.map((item) => item.type))), [list]);
-  const hasActiveFilters = readFilter !== "all" || typeFilter !== "all" || keyword.trim().length > 0;
-
-  const filteredList = useMemo(() => {
-    const keywordLower = keyword.trim().toLowerCase();
-
-    return list.filter((item) => {
-      if (readFilter === "unread" && item.readAt) return false;
-      if (readFilter === "read" && !item.readAt) return false;
-      if (typeFilter !== "all" && item.type !== typeFilter) return false;
-      if (!keywordLower) return true;
-
-      return [item.title, item.content, getNotificationTypeLabel(item.type)]
-        .join(" ")
-        .toLowerCase()
-        .includes(keywordLower);
-    });
-  }, [keyword, list, readFilter, typeFilter]);
-
-  const markRead = useCallback(
-    async (id: string) => {
-      if (actingKeyRef.current) {
-        return;
-      }
-
-      const requestId = actionRequestIdRef.current + 1;
-      const activeLoadRequestId = loadRequestIdRef.current;
-      actionRequestIdRef.current = requestId;
-      applyActingKey(id);
-      setError(null);
-
-      try {
-        const data = await requestJson<NotificationMutationResponse>("/api/notifications", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id })
-        });
-
-        if (requestId !== actionRequestIdRef.current || activeLoadRequestId !== loadRequestIdRef.current) {
-          return;
-        }
-
-        const updated = data.data;
-        hasNotificationsSnapshotRef.current = true;
-        setAuthRequired(false);
-        setList((prev) =>
-          prev.map((item) =>
-            item.id === id
-              ? {
-                  ...item,
-                  readAt: updated?.readAt ?? new Date().toISOString()
-                }
-              : item
-          )
-        );
-        setLastLoadedAt(new Date().toISOString());
-      } catch (nextError) {
-        if (requestId !== actionRequestIdRef.current || activeLoadRequestId !== loadRequestIdRef.current) {
-          return;
-        }
-
-        if (isAuthError(nextError)) {
-          handleAuthRequired();
-        } else if (isMissingNotificationError(nextError)) {
-          await loadNotifications("refresh");
-        } else {
-          setAuthRequired(false);
-          setError(getNotificationActionRequestMessage(nextError, "操作失败"));
-        }
-      } finally {
-        if (requestId === actionRequestIdRef.current) {
-          applyActingKey(null);
-        }
-      }
-    },
-    [applyActingKey, handleAuthRequired, loadNotifications]
+  const {
+    unreadCount,
+    readCount
+  } = useMemo(() => getNotificationCounts(list), [list]);
+  const typeOptions = useMemo(() => getNotificationTypeOptions(list), [list]);
+  const hasActiveFilters = useMemo(
+    () => hasActiveNotificationFilters(readFilter, typeFilter, keyword),
+    [keyword, readFilter, typeFilter]
+  );
+  const filteredList = useMemo(
+    () => filterNotifications(list, readFilter, typeFilter, keyword),
+    [keyword, list, readFilter, typeFilter]
   );
 
-  const markAllRead = useCallback(async () => {
-    const unreadIds = list.filter((item) => !item.readAt).map((item) => item.id);
-    if (!unreadIds.length || actingKeyRef.current) {
-      return;
-    }
-
-    const requestId = actionRequestIdRef.current + 1;
-    const activeLoadRequestId = loadRequestIdRef.current;
-    actionRequestIdRef.current = requestId;
-    applyActingKey("all");
-    setError(null);
-
-    try {
-      const results = await Promise.allSettled(
-        unreadIds.map((id) =>
-          requestJson<NotificationMutationResponse>("/api/notifications", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id })
-          })
-        )
-      );
-
-      if (requestId !== actionRequestIdRef.current || activeLoadRequestId !== loadRequestIdRef.current) {
-        return;
-      }
-
-      const rejectedResults = results.filter((item): item is PromiseRejectedResult => item.status === "rejected");
-      if (rejectedResults.length) {
-        const authRejected = rejectedResults.find((item) => isAuthError(item.reason));
-        if (authRejected) {
-          handleAuthRequired();
-          return;
-        }
-
-        const refreshStatus = await loadNotifications("refresh");
-        if (refreshStatus === "auth" || refreshStatus === "stale") {
-          return;
-        }
-
-        const firstRejected = rejectedResults[0]?.reason;
-        if (refreshStatus !== "error" && firstRejected && !isMissingNotificationError(firstRejected)) {
-          setError(getNotificationActionRequestMessage(firstRejected, "部分通知标记失败，请稍后再试"));
-        }
-        return;
-      }
-
-      const readAt = new Date().toISOString();
-      hasNotificationsSnapshotRef.current = true;
-      setAuthRequired(false);
-      setList((prev) => prev.map((item) => (item.readAt ? item : { ...item, readAt })));
-      setLastLoadedAt(readAt);
-    } catch (nextError) {
-      if (requestId !== actionRequestIdRef.current || activeLoadRequestId !== loadRequestIdRef.current) {
-        return;
-      }
-
-      if (isAuthError(nextError)) {
-        handleAuthRequired();
-      } else {
-        setAuthRequired(false);
-        setError(getNotificationActionRequestMessage(nextError, "批量操作失败"));
-      }
-    } finally {
-      if (requestId === actionRequestIdRef.current) {
-        applyActingKey(null);
-      }
-    }
-  }, [applyActingKey, handleAuthRequired, list, loadNotifications]);
+  const {
+    markRead,
+    markAllRead
+  } = useNotificationsActions({
+    list,
+    loadRequestIdRef,
+    actionRequestIdRef,
+    hasNotificationsSnapshotRef,
+    actingKeyRef,
+    applyActingKey,
+    handleAuthRequired,
+    loadNotifications: () => loadNotifications("refresh"),
+    setList,
+    setError,
+    setAuthRequired,
+    setLastLoadedAt
+  });
 
   const clearFilters = useCallback(() => {
     setReadFilter("all");
@@ -285,10 +118,6 @@ export function useNotificationsPage() {
     typeFilterRef.current = value;
     setTypeFilter(value);
   }, []);
-
-  const refreshNotifications = useCallback(async () => {
-    await loadNotifications("refresh");
-  }, [loadNotifications]);
 
   return {
     list,

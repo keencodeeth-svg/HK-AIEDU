@@ -1,166 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import Card from "@/components/Card";
-import { trackEvent } from "@/lib/analytics-client";
-import {
-  getRequestErrorMessage,
-  getRequestErrorPayload,
-  getRequestStatus,
-  requestJson
-} from "@/lib/client-request";
-
-type LoginRole = "student" | "teacher" | "parent" | "admin" | "school_admin";
-
-type LoginErrorPayload = {
-  error?: string;
-  details?: {
-    remainingAttempts?: number;
-    failedCount?: number;
-    maxFailedAttempts?: number;
-    lockUntil?: string | null;
-  };
-  role?: LoginRole;
-};
-
-type LoginSuccessPayload = {
-  role?: LoginRole;
-  name?: string;
-  message?: string;
-};
-
-function formatLockUntil(lockUntil?: string | null) {
-  if (!lockUntil) return "";
-  const value = new Date(lockUntil);
-  if (Number.isNaN(value.getTime())) return lockUntil;
-  return value.toLocaleString("zh-CN", {
-    hour12: false,
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-}
-
-function resolveLoginErrorMessage(payload: LoginErrorPayload, status: number) {
-  const lockUntil = formatLockUntil(payload.details?.lockUntil);
-  if (status === 429) {
-    return lockUntil
-      ? `登录失败次数过多，账号已临时锁定至 ${lockUntil}。`
-      : "登录失败次数过多，账号已临时锁定，请稍后再试。";
-  }
-
-  const remainingAttempts = payload.details?.remainingAttempts;
-  if (typeof remainingAttempts === "number") {
-    if (remainingAttempts <= 1) {
-      return "邮箱或密码错误，再错 1 次账号将被临时锁定。";
-    }
-    return `邮箱或密码错误，还可再尝试 ${remainingAttempts} 次。`;
-  }
-
-  return payload.error ?? "登录失败";
-}
+import { loginPlaceholderMap, loginRoleOptions, useLoginPage } from "./useLoginPage";
 
 export default function LoginPage() {
-  const searchParams = useSearchParams();
-  const [role, setRole] = useState<LoginRole>("student");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const roleOptions = [
-    { value: "student" as const, label: "学生", desc: "学习/练习/作业" },
-    { value: "teacher" as const, label: "教师", desc: "作业发布/批改/分析" },
-    { value: "parent" as const, label: "家长", desc: "周报/监督/提醒" },
-    { value: "admin" as const, label: "管理员", desc: "题库/知识点/日志" },
-    { value: "school_admin" as const, label: "学校管理员", desc: "学校组织/教师/班级" }
-  ];
-
-  const placeholderMap: Record<LoginRole, string> = {
-    student: "student@demo.com",
-    teacher: "teacher@demo.com",
-    parent: "parent@demo.com",
-    admin: "admin@demo.com",
-    school_admin: "school-admin@demo.com"
-  };
-
-  useEffect(() => {
-    trackEvent({
-      eventName: "login_page_view",
-      page: "/login",
-      props: { entry: searchParams.get("entry") ?? "direct", preselectedRole: searchParams.get("role") ?? null }
-    });
-  }, [searchParams]);
-
-  useEffect(() => {
-    const nextRole = searchParams.get("role");
-    if (
-      nextRole === "student" ||
-      nextRole === "teacher" ||
-      nextRole === "parent" ||
-      nextRole === "admin" ||
-      nextRole === "school_admin"
-    ) {
-      setRole(nextRole);
-    }
-  }, [searchParams]);
-
-  async function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      const normalizedEmail = email.trim();
-      const payload = await requestJson<LoginSuccessPayload>("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail, password, role })
-      });
-
-      trackEvent({
-        eventName: "login_success",
-        page: "/login",
-        entityId: payload.role ?? role,
-        props: {
-          selectedRole: role,
-          actualRole: payload.role ?? role
-        }
-      });
-
-      const target =
-        payload.role === "admin"
-          ? "/admin"
-          : payload.role === "teacher"
-            ? "/teacher"
-            : payload.role === "parent"
-              ? "/parent"
-              : payload.role === "school_admin"
-                ? "/school"
-                : "/student";
-      window.location.assign(target);
-    } catch (err) {
-      const payload = getRequestErrorPayload<LoginErrorPayload>(err);
-      const status = getRequestStatus(err) ?? 0;
-      trackEvent({
-        eventName: "login_failed",
-        page: "/login",
-        entityId: role,
-        props: {
-          selectedRole: role,
-          status,
-          error: payload?.error ?? getRequestErrorMessage(err, "登录失败"),
-          remainingAttempts: payload?.details?.remainingAttempts ?? null,
-          lockUntil: payload?.details?.lockUntil ?? null
-        }
-      });
-      setError(resolveLoginErrorMessage(payload ?? {}, status));
-    } finally {
-      setLoading(false);
-    }
-  }
+  const loginPage = useLoginPage();
 
   return (
     <div className="grid auth-page" style={{ gap: 18, maxWidth: 520 }}>
@@ -172,16 +17,16 @@ export default function LoginPage() {
         <span className="chip">账号中心</span>
       </div>
       <Card title="登录" tag="入口">
-        <form onSubmit={handleSubmit} className="auth-form">
+        <form onSubmit={loginPage.handleSubmit} className="auth-form">
           <div>
             <div className="section-title">选择身份</div>
             <div className="role-grid">
-              {roleOptions.map((option) => (
+              {loginRoleOptions.map((option) => (
                 <button
                   key={option.value}
                   type="button"
-                  className={`role-card${role === option.value ? " active" : ""}`}
-                  onClick={() => setRole(option.value)}
+                  className={`role-card${loginPage.role === option.value ? " active" : ""}`}
+                  onClick={() => loginPage.setField("role", option.value)}
                 >
                   <div className="role-title">{option.label}</div>
                   <div className="role-desc">{option.desc}</div>
@@ -197,9 +42,9 @@ export default function LoginPage() {
               inputMode="email"
               autoComplete="username"
               autoCapitalize="none"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder={placeholderMap[role]}
+              value={loginPage.email}
+              onChange={(event) => loginPage.setField("email", event.target.value)}
+              placeholder={loginPlaceholderMap[loginPage.role]}
               required
             />
           </label>
@@ -209,15 +54,15 @@ export default function LoginPage() {
               className="form-control"
               type="password"
               autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              value={loginPage.password}
+              onChange={(event) => loginPage.setField("password", event.target.value)}
               placeholder="Student123"
               required
             />
           </label>
-          {error ? <div className="status-note error">{error}</div> : null}
-          <button className="button primary" type="submit" disabled={loading}>
-            {loading ? "登录中..." : "登录"}
+          {loginPage.error ? <div className="status-note error">{loginPage.error}</div> : null}
+          <button className="button primary" type="submit" disabled={loginPage.loading}>
+            {loginPage.loading ? "登录中..." : "登录"}
           </button>
         </form>
         <div className="auth-footnote">
@@ -235,7 +80,7 @@ export default function LoginPage() {
         </div>
         <div className="auth-links">
           <div>
-            没有账号？<Link href={`/register?role=${role}&entry=login`}>去注册</Link>
+            没有账号？<Link href={`/register?role=${loginPage.role}&entry=login`}>去注册</Link>
           </div>
           <div>
             教师注册：<Link href="/teacher/register">去注册</Link>

@@ -1,5 +1,5 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
-import type { AnnouncementClassOption } from "./types";
+import type { AnnouncementClassOption, AnnouncementLoadStatus, AppUserRole } from "./types";
 
 function getAnnouncementsRequestMessage(error: unknown) {
   return getRequestErrorMessage(error, "").trim().toLowerCase();
@@ -61,4 +61,30 @@ export function resolveAnnouncementClassId(classes: AnnouncementClassOption[], c
     return classId;
   }
   return classes[0]?.id ?? "";
+}
+
+export function getAnnouncementsNoStoreRequestInit(): RequestInit {
+  return { cache: "no-store" };
+}
+
+export function buildAnnouncementSubmitPayload(classId: string, title: string, content: string) {
+  return { classId, title, content };
+}
+
+export function getAnnouncementSubmitSuccessMessage(loadStatus: AnnouncementLoadStatus) {
+  if (loadStatus === "loaded") {
+    return "公告已发布。";
+  }
+  if (loadStatus === "stale") {
+    return "公告已发布，系统正在同步最新公告。";
+  }
+  return "公告已发布，但公告列表刷新失败，请稍后重试。";
+}
+
+export function hasAnnouncementsPageData(
+  announcementsCount: number,
+  userRole: AppUserRole,
+  classesCount: number
+) {
+  return Boolean(announcementsCount || userRole === "teacher" || classesCount);
 }

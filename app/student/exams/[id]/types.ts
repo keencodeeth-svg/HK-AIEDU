@@ -125,3 +125,10 @@ export type LocalDraft = {
   updatedAt: string;
   clientStartedAt?: string;
 };
+
+export type StudentExamStageCopy = {
+  title: string;
+  description: string;
+};
+
+export type StudentExamSubmitTrigger = "manual" | "timeout";

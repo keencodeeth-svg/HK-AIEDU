@@ -1,3 +1,5 @@
+export type TeacherJoinMode = "approval" | "auto";
+
 export type ClassItem = {
   id: string;
   name: string;
@@ -6,7 +8,7 @@ export type ClassItem = {
   studentCount: number;
   assignmentCount: number;
   joinCode?: string;
-  joinMode?: "approval" | "auto";
+  joinMode?: TeacherJoinMode;
 };
 
 export type AssignmentItem = {
@@ -195,4 +197,13 @@ export type AssignmentFormState = {
   submissionType: "quiz" | "upload" | "essay";
   maxUploads: number;
   gradingFocus: string;
+};
+
+export type TeacherDashboardDerivedState = {
+  filteredPoints: KnowledgePoint[];
+  pendingJoinCount: number;
+  activeAlertCount: number;
+  classesMissingAssignmentsCount: number;
+  dueSoonAssignmentCount: number;
+  hasDashboardData: boolean;
 };

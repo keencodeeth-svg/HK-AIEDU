@@ -1,5 +1,13 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
-import type { AnalysisAlertKind, AnalysisActionType } from "./types";
+import type {
+  AnalysisAlertImpactData,
+  AnalysisAlertItem,
+  AnalysisAlertKind,
+  AnalysisActionType,
+  AnalysisClassItem,
+  AnalysisHeatItem,
+  AnalysisReportData
+} from "./types";
 
 export const ACTION_TYPE_LABEL: Record<AnalysisActionType, string> = {
   assign_review: "布置修复",
@@ -90,4 +98,88 @@ export function isMissingTeacherAnalysisAlertError(error: unknown) {
   const status = getRequestStatus(error) ?? 0;
   const requestMessage = getRequestErrorMessage(error, "").trim().toLowerCase();
   return requestMessage === "invalid alert id" || (status === 404 && requestMessage === "not found");
+}
+
+export function resolveTeacherAnalysisClassId(
+  currentClassId: string,
+  classes: Array<{ id: string }>
+) {
+  if (currentClassId && classes.some((item) => item.id === currentClassId)) {
+    return currentClassId;
+  }
+  return classes[0]?.id ?? "";
+}
+
+export function resolveTeacherAnalysisStudentId(
+  currentStudentId: string,
+  students: Array<{ id: string }>,
+  preferredStudentId?: string
+) {
+  if (preferredStudentId && students.some((item) => item.id === preferredStudentId)) {
+    return preferredStudentId;
+  }
+  if (currentStudentId && students.some((item) => item.id === currentStudentId)) {
+    return currentStudentId;
+  }
+  return students[0]?.id ?? "";
+}
+
+export function removeTeacherAnalysisClassSnapshot<T extends { id: string }>(
+  previousClasses: T[],
+  missingClassId: string
+) {
+  const classes = previousClasses.filter((item) => item.id !== missingClassId);
+  return {
+    classes,
+    classId: resolveTeacherAnalysisClassId("", classes)
+  };
+}
+
+export function removeTeacherAnalysisAlertImpact(
+  previousImpactByAlertId: Record<string, AnalysisAlertImpactData>,
+  alertId: string
+) {
+  if (!previousImpactByAlertId[alertId]) {
+    return previousImpactByAlertId;
+  }
+
+  const nextImpactByAlertId = { ...previousImpactByAlertId };
+  delete nextImpactByAlertId[alertId];
+  return nextImpactByAlertId;
+}
+
+export function getTeacherAnalysisPageDerivedState({
+  alerts,
+  classId,
+  classes,
+  heatmap,
+  heatmapLoading,
+  report,
+  reportLoading
+}: {
+  alerts: AnalysisAlertItem[];
+  classId: string;
+  classes: AnalysisClassItem[];
+  heatmap: AnalysisHeatItem[];
+  heatmapLoading: boolean;
+  report: AnalysisReportData | null;
+  reportLoading: boolean;
+}) {
+  const visibleHeatmap = heatmap.slice(0, 40);
+  const weakestKnowledgePoint =
+    [...visibleHeatmap].sort((left, right) => {
+      if (left.ratio !== right.ratio) {
+        return left.ratio - right.ratio;
+      }
+      return right.total - left.total;
+    })[0] ?? null;
+
+  return {
+    heatmap: visibleHeatmap,
+    showHeatmapSkeleton: heatmapLoading && visibleHeatmap.length === 0,
+    showReportSkeleton: reportLoading && !report,
+    selectedClass: classes.find((item) => item.id === classId) ?? null,
+    activeAlertCount: alerts.filter((item) => item.status === "active").length,
+    weakestKnowledgePoint
+  };
 }

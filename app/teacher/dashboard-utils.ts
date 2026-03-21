@@ -1,4 +1,202 @@
+import type { CourseModule } from "@/lib/modules";
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
+import type {
+  AlertImpactData,
+  AssignmentFormState,
+  AssignmentItem,
+  ClassFormState,
+  ClassItem,
+  KnowledgePoint,
+  TeacherDashboardDerivedState,
+  TeacherInsightsData,
+  TeacherJoinMode,
+  TeacherJoinRequest
+} from "./types";
+
+const TEACHER_DASHBOARD_DEFAULT_DUE_DAYS = 7;
+
+type CreatedAssignment = Partial<AssignmentItem> & { moduleTitle?: string };
+
+export function buildTeacherDashboardDefaultDueDate(now = Date.now()) {
+  return new Date(now + TEACHER_DASHBOARD_DEFAULT_DUE_DAYS * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+export function prependTeacherDashboardClass(
+  previousClasses: ClassItem[],
+  createdClass: Partial<ClassItem>,
+  classForm: ClassFormState
+) {
+  if (!createdClass.id) {
+    return previousClasses;
+  }
+
+  return [
+    {
+      id: createdClass.id,
+      name: createdClass.name ?? classForm.name,
+      subject: createdClass.subject ?? classForm.subject,
+      grade: createdClass.grade ?? classForm.grade,
+      studentCount: 0,
+      assignmentCount: 0,
+      joinCode: createdClass.joinCode,
+      joinMode: createdClass.joinMode ?? "approval"
+    },
+    ...previousClasses.filter((item) => item.id !== createdClass.id)
+  ];
+}
+
+export function incrementTeacherDashboardStudentCount(
+  previousClasses: ClassItem[],
+  classId: string
+) {
+  return previousClasses.map((item) =>
+    item.id === classId
+      ? { ...item, studentCount: item.studentCount + 1 }
+      : item
+  );
+}
+
+export function prependTeacherDashboardAssignment(
+  previousAssignments: AssignmentItem[],
+  createdAssignment: CreatedAssignment,
+  targetClass: ClassItem,
+  assignmentForm: AssignmentFormState,
+  selectedModule?: Pick<CourseModule, "title"> | null
+) {
+  if (!createdAssignment.id) {
+    return previousAssignments;
+  }
+
+  return [
+    {
+      id: createdAssignment.id,
+      classId: createdAssignment.classId ?? targetClass.id,
+      className: targetClass.name,
+      classSubject: targetClass.subject,
+      classGrade: targetClass.grade,
+      moduleTitle:
+        createdAssignment.moduleTitle ??
+        (assignmentForm.moduleId ? selectedModule?.title ?? "" : ""),
+      title: createdAssignment.title ?? assignmentForm.title,
+      dueDate: createdAssignment.dueDate ?? assignmentForm.dueDate,
+      total: targetClass.studentCount,
+      completed: 0,
+      submissionType: createdAssignment.submissionType ?? assignmentForm.submissionType
+    },
+    ...previousAssignments.filter((item) => item.id !== createdAssignment.id)
+  ];
+}
+
+export function incrementTeacherDashboardAssignmentCount(
+  previousClasses: ClassItem[],
+  classId: string
+) {
+  return previousClasses.map((item) =>
+    item.id === classId
+      ? { ...item, assignmentCount: item.assignmentCount + 1 }
+      : item
+  );
+}
+
+export function updateTeacherDashboardClassJoinMode(
+  previousClasses: ClassItem[],
+  classId: string,
+  joinMode: TeacherJoinMode
+) {
+  return previousClasses.map((item) =>
+    item.id === classId ? { ...item, joinMode } : item
+  );
+}
+
+export function updateTeacherDashboardClassJoinCode(
+  previousClasses: ClassItem[],
+  classId: string,
+  joinCode?: string
+) {
+  return previousClasses.map((item) =>
+    item.id === classId ? { ...item, joinCode: joinCode ?? item.joinCode } : item
+  );
+}
+
+export function removeTeacherDashboardClassSnapshot(
+  previousClasses: ClassItem[],
+  classId: string
+) {
+  const classes = previousClasses.filter((item) => item.id !== classId);
+  return {
+    classes,
+    nextClassId: classes[0]?.id ?? ""
+  };
+}
+
+export function removeTeacherDashboardJoinRequest(
+  previousJoinRequests: TeacherJoinRequest[],
+  requestId: string
+) {
+  return previousJoinRequests.filter((item) => item.id !== requestId);
+}
+
+export function removeTeacherDashboardAlertImpact(
+  previousImpactByAlertId: Record<string, AlertImpactData>,
+  alertId: string
+) {
+  if (!previousImpactByAlertId[alertId]) {
+    return previousImpactByAlertId;
+  }
+
+  const nextImpactByAlertId = { ...previousImpactByAlertId };
+  delete nextImpactByAlertId[alertId];
+  return nextImpactByAlertId;
+}
+
+type TeacherDashboardDerivedStateInput = {
+  classes: ClassItem[];
+  assignments: AssignmentItem[];
+  knowledgePoints: KnowledgePoint[];
+  assignmentClassId: string;
+  insights: TeacherInsightsData | null;
+  joinRequests: TeacherJoinRequest[];
+  now?: number;
+};
+
+export function getTeacherDashboardDerivedState({
+  classes,
+  assignments,
+  knowledgePoints,
+  assignmentClassId,
+  insights,
+  joinRequests,
+  now = Date.now()
+}: TeacherDashboardDerivedStateInput): TeacherDashboardDerivedState {
+  const klass = classes.find((item) => item.id === assignmentClassId);
+
+  return {
+    filteredPoints: klass
+      ? knowledgePoints.filter(
+          (kp) => kp.subject === klass.subject && kp.grade === klass.grade
+        )
+      : [],
+    pendingJoinCount: joinRequests.filter((item) => item.status === "pending").length,
+    activeAlertCount: (insights?.alerts ?? []).filter((item) => item.status === "active").length,
+    classesMissingAssignmentsCount: classes.filter(
+      (item) => item.studentCount > 0 && item.assignmentCount === 0
+    ).length,
+    dueSoonAssignmentCount: assignments.filter((item) => {
+      if (item.completed >= item.total) {
+        return false;
+      }
+
+      return Math.ceil((new Date(item.dueDate).getTime() - now) / (60 * 60 * 1000)) <= 48;
+    }).length,
+    hasDashboardData:
+      classes.length > 0 ||
+      assignments.length > 0 ||
+      insights !== null ||
+      joinRequests.length > 0
+  };
+}
 
 export function getTeacherDashboardClassRequestMessage(error: unknown, fallback: string) {
   const status = getRequestStatus(error) ?? 0;

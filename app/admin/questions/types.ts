@@ -59,14 +59,16 @@ export type QuestionQualitySummary = {
   }>;
 };
 
+export type QuestionListMeta = {
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
 export type QuestionListPayload = {
   data?: Question[];
-  meta?: {
-    total: number;
-    page: number;
-    pageSize: number;
-    totalPages: number;
-  };
+  meta?: QuestionListMeta;
   facets?: {
     subjects?: FacetItem[];
     grades?: FacetItem[];

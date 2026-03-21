@@ -38,8 +38,15 @@ npm run test:school-schedules:production-like:local
 如果当前机器没有可用 Docker daemon，但本机已有可复用 PostgreSQL，可改用：
 
 ```bash
-PRODUCTION_LIKE_USE_EXISTING_DB=1 npm run test:smoke:production-like:local
+PRODUCTION_LIKE_USE_EXISTING_DB=1 \
+PRODUCTION_LIKE_DB_NAME=hk_aiedu_local \
+PRODUCTION_LIKE_DB_RESET=1 \
+npm run test:smoke:production-like:local
 ```
+
+说明：
+- 本地 production-like 脚本默认会创建隔离临时数据库，避免复跑时吃到上次残留状态。
+- 只有在你需要固定数据库排障时，才显式设置 `PRODUCTION_LIKE_DB_NAME`；如果不希望复用旧数据，再额外设置 `PRODUCTION_LIKE_DB_RESET=1`。
 
 环境检查：
 - 已配置 `DATABASE_URL`

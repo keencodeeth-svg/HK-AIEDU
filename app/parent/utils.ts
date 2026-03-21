@@ -1,5 +1,10 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
-import type { ParentActionItem, ReceiptSource } from "./types";
+import type {
+  CorrectionSummary,
+  CorrectionTask,
+  ParentActionItem,
+  ReceiptSource
+} from "./types";
 
 function getParentRequestMessage(error: unknown) {
   return getRequestErrorMessage(error, "").trim().toLowerCase();
@@ -138,4 +143,47 @@ export function pruneParentReceiptNotes(
   return Object.fromEntries(
     Object.entries(receiptNotes).filter(([key, value]) => allowedKeys.has(key) && value.trim().length > 0)
   );
+}
+
+export function deriveParentTaskBuckets(tasks: CorrectionTask[], now = Date.now()) {
+  const pendingTasks = tasks.filter((task) => task.status === "pending");
+  const dueSoonTasks = pendingTasks.filter((task) => {
+    const diff = new Date(task.dueDate).getTime() - now;
+    return diff >= 0 && diff <= 2 * 24 * 60 * 60 * 1000;
+  });
+  const overdueTasks = pendingTasks.filter((task) => new Date(task.dueDate).getTime() < now);
+
+  return {
+    pendingTasks,
+    dueSoonTasks,
+    overdueTasks
+  };
+}
+
+type BuildParentCorrectionsReminderTextArgs = {
+  summary: CorrectionSummary | null;
+  pendingTasks: CorrectionTask[];
+  dueSoonTasks: CorrectionTask[];
+  overdueTasks: CorrectionTask[];
+};
+
+export function buildParentCorrectionsReminderText({
+  summary,
+  pendingTasks,
+  dueSoonTasks,
+  overdueTasks
+}: BuildParentCorrectionsReminderTextArgs) {
+  return [
+    `本周订正任务：待完成 ${summary?.pending ?? pendingTasks.length} 题。`,
+    overdueTasks.length ? `已逾期 ${overdueTasks.length} 题，请尽快完成。` : "",
+    dueSoonTasks.length ? `近 2 天到期 ${dueSoonTasks.length} 题。` : "",
+    ...dueSoonTasks
+      .slice(0, 3)
+      .map(
+        (task) =>
+          `- ${task.question?.stem ?? "题目"}（截止 ${new Date(task.dueDate).toLocaleDateString("zh-CN")}）`
+      )
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

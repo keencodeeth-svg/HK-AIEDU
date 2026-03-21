@@ -1,5 +1,12 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
-import type { ClassItem, ThreadDetail, ThreadSummary } from "./types";
+import type {
+  ClassItem,
+  InboxDerivedState,
+  InboxLoadStatus,
+  ThreadDetail,
+  ThreadSummary,
+  UserSession
+} from "./types";
 
 function getInboxRequestMessage(error: unknown) {
   return getRequestErrorMessage(error, "").trim().toLowerCase();
@@ -87,6 +94,10 @@ export function isMissingInboxClassError(error: unknown) {
   return getInboxRequestMessage(error) === "class not found";
 }
 
+export function getInboxNoStoreRequestInit(): RequestInit {
+  return { cache: "no-store" };
+}
+
 export function resolveInboxClassId(classes: ClassItem[], classId: string) {
   if (classId && classes.some((item) => item.id === classId)) {
     return classId;
@@ -108,4 +119,69 @@ export function resolveInboxActiveThreadId(
 
 export function isInboxThreadDetailCurrent(threadDetail: ThreadDetail | null, threadId: string) {
   return threadDetail?.thread.id === threadId;
+}
+
+export function filterInboxThreads(threads: ThreadSummary[], keyword: string, unreadOnly: boolean) {
+  const keywordLower = keyword.trim().toLowerCase();
+  return threads.filter((thread) => {
+    if (unreadOnly && !thread.unreadCount) return false;
+    if (!keywordLower) return true;
+    return [thread.subject, thread.lastMessage?.content ?? "", ...thread.participants.map((item) => item.name)]
+      .join(" ")
+      .toLowerCase()
+      .includes(keywordLower);
+  });
+}
+
+type InboxDerivedStateInput = {
+  user: UserSession | null;
+  classes: ClassItem[];
+  classId: string;
+  threads: ThreadSummary[];
+  activeThreadId: string;
+  threadDetail: ThreadDetail | null;
+  keyword: string;
+  unreadOnly: boolean;
+  requestedThreadId: string;
+};
+
+export function getInboxDerivedState({
+  user,
+  classes,
+  classId,
+  threads,
+  activeThreadId,
+  threadDetail,
+  keyword,
+  unreadOnly,
+  requestedThreadId
+}: InboxDerivedStateInput): InboxDerivedState {
+  return {
+    activeThread: threads.find((thread) => thread.id === activeThreadId) ?? null,
+    currentClass: classes.find((item) => item.id === classId) ?? null,
+    unreadCount: threads.reduce((sum, thread) => sum + (thread.unreadCount ?? 0), 0),
+    filteredThreads: filterInboxThreads(threads, keyword, unreadOnly),
+    hasInboxData: Boolean(user || classes.length || threads.length || threadDetail),
+    requestedThreadMatched: Boolean(requestedThreadId && activeThreadId === requestedThreadId)
+  };
+}
+
+export function getInboxCreateSuccessMessage(status: InboxLoadStatus) {
+  if (status === "error") {
+    return "消息已发送，但会话列表刷新失败，请稍后重试。";
+  }
+  if (status === "stale") {
+    return "消息已发送，收件箱正在同步最新内容。";
+  }
+  return "消息已发送";
+}
+
+export function getInboxReplySuccessMessage(status: InboxLoadStatus) {
+  if (status === "error") {
+    return "回复已发送，但会话刷新失败，请稍后重试。";
+  }
+  if (status === "stale") {
+    return "回复已发送，收件箱正在同步最新内容。";
+  }
+  return "回复已发送";
 }

@@ -312,7 +312,7 @@
 
 ## 7. 快速开始
 
-### 7.1 本地启动（JSON 模式）
+### 7.1 本地启动（Local Demo / JSON 模式）
 
 ```bash
 npm install
@@ -320,6 +320,21 @@ npm run dev
 ```
 
 访问：`http://localhost:3000`
+
+说明：
+
+- `npm run dev` 默认带 `API_TEST_SCOPE=local-dev` 启动，适合无 DB 的本地 demo / JSON fallback 联调。
+- 如果你需要直接运行不带本地 demo 契约的原始 Next.js dev server，请改用：
+
+```bash
+npm run dev:strict
+```
+
+- 修改登录、注册、恢复请求、analytics 等入口后，建议执行：
+
+```bash
+npm run verify:local-dev
+```
 
 ### 7.2 本地启动（PostgreSQL 模式）
 
@@ -400,11 +415,12 @@ npm run test:smoke:production-like:local
 
 - 脚本会自动复制一份临时 `DATA_SEED_DIR`，并剔除 production guardrails 禁止的高频 JSON 运行态文件，避免仓库内遗留 seed 数据把 readiness 误报成失败
 - 脚本会自动使用临时 `DATA_DIR` 与对象存储根目录，不污染仓库内 `.runtime-data`
+- 默认会为每次本地 production-like 运行创建一个隔离临时数据库，避免复跑时复用上一次残留状态而出现假红灯
 
 默认环境：
 
 ```bash
-DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54329/hk_aiedu_local
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54329/hk_aiedu_local_<run-id>
 REQUIRE_DATABASE=true
 ALLOW_JSON_FALLBACK=false
 OBJECT_STORAGE_ROOT=.runtime-data/local-objects
@@ -420,6 +436,14 @@ LIBRARY_INLINE_FILE_CONTENT=false
 PRODUCTION_LIKE_DB_PORT=54330 npm run test:smoke:production-like:local
 ```
 
+如需固定复用某个数据库名，可显式指定；如希望每次先清空该数据库，再额外加上 `PRODUCTION_LIKE_DB_RESET=1`：
+
+```bash
+PRODUCTION_LIKE_DB_NAME=hk_aiedu_local \
+PRODUCTION_LIKE_DB_RESET=1 \
+npm run test:smoke:production-like:local
+```
+
 如果想直接复用本机已经启动的 PostgreSQL，而不是等待 Docker 首次拉镜像，可运行：
 
 ```bash
@@ -427,6 +451,8 @@ PRODUCTION_LIKE_USE_EXISTING_DB=1 \
 PRODUCTION_LIKE_DB_HOST=/tmp \
 PRODUCTION_LIKE_DB_PORT=5432 \
 PRODUCTION_LIKE_DB_USER="$USER" \
+PRODUCTION_LIKE_DB_NAME=hk_aiedu_local \
+PRODUCTION_LIKE_DB_RESET=1 \
 DATABASE_URL="postgresql:///hk_aiedu_local" \
 npm run test:smoke:production-like:local
 ```
@@ -440,6 +466,7 @@ npm run test:school-schedules:production-like:local
 ```
 
 这条命令复用同一套 `build -> db:migrate -> seed:base -> seed:stage3 -> security:migrate-passwords` 路径，但最终执行的是独立排课 API 套件，而不是只读 smoke。
+默认也会为这条深回归创建隔离临时数据库；如需保留固定数据库做排障，可显式设置 `PRODUCTION_LIKE_DB_NAME`，并按需加上 `PRODUCTION_LIKE_DB_RESET=1`。
 
 如果要在同一条 DB-only / object-storage 路径下验证浏览器关键流程，可运行：
 
@@ -472,6 +499,8 @@ npm run storage:migrate
 - `LIBRARY_INLINE_FILE_CONTENT=false` / `FILE_INLINE_CONTENT=false` 时会在迁移后清空内联 base64，仅保留对象存储引用
 
 ## 8. 演示账号
+
+以下账号默认可用于 `npm run dev` 的 local demo/dev 启动；若启用了 PostgreSQL，则以数据库种子与当前库内账号为准。
 
 - 学生：`student@demo.com / Student123`
 - 学生2：`student2@demo.com / Student123`

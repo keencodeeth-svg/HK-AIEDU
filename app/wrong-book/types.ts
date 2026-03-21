@@ -76,3 +76,35 @@ export type CreateCorrectionSkippedItem = {
   questionId: string;
   reason: string;
 };
+
+export type WrongBookResponse = {
+  data?: WrongBookItem[];
+};
+
+export type CorrectionsResponse = {
+  data?: CorrectionTask[];
+  summary?: Summary | null;
+};
+
+export type ReviewQueueResponse = {
+  data?: ReviewQueueData | null;
+};
+
+export type CreateCorrectionResponse = {
+  created?: CorrectionTask[];
+  skipped?: CreateCorrectionSkippedItem[];
+};
+
+export type CorrectionMutationResponse = {
+  data?: CorrectionTask;
+};
+
+export type ReviewResultResponse = {
+  correct?: boolean;
+  nextReviewAt?: string | null;
+  review?: {
+    intervalLabel?: string | null;
+  } | null;
+};
+
+export type WrongBookLoadStatus = "loaded" | "partial" | "auth" | "stale" | "error";

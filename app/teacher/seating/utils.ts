@@ -1,9 +1,25 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
-import { buildSeatPairs, getAssignedStudentIds, getFrontRowCount } from "@/lib/seat-plan-utils";
+import {
+  buildSeatPairs,
+  getAssignedStudentIds,
+  getFrontRowCount,
+  getUnassignedStudentIds,
+  resizeSeatGrid,
+  swapSeatAssignment,
+  type SeatCell
+} from "@/lib/seat-plan-utils";
 import {
   STUDENT_GENDER_LABELS
 } from "@/lib/student-persona-options";
-import type { AiOptions, PlanSummary, SeatPlan, TeacherSeatingStudent } from "./types";
+import type {
+  AiOptions,
+  AiPreviewResponse,
+  PlanSummary,
+  SeatPlan,
+  TeacherClassItem,
+  TeacherSeatingDerivedState,
+  TeacherSeatingStudent
+} from "./types";
 
 export const DEFAULT_AI_OPTIONS: AiOptions = {
   balanceGender: true,
@@ -193,4 +209,229 @@ export function buildFollowUpChecklist(params: {
   }
 
   return lines.join("\n");
+}
+
+export function resolveTeacherSeatingClassId(
+  currentClassId: string,
+  classes: Array<{ id: string }>
+) {
+  if (currentClassId && classes.some((item) => item.id === currentClassId)) {
+    return currentClassId;
+  }
+  return classes[0]?.id ?? "";
+}
+
+export function removeTeacherSeatingClassSnapshot<T extends { id: string }>(
+  previousClasses: T[],
+  missingClassId: string
+) {
+  const classes = previousClasses.filter((item) => item.id !== missingClassId);
+  return {
+    classes,
+    classId: resolveTeacherSeatingClassId("", classes)
+  };
+}
+
+export function pruneTeacherSeatingLockedSeatIds(
+  lockedSeatIds: string[],
+  plan: Pick<SeatPlan, "seats"> | null
+) {
+  if (!plan) {
+    return [];
+  }
+
+  const validSeatIds = new Set(
+    plan.seats.filter((seat) => Boolean(seat.studentId)).map((seat) => seat.seatId)
+  );
+  return lockedSeatIds.filter((seatId) => validSeatIds.has(seatId));
+}
+
+export function toggleTeacherSeatingLockedSeatIds(
+  lockedSeatIds: string[],
+  seatId: string
+) {
+  return lockedSeatIds.includes(seatId)
+    ? lockedSeatIds.filter((item) => item !== seatId)
+    : [...lockedSeatIds, seatId];
+}
+
+export function updateTeacherSeatingPlanLayout(
+  plan: SeatPlan | null,
+  rows: number,
+  columns: number,
+  updatedAt = new Date().toISOString()
+) {
+  if (!plan) {
+    return plan;
+  }
+
+  return {
+    ...plan,
+    rows,
+    columns,
+    seats: resizeSeatGrid(plan.seats, rows, columns),
+    updatedAt
+  };
+}
+
+export function updateTeacherSeatingSeatAssignment(
+  plan: SeatPlan | null,
+  seatId: string,
+  nextStudentId?: string,
+  updatedAt = new Date().toISOString()
+) {
+  if (!plan) {
+    return plan;
+  }
+
+  return {
+    ...plan,
+    seats: swapSeatAssignment(plan.seats, seatId, nextStudentId),
+    generatedBy: "manual" as const,
+    updatedAt
+  };
+}
+
+type TeacherSeatingDerivedStateInput = {
+  classes: TeacherClassItem[];
+  classId: string;
+  students: TeacherSeatingStudent[];
+  draftPlan: SeatPlan | null;
+  savedPlan: SeatPlan | null;
+  preview: AiPreviewResponse["data"] | null;
+  lockedSeatIds: string[];
+};
+
+function buildTeacherSeatingLockedSeats(
+  draftPlan: SeatPlan | null,
+  lockedSeatIds: string[]
+) {
+  if (!draftPlan) {
+    return [] as Array<SeatCell & { studentId: string }>;
+  }
+
+  return draftPlan.seats.filter(
+    (seat): seat is SeatCell & { studentId: string } =>
+      Boolean(seat.studentId) && lockedSeatIds.includes(seat.seatId)
+  );
+}
+
+function buildTeacherSeatingRoster(students: TeacherSeatingStudent[]) {
+  return [...students].sort(
+    (left, right) =>
+      left.profileCompleteness - right.profileCompleteness ||
+      Number(isFrontPriorityStudent(right) || isFocusPriorityStudent(right)) -
+        Number(isFrontPriorityStudent(left) || isFocusPriorityStudent(left)) ||
+      right.placementScore - left.placementScore
+  );
+}
+
+export function getTeacherSeatingDerivedState({
+  classes,
+  classId,
+  students,
+  draftPlan,
+  savedPlan,
+  preview,
+  lockedSeatIds
+}: TeacherSeatingDerivedStateInput): TeacherSeatingDerivedState {
+  const lockedSeats = buildTeacherSeatingLockedSeats(draftPlan, lockedSeatIds);
+  const draftSummary = summarizePlan(draftPlan, students, lockedSeats.length);
+  const previewPlan = preview?.plan ?? null;
+  const previewSummary = preview?.summary ?? null;
+  const previewWarnings = preview?.warnings ?? [];
+  const previewInsights = preview?.insights ?? [];
+  const studentMap = new Map(students.map((student) => [student.id, student]));
+  const unassignedStudents = !draftPlan
+    ? students
+    : getUnassignedStudentIds(
+        draftPlan.seats,
+        students.map((student) => student.id)
+      )
+        .map((studentId) => studentMap.get(studentId))
+        .filter(Boolean) as TeacherSeatingStudent[];
+  const roster = buildTeacherSeatingRoster(students);
+  const studentsNeedingProfileReminder = roster.filter(
+    (student) => student.missingProfileFields.length > 0
+  );
+  const watchStudents = roster.filter(
+    (student) =>
+      isFrontPriorityStudent(student) ||
+      isFocusPriorityStudent(student) ||
+      student.missingProfileFields.length > 0
+  );
+  const classLabel =
+    classes.find((item) => item.id === classId)?.name ?? "当前班级";
+  const followUpChecklist = buildFollowUpChecklist({
+    classLabel,
+    studentsNeedingProfileReminder,
+    watchStudents,
+    summary: draftSummary,
+    lockedSeatCount: lockedSeats.length
+  });
+  const frontPriorityGap = Math.max(
+    0,
+    (draftSummary?.frontPriorityStudentCount ?? 0) -
+      (draftSummary?.frontPrioritySatisfiedCount ?? 0)
+  );
+  const focusPriorityGap = Math.max(
+    0,
+    (draftSummary?.focusPriorityStudentCount ?? 0) -
+      (draftSummary?.focusPrioritySatisfiedCount ?? 0)
+  );
+  const semesterReplanReasons: string[] = [];
+
+  if (!savedPlan) {
+    semesterReplanReasons.push("本学期还没有保存正式座位方案");
+  }
+  if ((draftSummary?.unassignedCount ?? 0) > 0) {
+    semesterReplanReasons.push(
+      `仍有 ${draftSummary?.unassignedCount ?? 0} 名学生未分配座位`
+    );
+  }
+  if (frontPriorityGap > 0) {
+    semesterReplanReasons.push(`${frontPriorityGap} 名前排需求学生仍需优先照顾`);
+  }
+  if (focusPriorityGap > 0) {
+    semesterReplanReasons.push(`${focusPriorityGap} 名低干扰需求学生仍需优化`);
+  }
+  if (studentsNeedingProfileReminder.length > 0) {
+    semesterReplanReasons.push(
+      `${studentsNeedingProfileReminder.length} 名学生关键画像待补`
+    );
+  }
+  if (previewPlan) {
+    semesterReplanReasons.push("当前有一份未应用的学期预览");
+  }
+
+  const semesterStatus = !savedPlan
+    ? "待初始化"
+    : semesterReplanReasons.length
+      ? "建议重排"
+      : "本学期稳定";
+
+  return {
+    lockedSeats,
+    draftSummary,
+    previewPlan,
+    previewSummary,
+    previewWarnings,
+    previewInsights,
+    studentMap,
+    unassignedStudents,
+    roster,
+    studentsNeedingProfileReminder,
+    watchStudents,
+    classLabel,
+    followUpChecklist,
+    semesterReplanReasons,
+    semesterStatus,
+    semesterStatusTone:
+      semesterStatus === "本学期稳定"
+        ? "#027a48"
+        : semesterStatus === "建议重排"
+          ? "#b54708"
+          : "#4f46e5",
+    frontRowCount: draftPlan ? getFrontRowCount(draftPlan.rows) : 1
+  };
 }

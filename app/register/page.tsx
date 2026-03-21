@@ -1,88 +1,14 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import Card from "@/components/Card";
 import PasswordPolicyHint from "@/components/auth/PasswordPolicyHint";
-import { resolveRegisterFormError } from "@/lib/auth-form-errors";
 import { GRADE_OPTIONS } from "@/lib/constants";
-import { requestJson } from "@/lib/client-request";
-import type { RegisterPayload, RegisterResponse, RegisterRole } from "./types";
+import type { RegisterRole } from "./types";
+import { useRegisterPage } from "./useRegisterPage";
 
 export default function RegisterPage() {
-  const searchParams = useSearchParams();
-  const [role, setRole] = useState<RegisterRole>("student");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [grade, setGrade] = useState("4");
-  const [schoolCode, setSchoolCode] = useState("");
-  const [observerCode, setObserverCode] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const nextRole = searchParams.get("role");
-    if (nextRole === "student" || nextRole === "parent") {
-      setRole(nextRole);
-    }
-  }, [searchParams]);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLoading(true);
-    setError(null);
-    setMessage(null);
-
-    const normalizedName = name.trim();
-    const normalizedEmail = email.trim();
-    const payload: RegisterPayload =
-      role === "student"
-        ? {
-            role,
-            name: normalizedName,
-            email: normalizedEmail,
-            password,
-            grade,
-            schoolCode: schoolCode.trim() || undefined
-          }
-        : {
-            role,
-            name: normalizedName,
-            email: normalizedEmail,
-            password,
-            observerCode: observerCode.trim()
-          };
-
-    try {
-      const data = await requestJson<RegisterResponse>("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      setMessage(data.message ?? "注册成功，请登录。");
-      setName("");
-      setEmail("");
-      setPassword("");
-      setSchoolCode("");
-      setObserverCode("");
-    } catch (nextError) {
-      setError(
-        resolveRegisterFormError(nextError, {
-          fallback: "注册失败",
-          emailExistsMessage: "该邮箱已注册，可直接登录或前往账号恢复。",
-          invalidSchoolCodeMessage: "学校编码无效，请核对后重试；不填则会归入默认学校。",
-          observerCodeRequiredMessage: "家长注册必须填写学生资料页中的绑定码。",
-          observerCodeInvalidMessage: "绑定码无效，请回到学生资料页重新获取后再试。",
-          gradeRequiredMessage: "请选择学生年级。"
-        })
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
+  const registerPage = useRegisterPage();
 
   return (
     <div className="grid auth-page" style={{ gap: 18 }}>
@@ -94,10 +20,14 @@ export default function RegisterPage() {
         <span className="chip">学生/家长</span>
       </div>
       <Card title="注册" tag="账户">
-        <form onSubmit={handleSubmit} className="auth-form">
+        <form onSubmit={registerPage.handleSubmit} className="auth-form">
           <label className="form-field">
             <div className="section-title">角色</div>
-            <select className="form-control" value={role} onChange={(event) => setRole(event.target.value as RegisterRole)}>
+            <select
+              className="form-control"
+              value={registerPage.role}
+              onChange={(event) => registerPage.setField("role", event.target.value as RegisterRole)}
+            >
               <option value="student">学生</option>
               <option value="parent">家长</option>
             </select>
@@ -105,22 +35,39 @@ export default function RegisterPage() {
           </label>
           <label className="form-field">
             <div className="section-title">姓名</div>
-            <input className="form-control" value={name} onChange={(event) => setName(event.target.value)} />
+            <input
+              className="form-control"
+              value={registerPage.name}
+              onChange={(event) => registerPage.setField("name", event.target.value)}
+            />
           </label>
           <label className="form-field">
             <div className="section-title">邮箱</div>
-            <input className="form-control" value={email} onChange={(event) => setEmail(event.target.value)} />
+            <input
+              className="form-control"
+              value={registerPage.email}
+              onChange={(event) => registerPage.setField("email", event.target.value)}
+            />
           </label>
           <label className="form-field">
             <div className="section-title">密码</div>
-            <input className="form-control" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+            <input
+              className="form-control"
+              type="password"
+              value={registerPage.password}
+              onChange={(event) => registerPage.setField("password", event.target.value)}
+            />
             <PasswordPolicyHint />
           </label>
-          {role === "student" ? (
+          {registerPage.role === "student" ? (
             <>
               <label className="form-field">
                 <div className="section-title">年级</div>
-                <select className="form-control" value={grade} onChange={(event) => setGrade(event.target.value)}>
+                <select
+                  className="form-control"
+                  value={registerPage.grade}
+                  onChange={(event) => registerPage.setField("grade", event.target.value)}
+                >
                   {GRADE_OPTIONS.map((item) => (
                     <option key={item.value} value={item.value}>
                       {item.label}
@@ -132,8 +79,8 @@ export default function RegisterPage() {
                 <div className="section-title">学校编码（可选）</div>
                 <input
                   className="form-control"
-                  value={schoolCode}
-                  onChange={(event) => setSchoolCode(event.target.value)}
+                  value={registerPage.schoolCode}
+                  onChange={(event) => registerPage.setField("schoolCode", event.target.value)}
                   placeholder="例如 HKHS01，不填则归入默认学校"
                 />
               </label>
@@ -144,8 +91,8 @@ export default function RegisterPage() {
                 <div className="section-title">绑定码</div>
                 <input
                   className="form-control"
-                  value={observerCode}
-                  onChange={(event) => setObserverCode(event.target.value)}
+                  value={registerPage.observerCode}
+                  onChange={(event) => registerPage.setField("observerCode", event.target.value)}
                   placeholder="学生资料页获取绑定码"
                 />
                 <div className="form-note">家长注册必须使用学生资料页中的绑定码，避免仅凭邮箱误绑他人账号。</div>
@@ -153,15 +100,15 @@ export default function RegisterPage() {
             </>
           )}
 
-          {error ? <div className="status-note error">{error}</div> : null}
-          {message ? <div className="status-note success">{message}</div> : null}
+          {registerPage.error ? <div className="status-note error">{registerPage.error}</div> : null}
+          {registerPage.message ? <div className="status-note success">{registerPage.message}</div> : null}
 
-          <button className="button primary" type="submit" disabled={loading}>
-            {loading ? "提交中..." : "注册"}
+          <button className="button primary" type="submit" disabled={registerPage.loading}>
+            {registerPage.loading ? "提交中..." : "注册"}
           </button>
         </form>
         <div className="section-sub" style={{ marginTop: 12 }}>
-          已有账号？<Link href={`/login?role=${role}&entry=register`}>去登录</Link>
+          已有账号？<Link href={`/login?role=${registerPage.role}&entry=register`}>去登录</Link>
         </div>
       </Card>
     </div>

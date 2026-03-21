@@ -79,5 +79,50 @@ export type ExplainPack = {
     riskLevel: "low" | "medium" | "high";
     matchRatio: number;
     reason: string[];
-  }>;
+    }>;
 };
+
+export type KnowledgePointListResponse = {
+  data?: KnowledgePoint[];
+};
+
+export type PracticeQuestionResponse = {
+  question?: Question | null;
+};
+
+export type PracticeSubmitResponse = {
+  correct: boolean;
+  explanation: string;
+  answer: string;
+  masteryScore?: number;
+  masteryDelta?: number;
+  weaknessRank?: number | null;
+  mastery?: {
+    confidenceScore?: number;
+    recencyWeight?: number;
+    masteryTrend7d?: number;
+    weaknessRank?: number | null;
+  };
+};
+
+export type ExplainPackResponse = {
+  data?: ExplainPack | null;
+};
+
+export type FavoriteResponse = {
+  data?: {
+    tags?: string[];
+  } | null;
+};
+
+export type VariantResponse = {
+  data?: {
+    explanation?: {
+      analysis?: string;
+      hints?: string[];
+    };
+    variants?: VariantPack["variants"];
+  };
+};
+
+export type PracticeRequestStatus = "auth" | "error" | "ok" | "stale";

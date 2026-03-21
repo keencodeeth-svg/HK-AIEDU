@@ -2,6 +2,7 @@ import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
 import type {
   ReportProfileData,
   ReportProfileKnowledgeItem,
+  ReportProfileResponse,
   ReportProfileSubjectGroup,
   ReportSortMode
 } from "./types";
@@ -90,4 +91,24 @@ export function getVisibleKnowledgeItems(
     }
     return left.ratio - right.ratio;
   });
+}
+
+export function getReportPageDerivedState(options: {
+  profile: ReportProfileResponse | null;
+  subjectFilter: string;
+  chapterFilter: string;
+}) {
+  const profileData = options.profile && !isErrorResponse(options.profile) ? options.profile : null;
+  const resolvedSubjectFilter = resolveReportSubjectFilter(profileData, options.subjectFilter);
+  const displaySubjects = getDisplaySubjectGroups(profileData, resolvedSubjectFilter);
+  const chapterOptions = getChapterOptions(displaySubjects);
+  const resolvedChapterFilter = resolveReportChapterFilter(displaySubjects, options.chapterFilter);
+
+  return {
+    profileData,
+    displaySubjects,
+    chapterOptions,
+    resolvedSubjectFilter,
+    resolvedChapterFilter
+  };
 }

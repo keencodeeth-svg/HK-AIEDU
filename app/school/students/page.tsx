@@ -1,15 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import Card from "@/components/Card";
 import StatePanel from "@/components/StatePanel";
 import Stat from "@/components/Stat";
-import { formatLoadedTime, requestJson } from "@/lib/client-request";
-import type { SchoolUserRecord } from "@/lib/school-admin-types";
-import { getSchoolAdminRequestMessage, isSchoolAdminAuthRequiredError } from "../utils";
-
-type SchoolUsersResponse = { data?: SchoolUserRecord[] };
+import { formatLoadedTime } from "@/lib/client-request";
+import { useSchoolStudentsPage } from "./useSchoolStudentsPage";
 
 const fieldStyle = {
   width: "100%",
@@ -21,83 +17,13 @@ const fieldStyle = {
 } as const;
 
 export default function SchoolStudentsPage() {
-  const [students, setStudents] = useState<SchoolUserRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [authRequired, setAuthRequired] = useState(false);
-  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
-  const [keyword, setKeyword] = useState("");
-  const [gradeFilter, setGradeFilter] = useState("all");
+  const studentsPage = useSchoolStudentsPage();
 
-  const loadStudents = useCallback(async (mode: "initial" | "refresh" = "initial") => {
-    if (mode === "refresh") {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-    setError(null);
-
-    try {
-      const payload = await requestJson<SchoolUsersResponse>("/api/school/users?role=student");
-      setStudents(payload.data ?? []);
-      setAuthRequired(false);
-      setLastLoadedAt(new Date().toISOString());
-    } catch (nextError) {
-      if (isSchoolAdminAuthRequiredError(nextError)) {
-        setAuthRequired(true);
-        setStudents([]);
-      } else {
-        setError(getSchoolAdminRequestMessage(nextError, "加载学生管理失败"));
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadStudents();
-  }, [loadStudents]);
-
-  const gradeOptions = useMemo(
-    () => Array.from(new Set(students.map((item) => item.grade).filter(Boolean) as string[])).sort((left, right) => left.localeCompare(right, "zh-CN")),
-    [students]
-  );
-
-  const stageSummary = useMemo(() => {
-    return students.reduce(
-      (acc, item) => {
-        const grade = Number(item.grade ?? 0);
-        if (!item.grade || Number.isNaN(grade)) {
-          acc.missing += 1;
-        } else if (grade <= 6) {
-          acc.primary += 1;
-        } else if (grade <= 9) {
-          acc.middle += 1;
-        } else {
-          acc.high += 1;
-        }
-        return acc;
-      },
-      { primary: 0, middle: 0, high: 0, missing: 0 }
-    );
-  }, [students]);
-
-  const filteredStudents = useMemo(() => {
-    const keywordLower = keyword.trim().toLowerCase();
-    return students.filter((student) => {
-      if (gradeFilter !== "all" && student.grade !== gradeFilter) return false;
-      if (!keywordLower) return true;
-      return [student.name, student.email, student.grade ?? "未设置年级"].join(" ").toLowerCase().includes(keywordLower);
-    });
-  }, [gradeFilter, keyword, students]);
-
-  if (loading && !students.length && !authRequired) {
+  if (studentsPage.loading && !studentsPage.students.length && !studentsPage.authRequired) {
     return <StatePanel title="学生管理加载中" description="正在汇总学生账号与年级分布。" tone="loading" />;
   }
 
-  if (authRequired) {
+  if (studentsPage.authRequired) {
     return (
       <StatePanel
         title="需要学校管理员权限"
@@ -112,14 +38,14 @@ export default function SchoolStudentsPage() {
     );
   }
 
-  if (error && !students.length) {
+  if (studentsPage.error && !studentsPage.students.length) {
     return (
       <StatePanel
         title="学生管理加载失败"
-        description={error}
+        description={studentsPage.error}
         tone="error"
         action={
-          <button className="button secondary" type="button" onClick={() => void loadStudents()}>
+          <button className="button secondary" type="button" onClick={() => void studentsPage.loadStudents()}>
             重试
           </button>
         }
@@ -135,24 +61,33 @@ export default function SchoolStudentsPage() {
           <div className="section-sub">按学校视角管理学生账号、年级分布和基础资料完整度。</div>
         </div>
         <div className="cta-row no-margin" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(lastLoadedAt)}</span> : null}
+          {studentsPage.lastLoadedAt ? <span className="chip">更新于 {formatLoadedTime(studentsPage.lastLoadedAt)}</span> : null}
           <span className="chip">Students</span>
-          <button className="button secondary" type="button" onClick={() => void loadStudents("refresh")} disabled={loading || refreshing}>
-            {refreshing ? "刷新中..." : "刷新"}
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() => void studentsPage.loadStudents("refresh")}
+            disabled={studentsPage.loading || studentsPage.refreshing}
+          >
+            {studentsPage.refreshing ? "刷新中..." : "刷新"}
           </button>
         </div>
       </div>
 
-      {error ? <StatePanel title="刷新存在异常" description={error} tone="error" compact /> : null}
+      {studentsPage.error ? <StatePanel title="刷新存在异常" description={studentsPage.error} tone="error" compact /> : null}
 
       <Card title="学生运营概览" tag="统计">
         <div className="grid grid-3">
-          <Stat label="学生总数" value={String(students.length)} helper={`当前筛选 ${filteredStudents.length} 人`} />
-          <Stat label="未设置年级" value={String(stageSummary.missing)} helper="建议补齐资料" />
-          <Stat label="年级覆盖" value={String(gradeOptions.length)} helper="有学生分布的年级数" />
-          <Stat label="小学段" value={String(stageSummary.primary)} helper="1-6 年级" />
-          <Stat label="初中段" value={String(stageSummary.middle)} helper="7-9 年级" />
-          <Stat label="高中段" value={String(stageSummary.high)} helper="10 年级及以上" />
+          <Stat
+            label="学生总数"
+            value={String(studentsPage.students.length)}
+            helper={`当前筛选 ${studentsPage.filteredStudents.length} 人`}
+          />
+          <Stat label="未设置年级" value={String(studentsPage.stageSummary.missing)} helper="建议补齐资料" />
+          <Stat label="年级覆盖" value={String(studentsPage.gradeOptions.length)} helper="有学生分布的年级数" />
+          <Stat label="小学段" value={String(studentsPage.stageSummary.primary)} helper="1-6 年级" />
+          <Stat label="初中段" value={String(studentsPage.stageSummary.middle)} helper="7-9 年级" />
+          <Stat label="高中段" value={String(studentsPage.stageSummary.high)} helper="10 年级及以上" />
         </div>
       </Card>
 
@@ -161,8 +96,8 @@ export default function SchoolStudentsPage() {
           <label style={{ display: "grid", gap: 6 }}>
             <span className="section-sub">搜索学生 / 邮箱 / 年级</span>
             <input
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
+              value={studentsPage.keyword}
+              onChange={(event) => studentsPage.setKeyword(event.target.value)}
               placeholder="搜索学生姓名、邮箱或年级"
               aria-label="搜索学生"
               style={fieldStyle}
@@ -170,9 +105,13 @@ export default function SchoolStudentsPage() {
           </label>
           <label style={{ display: "grid", gap: 6 }}>
             <span className="section-sub">年级</span>
-            <select value={gradeFilter} onChange={(event) => setGradeFilter(event.target.value)} style={fieldStyle}>
+            <select
+              value={studentsPage.gradeFilter}
+              onChange={(event) => studentsPage.setGradeFilter(event.target.value)}
+              style={fieldStyle}
+            >
               <option value="all">全部年级</option>
-              {gradeOptions.map((item) => (
+              {studentsPage.gradeOptions.map((item) => (
                 <option key={item} value={item}>
                   {item} 年级
                 </option>
@@ -181,16 +120,16 @@ export default function SchoolStudentsPage() {
           </label>
         </div>
         <div className="cta-row" style={{ marginTop: 12 }}>
-          <button className="button ghost" type="button" onClick={() => { setKeyword(""); setGradeFilter("all"); }}>
+          <button className="button ghost" type="button" onClick={studentsPage.clearFilters}>
             清空筛选
           </button>
         </div>
       </Card>
 
-      <Card title={`学生列表（${filteredStudents.length}）`} tag="清单">
-        {filteredStudents.length ? (
+      <Card title={`学生列表（${studentsPage.filteredStudents.length}）`} tag="清单">
+        {studentsPage.filteredStudents.length ? (
           <div className="grid" style={{ gap: 10 }}>
-            {filteredStudents.map((student) => (
+            {studentsPage.filteredStudents.map((student) => (
               <div className="card" key={student.id}>
                 <div className="cta-row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
                   <div>
@@ -213,7 +152,7 @@ export default function SchoolStudentsPage() {
             description="试试清空关键词或切换年级筛选。"
             tone="empty"
             action={
-              <button className="button secondary" type="button" onClick={() => { setKeyword(""); setGradeFilter("all"); }}>
+              <button className="button secondary" type="button" onClick={studentsPage.clearFilters}>
                 清空筛选
               </button>
             }

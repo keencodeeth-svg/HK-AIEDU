@@ -96,6 +96,26 @@ export type AiPreviewResponse = {
   };
 };
 
+export type TeacherSeatingDerivedState = {
+  lockedSeats: Array<SeatCell & { studentId: string }>;
+  draftSummary: PlanSummary | null;
+  previewPlan: SeatPlan | null;
+  previewSummary: PlanSummary | null;
+  previewWarnings: string[];
+  previewInsights: string[];
+  studentMap: Map<string, TeacherSeatingStudent>;
+  unassignedStudents: TeacherSeatingStudent[];
+  roster: TeacherSeatingStudent[];
+  studentsNeedingProfileReminder: TeacherSeatingStudent[];
+  watchStudents: TeacherSeatingStudent[];
+  classLabel: string;
+  followUpChecklist: string;
+  semesterReplanReasons: string[];
+  semesterStatus: "待初始化" | "建议重排" | "本学期稳定";
+  semesterStatusTone: string;
+  frontRowCount: number;
+};
+
 export type FollowUpActionResponse = {
   students?: number;
   parents?: number;

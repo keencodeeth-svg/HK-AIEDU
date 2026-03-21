@@ -1,24 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { pushAppToast } from "@/components/AppToastHub";
+import type { FavoriteItem } from "./types";
 import {
-  isAuthError,
-  requestJson
-} from "@/lib/client-request";
-import { SUBJECT_LABELS } from "@/lib/constants";
-import type { FavoriteItem, FavoritesResponse } from "./types";
-import {
-  buildFavoriteSearchText,
-  copyTextToClipboard,
-  getStudentFavoriteRemoveRequestMessage,
-  getStudentFavoritesRequestMessage,
-  getStudentFavoriteSaveRequestMessage,
+  getFilteredStudentFavorites,
   getStudentFavoritesStageCopy,
-  normalizeFavoriteTagInput,
-  resolveStudentFavoritesSelectedTag,
-  resolveStudentFavoritesSubjectFilter
+  getStudentFavoritesSubjectOptions,
+  getStudentFavoritesTopTags
 } from "./utils";
+import { useStudentFavoritesActions } from "./useStudentFavoritesActions";
+import { useStudentFavoritesLoaders } from "./useStudentFavoritesLoaders";
 
 export function useStudentFavoritesPage() {
   const editorRef = useRef<HTMLTextAreaElement>(null);
@@ -59,108 +50,42 @@ export function useStudentFavoritesPage() {
     setLastLoadedAt(null);
   }, []);
 
-  const handleAuthRequired = useCallback(() => {
-    clearFavoritesState();
-    setAuthRequired(true);
-  }, [clearFavoritesState]);
+  const closeEditor = useCallback(() => {
+    setEditingQuestionId("");
+    setDraftTags("");
+    setDraftNote("");
+  }, []);
 
-  const loadFavorites = useCallback(async (mode: "initial" | "refresh" = "initial") => {
-    const requestId = loadRequestIdRef.current + 1;
-    loadRequestIdRef.current = requestId;
-    const isRefresh = mode === "refresh";
-
-    if (isRefresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-
-    setPageError(null);
-
-    try {
-      const data = await requestJson<FavoritesResponse>("/api/favorites?includeQuestion=1");
-      if (requestId !== loadRequestIdRef.current) {
-        return;
-      }
-
-      const nextFavorites = Array.isArray(data.data) ? data.data : [];
-      const nextSubjectFilter = resolveStudentFavoritesSubjectFilter(nextFavorites, subjectFilterRef.current);
-      const nextSelectedTag = resolveStudentFavoritesSelectedTag(nextFavorites, selectedTagRef.current);
-
-      setAuthRequired(false);
-      hasFavoritesSnapshotRef.current = true;
-      setFavorites(nextFavorites);
-      if (nextSubjectFilter !== subjectFilterRef.current) {
-        subjectFilterRef.current = nextSubjectFilter;
-        setSubjectFilter(nextSubjectFilter);
-        setShowAll(false);
-      }
-      if (nextSelectedTag !== selectedTagRef.current) {
-        selectedTagRef.current = nextSelectedTag;
-        setSelectedTag(nextSelectedTag);
-        setShowAll(false);
-      }
-      setLastLoadedAt(new Date().toISOString());
-    } catch (error) {
-      if (requestId !== loadRequestIdRef.current) {
-        return;
-      }
-
-      if (isAuthError(error)) {
-        handleAuthRequired();
-      } else {
-        if (!hasFavoritesSnapshotRef.current) {
-          clearFavoritesState();
-        }
-        setAuthRequired(false);
-        setPageError(getStudentFavoritesRequestMessage(error, "加载收藏夹失败"));
-      }
-    } finally {
-      if (requestId === loadRequestIdRef.current) {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    }
-  }, [clearFavoritesState, handleAuthRequired]);
+  const {
+    handleAuthRequired,
+    loadFavorites
+  } = useStudentFavoritesLoaders({
+    loadRequestIdRef,
+    hasFavoritesSnapshotRef,
+    selectedTagRef,
+    subjectFilterRef,
+    clearFavoritesState,
+    setFavorites,
+    setAuthRequired,
+    setLoading,
+    setRefreshing,
+    setPageError,
+    setSelectedTag,
+    setSubjectFilter,
+    setShowAll,
+    setLastLoadedAt
+  });
 
   useEffect(() => {
     void loadFavorites("initial");
   }, [loadFavorites]);
 
-  const subjectOptions = useMemo(() => {
-    const subjects = Array.from(
-      new Set(favorites.map((item) => item.question?.subject).filter((value): value is string => Boolean(value)))
-    );
-    return subjects.sort((left, right) => (SUBJECT_LABELS[left] ?? left).localeCompare(SUBJECT_LABELS[right] ?? right, "zh-CN"));
-  }, [favorites]);
-
-  const topTags = useMemo(() => {
-    const counter = new Map<string, number>();
-    favorites.forEach((item) => {
-      item.tags.forEach((tag) => counter.set(tag, (counter.get(tag) ?? 0) + 1));
-    });
-    return Array.from(counter.entries())
-      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "zh-CN"))
-      .slice(0, 10);
-  }, [favorites]);
-
-  const filteredFavorites = useMemo(() => {
-    const needle = keyword.trim().toLowerCase();
-    return favorites
-      .filter((item) => {
-        if (selectedTag && !item.tags.includes(selectedTag)) {
-          return false;
-        }
-        if (subjectFilter !== "all" && item.question?.subject !== subjectFilter) {
-          return false;
-        }
-        if (!needle) {
-          return true;
-        }
-        return buildFavoriteSearchText(item).includes(needle);
-      })
-      .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
-  }, [favorites, keyword, selectedTag, subjectFilter]);
+  const subjectOptions = useMemo(() => getStudentFavoritesSubjectOptions(favorites), [favorites]);
+  const topTags = useMemo(() => getStudentFavoritesTopTags(favorites), [favorites]);
+  const filteredFavorites = useMemo(
+    () => getFilteredStudentFavorites(favorites, keyword, selectedTag, subjectFilter),
+    [favorites, keyword, selectedTag, subjectFilter]
+  );
 
   const visibleFavorites = showAll ? filteredFavorites : filteredFavorites.slice(0, 12);
   const hasActiveFilters = Boolean(keyword.trim() || selectedTag || subjectFilter !== "all");
@@ -213,104 +138,30 @@ export function useStudentFavoritesPage() {
     requestAnimationFrame(() => editorRef.current?.focus());
   }, []);
 
-  const closeEditor = useCallback(() => {
-    setEditingQuestionId("");
-    setDraftTags("");
-    setDraftNote("");
-  }, []);
-
   const refreshFavorites = useCallback(async () => {
     await loadFavorites("refresh");
   }, [loadFavorites]);
 
-  async function handleSave(item: FavoriteItem) {
-    setSavingQuestionId(item.questionId);
-    setActionError(null);
-    setActionMessage(null);
-
-    try {
-      const tags = normalizeFavoriteTagInput(draftTags);
-      await requestJson(`/api/favorites/${item.questionId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tags, note: draftNote.trim() || undefined })
-      });
-
-      setFavorites((prev) =>
-        prev.map((favorite) =>
-          favorite.questionId === item.questionId
-            ? {
-                ...favorite,
-                tags,
-                note: draftNote.trim() || undefined,
-                updatedAt: new Date().toISOString()
-              }
-            : favorite
-        )
-      );
-      hasFavoritesSnapshotRef.current = true;
-      setAuthRequired(false);
-      setPageError(null);
-      setLastLoadedAt(new Date().toISOString());
-      setActionMessage(tags.length || draftNote.trim() ? "收藏信息已更新，复习时更容易快速定位。" : "已清空标签和备注。");
-      pushAppToast("收藏信息已保存");
-      closeEditor();
-    } catch (error) {
-      if (isAuthError(error)) {
-        handleAuthRequired();
-        return;
-      }
-      const message = getStudentFavoriteSaveRequestMessage(error, "保存收藏信息失败");
-      setActionError(message);
-      pushAppToast(message, "error");
-    } finally {
-      setSavingQuestionId("");
-    }
-  }
-
-  async function handleRemove(item: FavoriteItem) {
-    setRemovingQuestionId(item.questionId);
-    setActionError(null);
-    setActionMessage(null);
-
-    try {
-      await requestJson(`/api/favorites/${item.questionId}`, { method: "DELETE" });
-      setFavorites((prev) => prev.filter((favorite) => favorite.questionId !== item.questionId));
-      hasFavoritesSnapshotRef.current = true;
-      setAuthRequired(false);
-      setPageError(null);
-      setLastLoadedAt(new Date().toISOString());
-      if (editingQuestionId === item.questionId) {
-        closeEditor();
-      }
-      setActionMessage("已从收藏夹移除这道题。");
-      pushAppToast("已取消收藏");
-    } catch (error) {
-      if (isAuthError(error)) {
-        handleAuthRequired();
-        return;
-      }
-      const message = getStudentFavoriteRemoveRequestMessage(error, "取消收藏失败");
-      setActionError(message);
-      pushAppToast(message, "error");
-    } finally {
-      setRemovingQuestionId("");
-    }
-  }
-
-  async function handleCopyQuestion(item: FavoriteItem) {
-    const stem = item.question?.stem?.trim() ?? "";
-    if (!stem) {
-      pushAppToast("当前题目内容为空", "error");
-      return;
-    }
-    try {
-      await copyTextToClipboard(stem);
-      pushAppToast("已复制题目");
-    } catch {
-      pushAppToast("复制失败，请稍后重试", "error");
-    }
-  }
+  const {
+    handleSave,
+    handleRemove,
+    handleCopyQuestion
+  } = useStudentFavoritesActions({
+    hasFavoritesSnapshotRef,
+    draftTags,
+    draftNote,
+    editingQuestionId,
+    handleAuthRequired,
+    closeEditor,
+    setFavorites,
+    setAuthRequired,
+    setPageError,
+    setActionError,
+    setActionMessage,
+    setSavingQuestionId,
+    setRemovingQuestionId,
+    setLastLoadedAt
+  });
 
   return {
     editorRef,

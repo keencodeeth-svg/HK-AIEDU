@@ -1,8 +1,11 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
 import type {
+  AssignmentNotifyTarget,
   AssignmentStudentFilter,
   RubricItem,
   RubricPayloadItem,
+  RubricLevel,
+  TeacherAssignmentDetailData,
   TeacherAssignmentStudent
 } from "./types";
 
@@ -132,4 +135,255 @@ export function getStudentPriority(student: TeacherAssignmentStudent, assignment
     label: "已稳定",
     detail: "当前已完成且没有明显风险，可以放到后续抽查"
   };
+}
+
+export function getTeacherAssignmentStudentPriorityRank(
+  student: TeacherAssignmentStudent,
+  assignmentOverdue: boolean
+) {
+  if (student.status !== "completed") {
+    return assignmentOverdue ? 0 : 1;
+  }
+  if (student.score === null || student.total === null) {
+    return 2;
+  }
+  if (student.total > 0 && student.score / student.total < 0.6) {
+    return 3;
+  }
+  return 4;
+}
+
+export function buildTeacherAssignmentNotifyPreviewStudents(
+  students: TeacherAssignmentStudent[],
+  notifyTarget: AssignmentNotifyTarget,
+  threshold: number
+) {
+  if (notifyTarget === "missing") {
+    return students.filter((student) => student.status !== "completed");
+  }
+  if (notifyTarget === "low_score") {
+    return students.filter(
+      (student) =>
+        student.status === "completed" &&
+        student.score !== null &&
+        student.total !== null &&
+        student.total > 0 &&
+        (student.score / student.total) * 100 < threshold
+    );
+  }
+  return students;
+}
+
+export function filterTeacherAssignmentStudents(
+  students: TeacherAssignmentStudent[],
+  studentFilter: AssignmentStudentFilter,
+  studentKeyword: string,
+  assignmentOverdue: boolean
+) {
+  const keywordLower = studentKeyword.trim().toLowerCase();
+  let nextStudents = students;
+
+  if (studentFilter === "pending") {
+    nextStudents = nextStudents.filter((student) => student.status !== "completed");
+  } else if (studentFilter === "review") {
+    nextStudents = nextStudents.filter(
+      (student) =>
+        student.status === "completed" &&
+        (student.score === null || student.total === null)
+    );
+  } else if (studentFilter === "low_score") {
+    nextStudents = nextStudents.filter(
+      (student) =>
+        student.status === "completed" &&
+        student.score !== null &&
+        student.total !== null &&
+        student.total > 0 &&
+        student.score / student.total < 0.6
+    );
+  } else if (studentFilter === "completed") {
+    nextStudents = nextStudents.filter((student) => student.status === "completed");
+  }
+
+  if (keywordLower) {
+    nextStudents = nextStudents.filter((student) =>
+      [student.name, student.email, student.grade ?? ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(keywordLower)
+    );
+  }
+
+  return nextStudents.slice().sort((left, right) => {
+    const rankDiff =
+      getTeacherAssignmentStudentPriorityRank(left, assignmentOverdue) -
+      getTeacherAssignmentStudentPriorityRank(right, assignmentOverdue);
+    if (rankDiff !== 0) {
+      return rankDiff;
+    }
+    if (left.status === "completed" && right.status === "completed") {
+      const leftTs = new Date(left.completedAt ?? "").getTime();
+      const rightTs = new Date(right.completedAt ?? "").getTime();
+      return rightTs - leftTs;
+    }
+    return left.name.localeCompare(right.name, "zh-CN");
+  });
+}
+
+export function getTeacherAssignmentDetailDerivedState({
+  data,
+  notifyTarget,
+  threshold,
+  studentFilter,
+  studentKeyword,
+  now
+}: {
+  data: TeacherAssignmentDetailData | null;
+  notifyTarget: AssignmentNotifyTarget;
+  threshold: number;
+  studentFilter: AssignmentStudentFilter;
+  studentKeyword: string;
+  now: number;
+}) {
+  const students = data?.students ?? [];
+  const assignmentOverdue = data
+    ? new Date(data.assignment.dueDate).getTime() < now
+    : false;
+  const completedStudents = students.filter((student) => student.status === "completed");
+  const pendingStudents = students.filter((student) => student.status !== "completed");
+  const reviewReadyStudents = completedStudents.filter(
+    (student) => student.score === null || student.total === null
+  );
+  const scoredStudents = completedStudents.filter(
+    (student) =>
+      student.score !== null && student.total !== null && student.total > 0
+  );
+  const lowScoreStudents = scoredStudents.filter(
+    (student) => student.score! / student.total! < 0.6
+  );
+  const latestCompletedStudent =
+    [...completedStudents].sort((left, right) => {
+      const leftTs = new Date(left.completedAt ?? "").getTime();
+      const rightTs = new Date(right.completedAt ?? "").getTime();
+      return rightTs - leftTs;
+    })[0] ?? null;
+  const completionRate = students.length
+    ? Math.round((completedStudents.length / students.length) * 100)
+    : 0;
+  const averagePercent = scoredStudents.length
+    ? Math.round(
+        scoredStudents.reduce(
+          (sum, student) => sum + (student.score! / student.total!) * 100,
+          0
+        ) / scoredStudents.length
+      )
+    : null;
+  const notifyPreviewStudents = buildTeacherAssignmentNotifyPreviewStudents(
+    students,
+    notifyTarget,
+    threshold
+  );
+  const hasStudentFilters = Boolean(studentFilter !== "all" || studentKeyword.trim());
+
+  return {
+    assignmentOverdue,
+    completedStudents,
+    pendingStudents,
+    reviewReadyStudents,
+    scoredStudents,
+    lowScoreStudents,
+    latestCompletedStudent,
+    completionRate,
+    averagePercent,
+    notifyPreviewStudents,
+    hasStudentFilters,
+    filteredStudents: filterTeacherAssignmentStudents(
+      students,
+      studentFilter,
+      studentKeyword,
+      assignmentOverdue
+    )
+  };
+}
+
+export function createTeacherAssignmentRubricLevel(maxScore: number): RubricLevel {
+  return {
+    label: "分档",
+    score: maxScore,
+    description: ""
+  };
+}
+
+export function createTeacherAssignmentRubricItem(): RubricItem {
+  return {
+    title: "评分维度",
+    description: "",
+    maxScore: 10,
+    weight: 1,
+    levels: [
+      { label: "优秀", score: 10, description: "表现优秀" },
+      { label: "良好", score: 8, description: "表现良好" },
+      { label: "需改进", score: 6, description: "需要改进" }
+    ]
+  };
+}
+
+export function patchTeacherAssignmentRubricItem(
+  rubrics: RubricItem[],
+  index: number,
+  patch: Partial<RubricItem>
+) {
+  return rubrics.map((item, idx) => (idx === index ? { ...item, ...patch } : item));
+}
+
+export function patchTeacherAssignmentRubricLevel(
+  rubrics: RubricItem[],
+  rubricIndex: number,
+  levelIndex: number,
+  patch: Partial<RubricLevel>
+) {
+  return rubrics.map((item, idx) => {
+    if (idx !== rubricIndex) {
+      return item;
+    }
+    return {
+      ...item,
+      levels: item.levels.map((level, currentLevelIndex) =>
+        currentLevelIndex === levelIndex ? { ...level, ...patch } : level
+      )
+    };
+  });
+}
+
+export function appendTeacherAssignmentRubricItem(rubrics: RubricItem[]) {
+  return [...rubrics, createTeacherAssignmentRubricItem()];
+}
+
+export function removeTeacherAssignmentRubricItem(rubrics: RubricItem[], index: number) {
+  return rubrics.filter((_, currentIndex) => currentIndex !== index);
+}
+
+export function appendTeacherAssignmentRubricLevel(rubrics: RubricItem[], index: number) {
+  return rubrics.map((item, currentIndex) =>
+    currentIndex === index
+      ? {
+          ...item,
+          levels: [...item.levels, createTeacherAssignmentRubricLevel(item.maxScore)]
+        }
+      : item
+  );
+}
+
+export function removeTeacherAssignmentRubricLevel(
+  rubrics: RubricItem[],
+  rubricIndex: number,
+  levelIndex: number
+) {
+  return rubrics.map((item, currentIndex) =>
+    currentIndex === rubricIndex
+      ? {
+          ...item,
+          levels: item.levels.filter((_, currentLevelIndex) => currentLevelIndex !== levelIndex)
+        }
+      : item
+  );
 }

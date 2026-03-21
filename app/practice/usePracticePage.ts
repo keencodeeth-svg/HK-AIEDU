@@ -7,72 +7,27 @@ import { isAuthError, requestJson } from "@/lib/client-request";
 import { useMathViewSettings } from "@/lib/math-view-settings";
 import { STUDENT_PRACTICE_GUIDE_KEY } from "./config";
 import type {
-  ExplainPack,
   KnowledgePoint,
+  KnowledgePointListResponse,
   KnowledgePointGroup,
   PracticeMode,
+  PracticeQuestionResponse,
+  PracticeRequestStatus,
   PracticeQuickFixAction,
   PracticeResult,
+  PracticeSubmitResponse,
   Question,
-  VariantPack
 } from "./types";
 import { usePracticeGuide } from "./usePracticeGuide";
+import { usePracticeQuestionSupport } from "./usePracticeQuestionSupport";
 import {
-  getPracticeExplainRequestMessage,
-  getPracticeFavoriteRequestMessage,
   getPracticeKnowledgePointsRequestMessage,
   getPracticeNextQuestionRequestMessage,
   getPracticeSubmitRequestMessage,
-  getPracticeVariantRequestMessage,
   isPracticeNoQuestionsError,
   isPracticeQuestionMissingError,
   resolvePracticeKnowledgePointId
 } from "./utils";
-
-type KnowledgePointListResponse = {
-  data?: KnowledgePoint[];
-};
-
-type PracticeQuestionResponse = {
-  question?: Question | null;
-};
-
-type PracticeSubmitResponse = {
-  correct: boolean;
-  explanation: string;
-  answer: string;
-  masteryScore?: number;
-  masteryDelta?: number;
-  weaknessRank?: number | null;
-  mastery?: {
-    confidenceScore?: number;
-    recencyWeight?: number;
-    masteryTrend7d?: number;
-    weaknessRank?: number | null;
-  };
-};
-
-type ExplainPackResponse = {
-  data?: ExplainPack | null;
-};
-
-type FavoriteResponse = {
-  data?: {
-    tags?: string[];
-  } | null;
-};
-
-type VariantResponse = {
-  data?: {
-    explanation?: {
-      analysis?: string;
-      hints?: string[];
-    };
-    variants?: VariantPack["variants"];
-  };
-};
-
-type PracticeRequestStatus = "auth" | "error" | "ok" | "stale";
 
 export function usePracticePage() {
   const searchParams = useSearchParams();
@@ -83,9 +38,6 @@ export function usePracticePage() {
   const knowledgePointsRequestIdRef = useRef(0);
   const questionRequestIdRef = useRef(0);
   const submitRequestIdRef = useRef(0);
-  const explainRequestIdRef = useRef(0);
-  const variantRequestIdRef = useRef(0);
-  const favoriteRequestIdRef = useRef(0);
   const hasKnowledgePointsSnapshotRef = useRef(false);
   const timeLeftRef = useRef(0);
 
@@ -99,6 +51,7 @@ export function usePracticePage() {
   const [question, setQuestion] = useState<Question | null>(null);
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState<PracticeResult | null>(null);
+  const [questionSupportResetKey, setQuestionSupportResetKey] = useState(0);
   const [challengeCount, setChallengeCount] = useState(0);
   const [challengeCorrect, setChallengeCorrect] = useState(0);
   const [timeLeft, setTimeLeft] = useState(0);
@@ -108,15 +61,6 @@ export function usePracticePage() {
   const [submitting, setSubmitting] = useState(false);
   const [autoFixing, setAutoFixing] = useState(false);
   const [autoFixHint, setAutoFixHint] = useState<string | null>(null);
-  const [variantPack, setVariantPack] = useState<VariantPack | null>(null);
-  const [variantAnswers, setVariantAnswers] = useState<Record<number, string>>({});
-  const [variantResults, setVariantResults] = useState<Record<number, boolean | null>>({});
-  const [loadingVariants, setLoadingVariants] = useState(false);
-  const [favorite, setFavorite] = useState<{ tags: string[] } | null>(null);
-  const [favoriteLoading, setFavoriteLoading] = useState(false);
-  const [explainMode, setExplainMode] = useState<"text" | "visual" | "analogy">("text");
-  const [explainPack, setExplainPack] = useState<ExplainPack | null>(null);
-  const [explainLoading, setExplainLoading] = useState(false);
   const [authRequired, setAuthRequired] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
   const mathView = useMathViewSettings("student-practice");
@@ -130,28 +74,17 @@ export function usePracticePage() {
   const clearQuestionArtifacts = useCallback((options?: { preserveTimer?: boolean }) => {
     setAnswer("");
     setResult(null);
-    setFavorite(null);
-    setVariantPack(null);
-    setVariantAnswers({});
-    setVariantResults({});
-    setExplainPack(null);
-    setExplainMode("text");
+    setQuestionSupportResetKey((prev) => prev + 1);
     if (!options?.preserveTimer) {
       setTimeLeft(0);
       setTimerRunning(false);
     }
-    setFavoriteLoading(false);
-    setLoadingVariants(false);
-    setExplainLoading(false);
   }, []);
 
   const clearQuestionWorkspace = useCallback(
     (options?: { invalidateRequests?: boolean }) => {
       if (options?.invalidateRequests !== false) {
         submitRequestIdRef.current += 1;
-        explainRequestIdRef.current += 1;
-        variantRequestIdRef.current += 1;
-        favoriteRequestIdRef.current += 1;
       }
       applyQuestion(null);
       clearQuestionArtifacts();
@@ -180,9 +113,6 @@ export function usePracticePage() {
     knowledgePointsRequestIdRef.current += 1;
     questionRequestIdRef.current += 1;
     submitRequestIdRef.current += 1;
-    explainRequestIdRef.current += 1;
-    variantRequestIdRef.current += 1;
-    favoriteRequestIdRef.current += 1;
     clearPracticePageState();
     setAuthRequired(true);
   }, [clearPracticePageState]);
@@ -478,239 +408,15 @@ export function usePracticePage() {
     }
   }, [answer, clearQuestionWorkspace, grade, handleAuthRequired, mode, question, questionLoading, subject, submitting]);
 
-  const loadExplainPack = useCallback(
-    async (questionId: string) => {
-      const requestId = explainRequestIdRef.current + 1;
-      explainRequestIdRef.current = requestId;
-      setExplainLoading(true);
-
-      try {
-        const payload = await requestJson<ExplainPackResponse>("/api/practice/explanation", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ questionId })
-        });
-
-        if (requestId !== explainRequestIdRef.current || activeQuestionIdRef.current !== questionId) {
-          return;
-        }
-
-        setAuthRequired(false);
-        setExplainPack(payload.data ?? null);
-      } catch (nextError) {
-        if (requestId !== explainRequestIdRef.current || activeQuestionIdRef.current !== questionId) {
-          return;
-        }
-
-        if (isAuthError(nextError)) {
-          handleAuthRequired();
-          return;
-        }
-
-        setExplainPack(null);
-        if (isPracticeQuestionMissingError(nextError)) {
-          clearQuestionWorkspace();
-        }
-        setError(getPracticeExplainRequestMessage(nextError, "AI 讲解生成失败"));
-      } finally {
-        if (requestId === explainRequestIdRef.current) {
-          setExplainLoading(false);
-        }
-      }
-    },
-    [clearQuestionWorkspace, handleAuthRequired]
-  );
-
-  const loadFavorite = useCallback(
-    async (questionId: string) => {
-      const requestId = favoriteRequestIdRef.current + 1;
-      favoriteRequestIdRef.current = requestId;
-
-      try {
-        const payload = await requestJson<FavoriteResponse>(`/api/favorites/${questionId}`);
-        if (requestId !== favoriteRequestIdRef.current || activeQuestionIdRef.current !== questionId) {
-          return;
-        }
-
-        setAuthRequired(false);
-        setFavorite(payload.data ? { tags: payload.data.tags ?? [] } : null);
-      } catch (nextError) {
-        if (requestId !== favoriteRequestIdRef.current || activeQuestionIdRef.current !== questionId) {
-          return;
-        }
-
-        if (isAuthError(nextError)) {
-          handleAuthRequired();
-          return;
-        }
-
-        setFavorite(null);
-        if (isPracticeQuestionMissingError(nextError)) {
-          clearQuestionWorkspace();
-          setError(getPracticeFavoriteRequestMessage(nextError, "收藏信息加载失败"));
-        }
-      }
-    },
-    [clearQuestionWorkspace, handleAuthRequired]
-  );
-
-  const toggleFavorite = useCallback(async () => {
-    if (!question) {
-      return;
-    }
-
-    const requestId = favoriteRequestIdRef.current + 1;
-    const questionId = question.id;
-    favoriteRequestIdRef.current = requestId;
-    setFavoriteLoading(true);
-
-    try {
-      if (favorite) {
-        await requestJson(`/api/favorites/${questionId}`, { method: "DELETE" });
-        if (requestId !== favoriteRequestIdRef.current || activeQuestionIdRef.current !== questionId) {
-          return;
-        }
-
-        setAuthRequired(false);
-        setFavorite(null);
-      } else {
-        const payload = await requestJson<FavoriteResponse>("/api/favorites", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ questionId, tags: [] })
-        });
-
-        if (requestId !== favoriteRequestIdRef.current || activeQuestionIdRef.current !== questionId) {
-          return;
-        }
-
-        setAuthRequired(false);
-        setFavorite(payload.data ? { tags: payload.data.tags ?? [] } : null);
-      }
-    } catch (nextError) {
-      if (requestId !== favoriteRequestIdRef.current || activeQuestionIdRef.current !== questionId) {
-        return;
-      }
-
-      if (isAuthError(nextError)) {
-        handleAuthRequired();
-        return;
-      }
-
-      if (isPracticeQuestionMissingError(nextError)) {
-        clearQuestionWorkspace();
-      }
-      setError(getPracticeFavoriteRequestMessage(nextError, favorite ? "取消收藏失败" : "收藏失败"));
-    } finally {
-      if (requestId === favoriteRequestIdRef.current) {
-        setFavoriteLoading(false);
-      }
-    }
-  }, [clearQuestionWorkspace, favorite, handleAuthRequired, question]);
-
-  const editFavoriteTags = useCallback(async () => {
-    if (!question) {
-      return;
-    }
-
-    const input = prompt("输入标签（用逗号分隔）", favorite?.tags?.join(",") ?? "");
-    if (input === null) {
-      return;
-    }
-
-    const tags = input
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    const requestId = favoriteRequestIdRef.current + 1;
-    const questionId = question.id;
-    favoriteRequestIdRef.current = requestId;
-    setFavoriteLoading(true);
-
-    try {
-      const payload = await requestJson<FavoriteResponse>(`/api/favorites/${questionId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tags })
-      });
-
-      if (requestId !== favoriteRequestIdRef.current || activeQuestionIdRef.current !== questionId) {
-        return;
-      }
-
-      setAuthRequired(false);
-      setFavorite(payload.data ? { tags: payload.data.tags ?? [] } : null);
-    } catch (nextError) {
-      if (requestId !== favoriteRequestIdRef.current || activeQuestionIdRef.current !== questionId) {
-        return;
-      }
-
-      if (isAuthError(nextError)) {
-        handleAuthRequired();
-        return;
-      }
-
-      if (isPracticeQuestionMissingError(nextError)) {
-        clearQuestionWorkspace();
-      }
-      setError(getPracticeFavoriteRequestMessage(nextError, "更新收藏标签失败"));
-    } finally {
-      if (requestId === favoriteRequestIdRef.current) {
-        setFavoriteLoading(false);
-      }
-    }
-  }, [clearQuestionWorkspace, favorite?.tags, handleAuthRequired, question]);
-
-  const loadVariants = useCallback(async () => {
-    if (!question) {
-      return;
-    }
-
-    const requestId = variantRequestIdRef.current + 1;
-    const questionId = question.id;
-    variantRequestIdRef.current = requestId;
-    setLoadingVariants(true);
-
-    try {
-      const payload = await requestJson<VariantResponse>("/api/practice/variants", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questionId, studentAnswer: answer })
-      });
-
-      if (requestId !== variantRequestIdRef.current || activeQuestionIdRef.current !== questionId) {
-        return;
-      }
-
-      setAuthRequired(false);
-      setVariantPack({
-        analysis: payload.data?.explanation?.analysis ?? "",
-        hints: payload.data?.explanation?.hints ?? [],
-        variants: payload.data?.variants ?? []
-      });
-      setVariantAnswers({});
-      setVariantResults({});
-    } catch (nextError) {
-      if (requestId !== variantRequestIdRef.current || activeQuestionIdRef.current !== questionId) {
-        return;
-      }
-
-      if (isAuthError(nextError)) {
-        handleAuthRequired();
-        return;
-      }
-
-      if (isPracticeQuestionMissingError(nextError)) {
-        clearQuestionWorkspace();
-      }
-      setError(getPracticeVariantRequestMessage(nextError, "变式生成失败，请稍后重试"));
-    } finally {
-      if (requestId === variantRequestIdRef.current) {
-        setLoadingVariants(false);
-      }
-    }
-  }, [answer, clearQuestionWorkspace, handleAuthRequired, question]);
+  const questionSupport = usePracticeQuestionSupport({
+    question,
+    answer,
+    resultAnswer: result?.answer,
+    resetSignal: questionSupportResetKey,
+    clearQuestionWorkspace,
+    handleAuthRequired,
+    setError
+  });
 
   const filteredKnowledgePoints = useMemo(() => {
     const keyword = knowledgeSearch.trim().toLowerCase();
@@ -762,29 +468,12 @@ export function usePracticePage() {
     return () => clearInterval(timer);
   }, [timerRunning]);
 
-  const questionId = question?.id;
-  const resultAnswer = result?.answer;
-
   useEffect(() => {
-    if (!questionId) {
-      return;
-    }
-    void loadFavorite(questionId);
-  }, [loadFavorite, questionId]);
-
-  useEffect(() => {
-    if (!questionId || !resultAnswer) {
-      return;
-    }
-    void loadExplainPack(questionId);
-  }, [loadExplainPack, questionId, resultAnswer]);
-
-  useEffect(() => {
-    if (!questionId || questionLoading) {
+    if (!question?.id || questionLoading) {
       return;
     }
     questionCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [questionId, questionLoading]);
+  }, [question?.id, questionLoading]);
 
   useEffect(() => {
     if (!result) {
@@ -869,18 +558,6 @@ export function usePracticePage() {
     submitting,
     autoFixing,
     autoFixHint,
-    variantPack,
-    variantAnswers,
-    setVariantAnswers,
-    variantResults,
-    setVariantResults,
-    loadingVariants,
-    favorite,
-    favoriteLoading,
-    explainMode,
-    setExplainMode,
-    explainPack,
-    explainLoading,
     lastLoadedAt,
     mathView,
     showPracticeGuide,
@@ -901,9 +578,7 @@ export function usePracticePage() {
     loadQuestion,
     applyPracticeQuickFix,
     submitAnswer,
-    toggleFavorite,
-    editFavoriteTags,
-    loadVariants,
+    ...questionSupport,
     resetChallenge
   };
 }

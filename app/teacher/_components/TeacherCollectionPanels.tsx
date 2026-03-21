@@ -1,12 +1,17 @@
 import Link from "next/link";
 import Card from "@/components/Card";
 import { ASSIGNMENT_TYPE_LABELS, SUBJECT_LABELS } from "@/lib/constants";
-import type { AssignmentItem, ClassItem, TeacherJoinRequest } from "../types";
+import type {
+  AssignmentItem,
+  ClassItem,
+  TeacherJoinMode,
+  TeacherJoinRequest
+} from "../types";
 
 type TeacherClassListCardProps = {
   classes: ClassItem[];
   onRegenerateCode: (classId: string) => void | Promise<void>;
-  onUpdateJoinMode: (classId: string, joinMode: "approval" | "auto") => void | Promise<void>;
+  onUpdateJoinMode: (classId: string, joinMode: TeacherJoinMode) => void | Promise<void>;
 };
 
 export function TeacherClassListCard({ classes, onRegenerateCode, onUpdateJoinMode }: TeacherClassListCardProps) {
@@ -31,7 +36,7 @@ export function TeacherClassListCard({ classes, onRegenerateCode, onUpdateJoinMo
                 </button>
                 <select
                   value={item.joinMode ?? "approval"}
-                  onChange={(event) => onUpdateJoinMode(item.id, event.target.value as "approval" | "auto")}
+                  onChange={(event) => onUpdateJoinMode(item.id, event.target.value as TeacherJoinMode)}
                   style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--stroke)" }}
                 >
                   <option value="approval">需要审核</option>

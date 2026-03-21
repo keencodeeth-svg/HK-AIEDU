@@ -1,6 +1,6 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
 import { SUBJECT_LABELS } from "@/lib/constants";
-import type { ClassItem, PreviewAssignment, PreviewData, RuleItem } from "./types";
+import type { ClassItem, HistoryItem, PreviewAssignment, PreviewData, RuleItem } from "./types";
 
 export type NotificationCommandState = {
   tone: "info" | "loading" | "empty" | "success";
@@ -24,6 +24,26 @@ export function buildDraftRule(classId: string, rules: RuleItem[]): RuleItem {
       ...DEFAULT_RULE
     }
   );
+}
+
+export function resolveTeacherNotificationClassId(
+  currentClassId: string,
+  classes: Array<{ id: string }>
+) {
+  if (currentClassId && classes.some((item) => item.id === currentClassId)) {
+    return currentClassId;
+  }
+  return classes[0]?.id ?? "";
+}
+
+export function upsertTeacherNotificationRule(
+  previousRules: RuleItem[],
+  nextRule: RuleItem
+) {
+  const index = previousRules.findIndex((item) => item.classId === nextRule.classId);
+  return index >= 0
+    ? previousRules.map((item, itemIndex) => (itemIndex === index ? nextRule : item))
+    : [...previousRules, nextRule];
 }
 
 export function getTeacherNotificationRulesRequestMessage(error: unknown, fallback: string) {
@@ -57,6 +77,20 @@ export function isMissingTeacherNotificationClassError(error: unknown) {
   const status = getRequestStatus(error) ?? 0;
   const requestMessage = getRequestErrorMessage(error, "").trim().toLowerCase();
   return requestMessage === "class not found" || (status === 404 && requestMessage === "not found");
+}
+
+export function getTeacherNotificationMissingClassError(errors: unknown[]) {
+  return errors.find((error) => isMissingTeacherNotificationClassError(error)) ?? null;
+}
+
+export function getTeacherNotificationRefreshErrors(
+  entries: Array<{ label: string; error: unknown | null }>
+) {
+  return entries.flatMap((entry) =>
+    entry.error
+      ? [`${entry.label}：${getTeacherNotificationRulesRequestMessage(entry.error, "加载失败")}`]
+      : []
+  );
 }
 
 export function isSameRule(left: RuleItem, right: RuleItem) {
@@ -131,5 +165,54 @@ export function getCommandState(params: {
     tone: params.hasUnsavedChanges ? "info" : "success",
     title: params.hasUnsavedChanges ? "草稿已准备好，但还未保存为默认规则" : "当前规则已经准备好执行",
     description: `当前预览会覆盖 ${params.preview.summary.assignmentTargets} 份作业、${params.preview.summary.uniqueStudents} 名学生。`
+  };
+}
+
+export function getTeacherNotificationRulesPageDerivedState(options: {
+  classes: ClassItem[];
+  savedRules: RuleItem[];
+  classId: string;
+  draftRule: RuleItem;
+  preview: PreviewData | null;
+  previewRuleSnapshot: RuleItem | null;
+  history: HistoryItem[];
+}) {
+  const selectedClass = options.classes.find((item) => item.id === options.classId) ?? null;
+  const savedRuleForClass = buildDraftRule(options.classId, options.savedRules);
+  const hasUnsavedChanges = options.classId ? !isSameRule(options.draftRule, savedRuleForClass) : false;
+  const isPreviewCurrent = options.classId
+    ? Boolean(options.previewRuleSnapshot && isSameRule(options.previewRuleSnapshot, options.draftRule))
+    : false;
+  const configuredRuleCount = options.savedRules.length;
+  const enabledRuleCount = options.savedRules.filter((item) => item.enabled).length;
+  const latestHistory = options.history[0] ?? null;
+  const latestClassResult =
+    latestHistory?.classResults.find((entry) => entry.classId === options.classId) ??
+    latestHistory?.classResults[0] ??
+    null;
+  const overdueAssignments = options.preview?.sampleAssignments.filter((item) => item.stage === "overdue") ?? [];
+  const dueSoonAssignments = options.preview?.sampleAssignments.filter((item) => item.stage === "due_soon") ?? [];
+  const commandState = getCommandState({
+    draftRule: options.draftRule,
+    preview: options.preview,
+    hasUnsavedChanges,
+    isPreviewCurrent
+  });
+  const previewTargetDelta =
+    latestClassResult && options.preview ? options.preview.summary.studentTargets - latestClassResult.studentTargets : null;
+
+  return {
+    selectedClass,
+    savedRuleForClass,
+    hasUnsavedChanges,
+    isPreviewCurrent,
+    configuredRuleCount,
+    enabledRuleCount,
+    latestHistory,
+    latestClassResult,
+    overdueAssignments,
+    dueSoonAssignments,
+    commandState,
+    previewTargetDelta
   };
 }

@@ -1,5 +1,35 @@
+import {
+  getRequestErrorMessage,
+  getRequestStatus
+} from "@/lib/client-request";
 import { SUBJECT_LABELS, getGradeLabel } from "@/lib/constants";
-import type { ClassItem, Difficulty, FormState, KnowledgePoint, PoolRisk, PublishMode, ScheduleStatus } from "./types";
+import type {
+  ClassItem,
+  ClassStudent,
+  Difficulty,
+  FormState,
+  KnowledgePoint,
+  PoolRisk,
+  PublishMode,
+  ScheduleStatus
+} from "./types";
+
+export const INITIAL_TEACHER_EXAM_CREATE_FORM: FormState = {
+  classId: "",
+  title: "",
+  description: "",
+  publishMode: "teacher_assigned",
+  antiCheatLevel: "basic",
+  studentIds: [],
+  startAt: "",
+  endAt: getDefaultEndAt(),
+  durationMinutes: 60,
+  questionCount: 10,
+  knowledgePointId: "",
+  difficulty: "medium",
+  questionType: "choice",
+  includeIsolated: false
+};
 
 export const DIFFICULTY_OPTIONS: Array<{ value: Difficulty; label: string }> = [
   { value: "easy", label: "简单" },
@@ -78,6 +108,224 @@ export function normalizeCreateErrorMessage(message: string) {
     return "请先设置截止时间后再发布考试。";
   }
   return normalized;
+}
+
+export function getTeacherExamCreateRequestMessage(error: unknown, fallback: string) {
+  const status = getRequestStatus(error) ?? 0;
+  const requestMessage = getRequestErrorMessage(error, "").trim();
+  const normalizedMessage = normalizeCreateErrorMessage(requestMessage);
+
+  if (status === 401 || status === 403) {
+    return "教师登录状态已失效，请重新登录后继续发布考试。";
+  }
+  if (
+    requestMessage.toLowerCase() === "class not found" ||
+    (status === 404 && requestMessage.toLowerCase() === "not found")
+  ) {
+    return "当前班级不存在，或你已失去该班级的发布权限。";
+  }
+  return normalizedMessage || fallback;
+}
+
+export function isTeacherExamCreateClassMissingError(error: unknown) {
+  const status = getRequestStatus(error) ?? 0;
+  const requestMessage = getRequestErrorMessage(error, "").trim().toLowerCase();
+  return requestMessage === "class not found" || (status === 404 && requestMessage === "not found");
+}
+
+export function syncTeacherExamCreateFormWithConfig(
+  prev: FormState,
+  nextClasses: ClassItem[],
+  nextKnowledgePoints: KnowledgePoint[]
+) {
+  const nextClassId =
+    prev.classId && nextClasses.some((item) => item.id === prev.classId)
+      ? prev.classId
+      : nextClasses[0]?.id ?? "";
+  const nextClass = nextClasses.find((item) => item.id === nextClassId);
+  const nextKnowledgePointId =
+    prev.knowledgePointId &&
+    nextClass &&
+    nextKnowledgePoints.some(
+      (item) =>
+        item.id === prev.knowledgePointId &&
+        item.subject === nextClass.subject &&
+        item.grade === nextClass.grade
+    )
+      ? prev.knowledgePointId
+      : "";
+
+  return {
+    nextClassId,
+    nextForm: {
+      ...prev,
+      classId: nextClassId,
+      knowledgePointId: nextKnowledgePointId,
+      studentIds: nextClassId === prev.classId ? prev.studentIds : [],
+      endAt: prev.endAt || getDefaultEndAt()
+    }
+  };
+}
+
+export function pruneTeacherExamCreateStudentIds(studentIds: string[], students: Array<{ id: string }>) {
+  return studentIds.filter((studentId) =>
+    students.some((student) => student.id === studentId)
+  );
+}
+
+export function getTeacherExamCreateTargetCount(
+  publishMode: PublishMode,
+  selectedStudentCount: number,
+  classStudentsCount: number
+) {
+  return publishMode === "targeted" ? selectedStudentCount : classStudentsCount;
+}
+
+export function buildTeacherExamCreateScopeLabel(
+  selectedPoint: KnowledgePoint | null,
+  subject: string | undefined,
+  questionCount: number
+) {
+  if (selectedPoint) {
+    return `${selectedPoint.chapter} · ${selectedPoint.title} · ${questionCount} 题`;
+  }
+  return `${SUBJECT_LABELS[subject ?? ""] ?? "当前学科"}全范围 · ${questionCount} 题`;
+}
+
+export function buildTeacherExamCreateTargetLabel(
+  publishMode: PublishMode,
+  targetCount: number,
+  classStudentsCount: number
+) {
+  return publishMode === "targeted"
+    ? `定向 ${targetCount}/${classStudentsCount || 0} 人`
+    : `全班 ${classStudentsCount || 0} 人`;
+}
+
+export function getTeacherExamCreateCanSubmit(options: {
+  classId: string;
+  title: string;
+  publishMode: PublishMode;
+  scheduleReady: boolean;
+  configLoading: boolean;
+  saving: boolean;
+  targetCount: number;
+  studentsLoading: boolean;
+}) {
+  const {
+    classId,
+    title,
+    publishMode,
+    scheduleReady,
+    configLoading,
+    saving,
+    targetCount,
+    studentsLoading
+  } = options;
+
+  return (
+    Boolean(classId && title.trim()) &&
+    scheduleReady &&
+    !configLoading &&
+    !saving &&
+    !(publishMode === "targeted" && targetCount === 0) &&
+    !(publishMode === "targeted" && studentsLoading)
+  );
+}
+
+export function getTeacherExamCreatePageDerivedState(options: {
+  classes: ClassItem[];
+  knowledgePoints: KnowledgePoint[];
+  classStudents: ClassStudent[];
+  form: FormState;
+  configLoading: boolean;
+  saving: boolean;
+  studentsLoading: boolean;
+  lastLoadedAt: string | null;
+}) {
+  const selectedClass =
+    options.classes.find((item) => item.id === options.form.classId);
+  const filteredPoints = selectedClass
+    ? options.knowledgePoints.filter(
+        (item) =>
+          item.subject === selectedClass.subject &&
+          item.grade === selectedClass.grade
+      )
+    : [];
+  const selectedPoint =
+    filteredPoints.find((item) => item.id === options.form.knowledgePointId) ??
+    null;
+  const scheduleStatus = getScheduleStatus(options.form);
+  const poolRisk = getPoolRisk(options.form, filteredPoints);
+  const targetCount = getTeacherExamCreateTargetCount(
+    options.form.publishMode,
+    options.form.studentIds.length,
+    options.classStudents.length
+  );
+
+  return {
+    selectedClass,
+    filteredPoints,
+    selectedPoint,
+    scheduleStatus,
+    poolRisk,
+    targetCount,
+    canSubmit: getTeacherExamCreateCanSubmit({
+      classId: options.form.classId,
+      title: options.form.title,
+      publishMode: options.form.publishMode,
+      scheduleReady: scheduleStatus.canSubmit,
+      configLoading: options.configLoading,
+      saving: options.saving,
+      targetCount,
+      studentsLoading: options.studentsLoading
+    }),
+    classLabel: formatClassLabel(selectedClass),
+    scopeLabel: buildTeacherExamCreateScopeLabel(
+      selectedPoint,
+      selectedClass?.subject,
+      options.form.questionCount
+    ),
+    targetLabel: buildTeacherExamCreateTargetLabel(
+      options.form.publishMode,
+      targetCount,
+      options.classStudents.length
+    ),
+    lastLoadedAtLabel: formatLoadedTime(options.lastLoadedAt)
+  };
+}
+
+export function buildTeacherExamCreateSubmitPayload(form: FormState) {
+  return {
+    classId: form.classId,
+    title: form.title.trim(),
+    description: form.description.trim(),
+    publishMode: form.publishMode,
+    antiCheatLevel: form.antiCheatLevel,
+    studentIds: form.publishMode === "targeted" ? form.studentIds : undefined,
+    startAt: form.startAt || undefined,
+    endAt: form.endAt || undefined,
+    durationMinutes: form.durationMinutes || undefined,
+    questionCount: form.questionCount,
+    knowledgePointId: form.knowledgePointId || undefined,
+    difficulty: form.difficulty || undefined,
+    questionType: form.questionType || undefined,
+    includeIsolated: form.includeIsolated
+  };
+}
+
+export function buildTeacherExamCreateSuccessMessage(
+  message: string | undefined,
+  warnings: string[] | undefined
+) {
+  const normalizedWarnings = Array.isArray(warnings)
+    ? warnings.filter((warning) => Boolean(warning))
+    : [];
+  const baseMessage = message ?? "考试发布成功";
+
+  return normalizedWarnings.length
+    ? `${baseMessage} ${normalizedWarnings.join("；")}`
+    : baseMessage;
 }
 
 export function getScheduleStatus(form: FormState): ScheduleStatus {

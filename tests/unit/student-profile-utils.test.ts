@@ -15,8 +15,15 @@ Module._resolveFilename = function resolveFilename(request, parent, isMain, opti
 };
 
 const {
+  buildProfileFormState,
+  buildProfileSavePayload,
+  createInitialStudentProfileForm,
   getStudentObserverCodeRequestMessage,
-  getStudentProfileRequestMessage
+  getStudentProfileRequestMessage,
+  getStudentProfileSaveMessage,
+  mergeSavedProfileForm,
+  sanitizeHeightInput,
+  toggleStudentProfileSubject
 } = require("../../app/student/profile/utils") as typeof import("../../app/student/profile/utils");
 Module._resolveFilename = originalResolveFilename;
 
@@ -54,4 +61,149 @@ test("student profile helpers map observer-code auth and enum errors", () => {
     getStudentProfileRequestMessage(createRequestError(400, "body.peerSupport must be one of the allowed values"), "fallback"),
     "同桌协作选项无效，请重新选择。"
   );
+});
+
+test("student profile helpers build and merge form state deterministically", () => {
+  assert.deepEqual(createInitialStudentProfileForm(), {
+    grade: "4",
+    subjects: ["math", "chinese", "english"],
+    target: "",
+    school: "",
+    preferredName: "",
+    gender: "",
+    heightCm: "",
+    eyesightLevel: "",
+    seatPreference: "",
+    personality: "",
+    focusSupport: "",
+    peerSupport: "",
+    strengths: "",
+    supportNotes: ""
+  });
+
+  assert.deepEqual(
+    buildProfileFormState({
+      grade: "5",
+      subjects: ["math"],
+      target: "提升口算",
+      school: "实验小学",
+      preferredName: "小明",
+      gender: "male",
+      heightCm: 138,
+      eyesightLevel: "front_preferred",
+      seatPreference: "front",
+      personality: "active",
+      focusSupport: "needs_focus",
+      peerSupport: "needs_support",
+      strengths: "口算快",
+      supportNotes: "需要少量提醒"
+    }),
+    {
+      grade: "5",
+      subjects: ["math"],
+      target: "提升口算",
+      school: "实验小学",
+      preferredName: "小明",
+      gender: "male",
+      heightCm: "138",
+      eyesightLevel: "front_preferred",
+      seatPreference: "front",
+      personality: "active",
+      focusSupport: "needs_focus",
+      peerSupport: "needs_support",
+      strengths: "口算快",
+      supportNotes: "需要少量提醒"
+    }
+  );
+
+  assert.deepEqual(
+    mergeSavedProfileForm(
+      createInitialStudentProfileForm(),
+      {
+        preferredName: "小明",
+        gender: "male",
+        heightCm: 138,
+        eyesightLevel: "front_preferred",
+        seatPreference: "front",
+        personality: "active",
+        focusSupport: "needs_focus",
+        peerSupport: "needs_support",
+        strengths: "口算快",
+        supportNotes: "需要少量提醒"
+      }
+    ),
+    {
+      grade: "4",
+      subjects: ["math", "chinese", "english"],
+      target: "",
+      school: "",
+      preferredName: "小明",
+      gender: "male",
+      heightCm: "138",
+      eyesightLevel: "front_preferred",
+      seatPreference: "front",
+      personality: "active",
+      focusSupport: "needs_focus",
+      peerSupport: "needs_support",
+      strengths: "口算快",
+      supportNotes: "需要少量提醒"
+    }
+  );
+});
+
+test("student profile helpers build save payloads and normalize input predictably", () => {
+  assert.deepEqual(
+    buildProfileSavePayload({
+      grade: "5",
+      subjects: ["math", "english"],
+      target: "提升阅读",
+      school: "实验小学",
+      preferredName: "小明",
+      gender: "",
+      heightCm: " 138 ",
+      eyesightLevel: "",
+      seatPreference: "front",
+      personality: "",
+      focusSupport: "needs_focus",
+      peerSupport: "",
+      strengths: "表达好",
+      supportNotes: "需要稳定提醒"
+    }),
+    {
+      grade: "5",
+      subjects: ["math", "english"],
+      target: "提升阅读",
+      school: "实验小学",
+      preferredName: "小明",
+      gender: null,
+      heightCm: 138,
+      eyesightLevel: null,
+      seatPreference: "front",
+      personality: null,
+      focusSupport: "needs_focus",
+      peerSupport: null,
+      strengths: "表达好",
+      supportNotes: "需要稳定提醒"
+    }
+  );
+
+  assert.equal(sanitizeHeightInput("1a3b8cm"), "138");
+  assert.deepEqual(toggleStudentProfileSubject(["math", "english"], "math"), ["english"]);
+  assert.deepEqual(toggleStudentProfileSubject(["math", "english"], "chinese"), ["math", "english", "chinese"]);
+});
+
+test("student profile helpers resolve save feedback copy deterministically", () => {
+  assert.equal(
+    getStudentProfileSaveMessage("observer-123"),
+    "已保存，老师端学期排座配置与个性化推荐会同步使用这些信息。"
+  );
+  assert.equal(
+    getStudentProfileSaveMessage("", "ok"),
+    "已保存，老师端学期排座配置与个性化推荐会同步使用这些信息。"
+  );
+  assert.equal(
+    getStudentProfileSaveMessage("", "failed"),
+    "已保存，但家长绑定码同步失败，请稍后重试。"
+  );
+  assert.equal(getStudentProfileSaveMessage("", "auth"), null);
 });

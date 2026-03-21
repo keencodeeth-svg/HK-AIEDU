@@ -15,12 +15,20 @@ Module._resolveFilename = function resolveFilename(request, parent, isMain, opti
 };
 
 const {
+  buildWrongBookReviewFeedbackMessage,
+  formatDateTime,
+  getSelectedWrongBookQuestionIds,
   getWrongBookCompleteTaskRequestMessage,
   getWrongBookCreateTasksRequestMessage,
+  getWrongBookDefaultDueDate,
   getWrongBookHistoryRequestMessage,
   getWrongBookReviewSubmitRequestMessage,
+  getWrongBookTaskCompletionFeedback,
+  getWrongBookTaskGenerationFeedback,
+  hasWrongBookContent,
   isMissingWrongBookReviewQuestionError,
   isMissingWrongBookTaskError,
+  isWrongBookActionBusy,
   normalizeWrongBookSkippedReason,
   pruneWrongBookReviewState,
   pruneWrongBookSelection
@@ -90,6 +98,9 @@ test("wrong-book helpers normalize skipped reasons and prune stale local state",
   assert.deepEqual(pruneWrongBookSelection(list, { "question-1": true, "question-2": true }), {
     "question-1": true
   });
+  assert.deepEqual(getSelectedWrongBookQuestionIds(list, { "question-1": true, "question-2": true }), [
+    "question-1"
+  ]);
   assert.deepEqual(
     pruneWrongBookReviewState(reviewQueue, {
       "question-1": "A",
@@ -99,4 +110,102 @@ test("wrong-book helpers normalize skipped reasons and prune stale local state",
   );
   assert.equal(normalizeWrongBookSkippedReason("题目不存在"), "题目已不存在");
   assert.equal(normalizeWrongBookSkippedReason("已有未完成订正任务"), "已有未完成订正任务");
+});
+
+test("wrong-book helpers derive default due dates and page state flags", () => {
+  const upcomingReviewItem = {
+    id: "review-2",
+    questionId: "question-3",
+    intervalLevel: 2,
+    intervalLabel: "三天后",
+    nextReviewAt: "2026-03-21T08:00:00.000Z",
+    lastReviewResult: "correct" as const,
+    lastReviewAt: "2026-03-18T08:00:00.000Z",
+    reviewCount: 1,
+    status: "active" as const,
+    originType: "wrong_book_review" as const,
+    originLabel: "错题复练",
+    originPaperId: null,
+    originSubmittedAt: null,
+    question: null
+  };
+
+  assert.equal(getWrongBookDefaultDueDate(new Date(2026, 2, 18, 9, 0, 0)), "2026-03-21");
+
+  assert.equal(
+    hasWrongBookContent({
+      list: [],
+      tasks: [],
+      reviewQueue: null,
+      summary: null
+    }),
+    false
+  );
+  assert.equal(
+    hasWrongBookContent({
+      list: [],
+      tasks: [],
+      reviewQueue: {
+        summary: {
+          totalActive: 1,
+          dueToday: 1,
+          overdue: 0,
+          upcoming: 0
+        },
+        today: [],
+        upcoming: [upcomingReviewItem]
+      },
+      summary: null
+    }),
+    true
+  );
+
+  assert.equal(
+    isWrongBookActionBusy({
+      creatingTasks: false,
+      completingTaskIds: {},
+      reviewSubmitting: {}
+    }),
+    false
+  );
+  assert.equal(
+    isWrongBookActionBusy({
+      creatingTasks: false,
+      completingTaskIds: { "task-1": true },
+      reviewSubmitting: {}
+    }),
+    true
+  );
+});
+
+test("wrong-book helpers build refresh feedback messages for task and review flows", () => {
+  const nextReviewAt = "2026-03-18T08:00:00.000Z";
+
+  assert.equal(getWrongBookTaskGenerationFeedback(2, "loaded"), "已创建 2 个订正任务。");
+  assert.equal(
+    getWrongBookTaskGenerationFeedback(0, "stale"),
+    "所选错题暂未创建新的订正任务 系统正在同步最新列表。"
+  );
+  assert.equal(
+    getWrongBookTaskCompletionFeedback("partial"),
+    "订正任务已标记完成，但部分列表刷新失败，请稍后重试。"
+  );
+  assert.equal(
+    buildWrongBookReviewFeedbackMessage({
+      correct: true,
+      intervalLabel: "明天",
+      nextReviewAt,
+      refreshStatus: "loaded"
+    }),
+    `复练正确，下一轮：明天（${formatDateTime(nextReviewAt)}）`
+  );
+  assert.equal(
+    buildWrongBookReviewFeedbackMessage({
+      correct: false,
+      intervalLabel: null,
+      nextReviewAt: null,
+      refreshStatus: "stale"
+    }),
+    "复练错误，系统正在同步最新列表。"
+  );
 });

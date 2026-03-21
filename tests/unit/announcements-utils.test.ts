@@ -15,9 +15,13 @@ Module._resolveFilename = function resolveFilename(request, parent, isMain, opti
 };
 
 const {
+  buildAnnouncementSubmitPayload,
   getAnnouncementClassListRequestMessage,
   getAnnouncementsListRequestMessage,
+  getAnnouncementsNoStoreRequestInit,
   getAnnouncementSubmitRequestMessage,
+  getAnnouncementSubmitSuccessMessage,
+  hasAnnouncementsPageData,
   isMissingAnnouncementClassError,
   resolveAnnouncementClassId
 } = require("../../app/announcements/utils") as typeof import("../../app/announcements/utils");
@@ -62,4 +66,31 @@ test("announcements helpers keep selected class only when it still exists", () =
   assert.equal(resolveAnnouncementClassId(classes, "class-2"), "class-2");
   assert.equal(resolveAnnouncementClassId(classes, "missing-class"), "class-1");
   assert.equal(resolveAnnouncementClassId([], "class-1"), "");
+});
+
+test("announcements helpers build submit payloads and success copy deterministically", () => {
+  assert.deepEqual(buildAnnouncementSubmitPayload("class-1", "周测提醒", "明天带练习册"), {
+    classId: "class-1",
+    title: "周测提醒",
+    content: "明天带练习册"
+  });
+  assert.equal(getAnnouncementSubmitSuccessMessage("loaded"), "公告已发布。");
+  assert.equal(getAnnouncementSubmitSuccessMessage("stale"), "公告已发布，系统正在同步最新公告。");
+  assert.equal(getAnnouncementSubmitSuccessMessage("error"), "公告已发布，但公告列表刷新失败，请稍后重试。");
+});
+
+test("announcements helpers derive page data state predictably", () => {
+  assert.equal(hasAnnouncementsPageData(0, null, 0), false);
+  assert.equal(hasAnnouncementsPageData(1, null, 0), true);
+  assert.equal(hasAnnouncementsPageData(0, "teacher", 0), true);
+  assert.equal(hasAnnouncementsPageData(0, "student", 2), true);
+});
+
+test("announcements helpers expose fresh no-store request init for dynamic page bootstrap", () => {
+  const first = getAnnouncementsNoStoreRequestInit();
+  const second = getAnnouncementsNoStoreRequestInit();
+
+  assert.notEqual(first, second);
+  assert.deepEqual(first, { cache: "no-store" });
+  assert.deepEqual(second, { cache: "no-store" });
 });

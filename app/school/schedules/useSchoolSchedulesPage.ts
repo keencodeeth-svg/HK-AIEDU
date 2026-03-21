@@ -10,12 +10,10 @@ import { isSchoolAdminAuthRequiredError } from "../utils";
 import type {
   AiMode,
   AiOperationSummary,
-  AiRollbackResponse,
   AiScheduleResponse,
   AiScheduleFormState,
   LatestAiOperationResponse,
   ScheduleFormState,
-  ScheduleMutationResponse,
   ScheduleTemplateResponse,
   ScheduleViewItem,
   SchoolSchedulesData,
@@ -23,7 +21,6 @@ import type {
   SchoolUsersResponse,
   TeacherRuleFormState,
   TeacherRuleListResponse,
-  TeacherRuleMutationResponse,
   TeacherUnavailableFormState,
   TeacherUnavailableResponse,
   TemplateFormState
@@ -35,19 +32,12 @@ import {
   DEFAULT_TEMPLATE_FORM,
   EMPTY_FORM,
   WEEKDAY_OPTIONS,
-  addMinutesToTime,
-  applyTemplateToAiForm,
   formatTeacherRuleSummary,
-  getSchoolSchedulesRequestMessage,
-  isMissingSchoolScheduleClassError,
-  isMissingSchoolScheduleOperationError,
-  isMissingSchoolSchedulePreviewError,
-  isMissingSchoolScheduleSessionError,
-  isMissingSchoolScheduleTeacherRuleError,
-  isMissingSchoolScheduleTeacherUnavailableError,
-  isMissingSchoolScheduleTemplateError,
-  toOptionalNumber
+  getSchoolSchedulesRequestMessage
 } from "./utils";
+import { useSchoolSchedulesAiActions } from "./useSchoolSchedulesAiActions";
+import { useSchoolSchedulesConstraintActions } from "./useSchoolSchedulesConstraintActions";
+import { useSchoolSchedulesManualActions } from "./useSchoolSchedulesManualActions";
 
 export function useSchoolSchedulesPage() {
   const loadRequestIdRef = useRef(0);
@@ -444,684 +434,97 @@ export function useSchoolSchedulesPage() {
     return map;
   }, [filteredSessions]);
 
-  const scrollToManualEditor = useCallback(() => {
-    if (typeof window === "undefined") return;
-    window.requestAnimationFrame(() => {
-      manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const {
+    buildManualScheduleDraft,
+    resetForm,
+    startCreateForClass,
+    startEdit,
+    clearWeekViewFilters,
+    keepFocusedClassWeekView,
+    focusClassInWeekView,
+    applySelectedClassTemplateToForm,
+    handleSave,
+    handleDelete,
+    handleToggleLock
+  } = useSchoolSchedulesManualActions({
+    classes,
+    templateByKey,
+    classWeekdayCountByClass,
+    form,
+    editingId,
+    classFilter,
+    manualEditorRef,
+    weekViewRef,
+    loadData,
+    handleAuthRequired,
+    setClassFilter,
+    setWeekdayFilter,
+    setKeyword,
+    setEditingId,
+    setForm,
+    setFormError,
+    setFormMessage,
+    setSaving,
+    setDeletingId,
+    setPageError,
+    setLockingId
+  });
+
+  const { toggleAiWeekday, resetAiForm, handleAiPreview, handleAiApplyPreview, handleAiRollback } =
+    useSchoolSchedulesAiActions({
+      aiForm,
+      aiResult,
+      latestAiOperation,
+      loadData,
+      handleAuthRequired,
+      setAiForm,
+      setAiGenerating,
+      setAiRollingBack,
+      setAiMessage,
+      setAiError,
+      setAiResult,
+      setLatestAiOperation
     });
-  }, []);
 
-  const scrollToWeekView = useCallback(() => {
-    if (typeof window === "undefined") return;
-    window.requestAnimationFrame(() => {
-      weekViewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  }, []);
-
-  const buildManualScheduleDraft = useCallback((classId: string) => {
-    const klass = classes.find((item) => item.id === classId);
-    const template = klass ? templateByKey.get(`${klass.grade}:${klass.subject}`) ?? null : null;
-    const weekdayCountMap = classWeekdayCountByClass.get(classId) ?? new Map<string, number>();
-    const candidateWeekdays = template?.weekdays?.length ? template.weekdays.map((item) => String(item)) : WEEKDAY_OPTIONS.map((item) => item.value);
-    const weekday =
-      candidateWeekdays
-        .slice()
-        .sort((left, right) => (weekdayCountMap.get(left) ?? 0) - (weekdayCountMap.get(right) ?? 0) || Number(left) - Number(right))[0] ??
-      EMPTY_FORM.weekday;
-    const startTime = template?.dayStartTime ?? EMPTY_FORM.startTime;
-    const lessonDuration = template?.lessonDurationMinutes ?? 45;
-    return {
-      ...EMPTY_FORM,
-      classId,
-      weekday,
-      startTime,
-      endTime: addMinutesToTime(startTime, lessonDuration),
-      campus: template?.campus ?? EMPTY_FORM.campus
-    } satisfies ScheduleFormState;
-  }, [classWeekdayCountByClass, classes, templateByKey]);
-
-  const resetForm = useCallback((options?: { preserveMessage?: boolean; nextClassId?: string }) => {
-    setEditingId(null);
-    setFormError(null);
-    if (!options?.preserveMessage) {
-      setFormMessage(null);
-    }
-    const nextClassId = options?.nextClassId ?? classes[0]?.id ?? "";
-    setForm(nextClassId ? buildManualScheduleDraft(nextClassId) : { ...EMPTY_FORM, classId: nextClassId });
-  }, [buildManualScheduleDraft, classes]);
-
-  const startCreateForClass = useCallback((classId: string) => {
-    setEditingId(null);
-    setFormError(null);
-    setFormMessage(null);
-    setForm(buildManualScheduleDraft(classId));
-    scrollToManualEditor();
-  }, [buildManualScheduleDraft, scrollToManualEditor]);
-
-  const startEdit = useCallback((item: ScheduleViewItem) => {
-    setEditingId(item.id);
-    setFormError(null);
-    setFormMessage(null);
-    setForm({
-      classId: item.classId,
-      weekday: String(item.weekday),
-      startTime: item.startTime,
-      endTime: item.endTime,
-      slotLabel: item.slotLabel ?? "",
-      room: item.room ?? "",
-      campus: item.campus ?? "",
-      focusSummary: item.focusSummary ?? "",
-      note: item.note ?? ""
-    });
-    scrollToManualEditor();
-  }, [scrollToManualEditor]);
-
-  const clearWeekViewFilters = useCallback(() => {
-    setClassFilter("all");
-    setWeekdayFilter("all");
-    setKeyword("");
-  }, []);
-
-  const keepFocusedClassWeekView = useCallback(() => {
-    if (classFilter === "all") return;
-    setWeekdayFilter("all");
-    setKeyword("");
-  }, [classFilter]);
-
-  const focusClassInWeekView = useCallback((classId: string) => {
-    setClassFilter(classId);
-    setWeekdayFilter("all");
-    setKeyword("");
-    scrollToWeekView();
-  }, [scrollToWeekView]);
-
-  const applySelectedClassTemplateToForm = useCallback(() => {
-    if (!selectedManualClass) return;
-    const draft = buildManualScheduleDraft(selectedManualClass.id);
-    setForm((prev) => ({
-      ...prev,
-      classId: selectedManualClass.id,
-      weekday: draft.weekday,
-      startTime: draft.startTime,
-      endTime: draft.endTime,
-      campus: draft.campus || prev.campus
-    }));
-    setFormMessage("已带入该班模板的推荐星期、时间和校区，可继续微调后保存。");
-    setFormError(null);
-  }, [buildManualScheduleDraft, selectedManualClass]);
-
-  const handleSave = useCallback(async () => {
-    setSaving(true);
-    setFormError(null);
-    setFormMessage(null);
-    try {
-      const payload = {
-        classId: form.classId,
-        weekday: Number(form.weekday),
-        startTime: form.startTime,
-        endTime: form.endTime,
-        slotLabel: form.slotLabel,
-        room: form.room,
-        campus: form.campus,
-        focusSummary: form.focusSummary,
-        note: form.note
-      };
-      if (!payload.classId) {
-        throw new Error("请选择班级");
-      }
-      const successMessage = editingId ? "课程节次已更新" : "课程节次已创建";
-      if (editingId) {
-        await requestJson<ScheduleMutationResponse>(`/api/school/schedules/${editingId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            weekday: payload.weekday,
-            startTime: payload.startTime,
-            endTime: payload.endTime,
-            slotLabel: payload.slotLabel,
-            room: payload.room,
-            campus: payload.campus,
-            focusSummary: payload.focusSummary,
-            note: payload.note
-          })
-        });
-      } else {
-        await requestJson<ScheduleMutationResponse>("/api/school/schedules", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-      }
-      await loadData("refresh");
-      resetForm({ preserveMessage: true, nextClassId: payload.classId });
-      setFormMessage(successMessage);
-    } catch (error) {
-      if (isSchoolAdminAuthRequiredError(error)) {
-        handleAuthRequired();
-      } else if (isMissingSchoolScheduleClassError(error) || (editingId && isMissingSchoolScheduleSessionError(error))) {
-        resetForm({ preserveMessage: true });
-        await loadData("refresh");
-        setFormError(getSchoolSchedulesRequestMessage(error, editingId ? "更新节次失败" : "创建节次失败"));
-      } else {
-        setFormError(getSchoolSchedulesRequestMessage(error, editingId ? "更新节次失败" : "创建节次失败"));
-      }
-    } finally {
-      setSaving(false);
-    }
-  }, [editingId, form, handleAuthRequired, loadData, resetForm]);
-
-  const handleDelete = useCallback(async (id: string) => {
-    if (typeof window !== "undefined" && !window.confirm("确定删除这个课程节次吗？")) {
-      return;
-    }
-    setDeletingId(id);
-    setPageError(null);
-    try {
-      await requestJson<ScheduleMutationResponse>(`/api/school/schedules/${id}`, { method: "DELETE" });
-      if (editingId === id) {
-        resetForm({ preserveMessage: true });
-      }
-      await loadData("refresh");
-      setFormMessage("课程节次已删除");
-    } catch (error) {
-      if (isSchoolAdminAuthRequiredError(error)) {
-        handleAuthRequired();
-      } else if (isMissingSchoolScheduleSessionError(error)) {
-        if (editingId === id) {
-          resetForm({ preserveMessage: true });
-        }
-        await loadData("refresh");
-        setPageError(getSchoolSchedulesRequestMessage(error, "删除节次失败"));
-      } else {
-        setPageError(getSchoolSchedulesRequestMessage(error, "删除节次失败"));
-      }
-    } finally {
-      setDeletingId(null);
-    }
-  }, [editingId, handleAuthRequired, loadData, resetForm]);
-
-  const toggleAiWeekday = useCallback((weekday: string) => {
-    setAiForm((prev) => {
-      const exists = prev.weekdays.includes(weekday);
-      const weekdays = exists
-        ? prev.weekdays.filter((item) => item !== weekday)
-        : [...prev.weekdays, weekday].sort((left, right) => Number(left) - Number(right));
-      return { ...prev, weekdays };
-    });
-  }, []);
-
-  const resetAiForm = useCallback(() => {
-    setAiForm(DEFAULT_AI_FORM);
-    setAiError(null);
-    setAiMessage(null);
-    setAiResult(null);
-  }, []);
-
-  const buildAiRequestBody = useCallback(() => {
-    const weeklyLessonsPerClass = Number(aiForm.weeklyLessonsPerClass);
-    const lessonDurationMinutes = Number(aiForm.lessonDurationMinutes);
-    const periodsPerDay = Number(aiForm.periodsPerDay);
-    const shortBreakMinutes = Number(aiForm.shortBreakMinutes);
-    const lunchBreakMinutes = Number(aiForm.lunchBreakMinutes);
-    const lunchBreakAfterPeriod = aiForm.lunchBreakAfterPeriod ? Number(aiForm.lunchBreakAfterPeriod) : undefined;
-
-    if (!aiForm.weekdays.length) {
-      throw new Error("请至少选择 1 个排课日。");
-    }
-    if (!Number.isFinite(weeklyLessonsPerClass) || weeklyLessonsPerClass < 1) {
-      throw new Error("请填写有效的每班每周总节数。");
-    }
-
-    return {
-      weeklyLessonsPerClass,
-      lessonDurationMinutes,
-      periodsPerDay,
-      weekdays: aiForm.weekdays.map((item) => Number(item)),
-      dayStartTime: aiForm.dayStartTime,
-      shortBreakMinutes,
-      lunchBreakAfterPeriod,
-      lunchBreakMinutes,
-      mode: aiForm.mode,
-      campus: aiForm.campus
-    };
-  }, [aiForm]);
-
-  const handleAiPreview = useCallback(async () => {
-    try {
-      const payload = buildAiRequestBody();
-      setAiGenerating(true);
-      setAiError(null);
-      setAiMessage(null);
-      const result = await requestJson<AiScheduleResponse>("/api/school/schedules/ai-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      setAiResult(result.data ?? null);
-      setAiMessage(`AI 预演已完成，预计新增 ${result.data?.summary.createdSessions ?? 0} 个节次。`);
-    } catch (error) {
-      if (isSchoolAdminAuthRequiredError(error)) {
-        handleAuthRequired();
-      } else {
-        setAiError(getSchoolSchedulesRequestMessage(error, "AI 预演失败"));
-      }
-    } finally {
-      setAiGenerating(false);
-    }
-  }, [buildAiRequestBody, handleAuthRequired]);
-
-  const handleAiApplyPreview = useCallback(async () => {
-    if (!aiResult?.previewId) {
-      setAiError("请先完成一次 AI 预演。");
-      return;
-    }
-    if (aiForm.mode === "replace_all" && typeof window !== "undefined") {
-      const confirmed = window.confirm("确认将本次 AI 预演正式写入课表吗？系统会保留已锁定节次，并支持回滚最近一次 AI 排课。");
-      if (!confirmed) return;
-    }
-
-    setAiGenerating(true);
-    setAiError(null);
-    setAiMessage(null);
-    try {
-      const result = await requestJson<AiScheduleResponse>(`/api/school/schedules/ai-preview/${aiResult.previewId}/apply`, {
-        method: "POST"
-      });
-      setAiResult(result.data ?? null);
-      await loadData("refresh");
-      setAiMessage(`AI 排课已写入课表，本次新增 ${result.data?.summary.createdSessions ?? 0} 个节次。`);
-    } catch (error) {
-      if (isSchoolAdminAuthRequiredError(error)) {
-        handleAuthRequired();
-      } else if (isMissingSchoolSchedulePreviewError(error)) {
-        setAiResult(null);
-        await loadData("refresh");
-        setAiError(getSchoolSchedulesRequestMessage(error, "确认写入 AI 排课失败"));
-      } else {
-        setAiError(getSchoolSchedulesRequestMessage(error, "确认写入 AI 排课失败"));
-      }
-    } finally {
-      setAiGenerating(false);
-    }
-  }, [aiForm.mode, aiResult?.previewId, handleAuthRequired, loadData]);
-
-  const handleAiRollback = useCallback(async () => {
-    if (!latestAiOperation?.id) {
-      setAiError("当前没有可回滚的 AI 排课记录。");
-      return;
-    }
-    if (typeof window !== "undefined") {
-      const confirmed = window.confirm("确定回滚最近一次已写入的 AI 排课吗？仅在课表未被后续人工调整时可成功回滚。");
-      if (!confirmed) return;
-    }
-
-    setAiRollingBack(true);
-    setAiError(null);
-    setAiMessage(null);
-    try {
-      const result = await requestJson<AiRollbackResponse>("/api/school/schedules/ai-operations/rollback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operationId: latestAiOperation.id })
-      });
-      setAiResult(null);
-      await loadData("refresh");
-      setAiMessage(`已回滚最近一次 AI 排课，恢复 ${result.data?.restoredSessionCount ?? 0} 个节次。`);
-    } catch (error) {
-      if (isSchoolAdminAuthRequiredError(error)) {
-        handleAuthRequired();
-      } else if (isMissingSchoolScheduleOperationError(error)) {
-        setLatestAiOperation(null);
-        await loadData("refresh");
-        setAiError(getSchoolSchedulesRequestMessage(error, "回滚 AI 排课失败"));
-      } else {
-        setAiError(getSchoolSchedulesRequestMessage(error, "回滚 AI 排课失败"));
-      }
-    } finally {
-      setAiRollingBack(false);
-    }
-  }, [handleAuthRequired, latestAiOperation?.id, loadData]);
-
-  const handleToggleLock = useCallback(async (item: ScheduleViewItem) => {
-    setLockingId(item.id);
-    setPageError(null);
-    setFormError(null);
-    setFormMessage(null);
-    try {
-      await requestJson<ScheduleMutationResponse>(`/api/school/schedules/${item.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ locked: !item.locked })
-      });
-      if (editingId === item.id && !item.locked) {
-        resetForm({ preserveMessage: true });
-      }
-      await loadData("refresh");
-      setFormMessage(item.locked ? "课程节次已解锁" : "课程节次已锁定");
-    } catch (error) {
-      if (isSchoolAdminAuthRequiredError(error)) {
-        handleAuthRequired();
-      } else if (isMissingSchoolScheduleSessionError(error)) {
-        if (editingId === item.id) {
-          resetForm({ preserveMessage: true });
-        }
-        await loadData("refresh");
-        setPageError(getSchoolSchedulesRequestMessage(error, item.locked ? "解锁节次失败" : "锁定节次失败"));
-      } else {
-        setPageError(getSchoolSchedulesRequestMessage(error, item.locked ? "解锁节次失败" : "锁定节次失败"));
-      }
-    } finally {
-      setLockingId(null);
-    }
-  }, [editingId, handleAuthRequired, loadData, resetForm]);
-
-  const toggleTemplateWeekday = useCallback((weekday: string) => {
-    setTemplateForm((prev) => {
-      const exists = prev.weekdays.includes(weekday);
-      const weekdays = exists
-        ? prev.weekdays.filter((item) => item !== weekday)
-        : [...prev.weekdays, weekday].sort((left, right) => Number(left) - Number(right));
-      return { ...prev, weekdays };
-    });
-  }, []);
-
-  const resetTemplateForm = useCallback(() => {
-    setTemplateForm((prev) => ({
-      ...DEFAULT_TEMPLATE_FORM,
-      grade: prev.grade || gradeOptions[0] || "",
-      subject: prev.subject || subjectOptions[0] || ""
-    }));
-    setTemplateError(null);
-    setTemplateMessage(null);
-  }, [gradeOptions, subjectOptions]);
-
-  const resetTeacherRuleForm = useCallback(() => {
-    setTeacherRuleForm((prev) => ({
-      ...DEFAULT_TEACHER_RULE_FORM,
-      teacherId: prev.teacherId || teacherOptions[0]?.id || ""
-    }));
-    setTeacherRuleError(null);
-    setTeacherRuleMessage(null);
-  }, [teacherOptions]);
-
-  const startEditTeacherRule = useCallback((rule: TeacherScheduleRule) => {
-    setTeacherRuleError(null);
-    setTeacherRuleMessage(null);
-    setTeacherRuleForm({
-      id: rule.id,
-      teacherId: rule.teacherId,
-      weeklyMaxLessons: rule.weeklyMaxLessons ? String(rule.weeklyMaxLessons) : "",
-      maxConsecutiveLessons: rule.maxConsecutiveLessons ? String(rule.maxConsecutiveLessons) : "",
-      minCampusGapMinutes: rule.minCampusGapMinutes ? String(rule.minCampusGapMinutes) : ""
-    });
-  }, []);
-
-  const startEditTemplate = useCallback((template: SchoolScheduleTemplate) => {
-    setTemplateError(null);
-    setTemplateMessage(null);
-    setTemplateForm({
-      id: template.id,
-      grade: template.grade,
-      subject: template.subject,
-      weeklyLessonsPerClass: String(template.weeklyLessonsPerClass),
-      lessonDurationMinutes: String(template.lessonDurationMinutes),
-      periodsPerDay: String(template.periodsPerDay),
-      dayStartTime: template.dayStartTime,
-      shortBreakMinutes: String(template.shortBreakMinutes),
-      lunchBreakAfterPeriod: template.lunchBreakAfterPeriod ? String(template.lunchBreakAfterPeriod) : "",
-      lunchBreakMinutes: String(template.lunchBreakMinutes),
-      campus: template.campus ?? "主校区",
-      weekdays: template.weekdays.map((item) => String(item))
-    });
-  }, []);
-
-  const handleSaveTemplate = useCallback(async () => {
-    const weeklyLessonsPerClass = Number(templateForm.weeklyLessonsPerClass);
-    const lessonDurationMinutes = Number(templateForm.lessonDurationMinutes);
-    const periodsPerDay = Number(templateForm.periodsPerDay);
-    const shortBreakMinutes = Number(templateForm.shortBreakMinutes);
-    const lunchBreakMinutes = Number(templateForm.lunchBreakMinutes);
-    const lunchBreakAfterPeriod = templateForm.lunchBreakAfterPeriod ? Number(templateForm.lunchBreakAfterPeriod) : undefined;
-    if (!templateForm.grade || !templateForm.subject) {
-      setTemplateError("请选择年级和学科。");
-      return;
-    }
-    if (!templateForm.weekdays.length) {
-      setTemplateError("模板至少需要 1 个排课日。");
-      return;
-    }
-    setTemplateSaving(true);
-    setTemplateError(null);
-    setTemplateMessage(null);
-    try {
-      await requestJson<ScheduleTemplateResponse>("/api/school/schedules/templates", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: templateForm.id,
-          grade: templateForm.grade,
-          subject: templateForm.subject,
-          weeklyLessonsPerClass,
-          lessonDurationMinutes,
-          periodsPerDay,
-          weekdays: templateForm.weekdays.map((item) => Number(item)),
-          dayStartTime: templateForm.dayStartTime,
-          shortBreakMinutes,
-          lunchBreakAfterPeriod,
-          lunchBreakMinutes,
-          campus: templateForm.campus
-        })
-      });
-      await loadData("refresh");
-      setTemplateMessage(templateForm.id ? "课时模板已更新" : "课时模板已保存");
-      setTemplateForm((prev) => ({ ...prev, id: undefined }));
-    } catch (error) {
-      if (isSchoolAdminAuthRequiredError(error)) {
-        handleAuthRequired();
-      } else if (isMissingSchoolScheduleTemplateError(error)) {
-        resetTemplateForm();
-        await loadData("refresh");
-        setTemplateError(getSchoolSchedulesRequestMessage(error, "保存模板失败"));
-      } else {
-        setTemplateError(getSchoolSchedulesRequestMessage(error, "保存模板失败"));
-      }
-    } finally {
-      setTemplateSaving(false);
-    }
-  }, [handleAuthRequired, loadData, resetTemplateForm, templateForm]);
-
-  const applyDraftTemplateToAi = useCallback(() => {
-    if (!templateForm.grade || !templateForm.subject || !templateForm.weekdays.length) {
-      setTemplateError("请先补全年级、学科和排课日，再应用到 AI 参数。");
-      return;
-    }
-    setAiForm(
-      applyTemplateToAiForm({
-        id: templateForm.id ?? "draft-template",
-        schoolId: "school-default",
-        grade: templateForm.grade,
-        subject: templateForm.subject,
-        weeklyLessonsPerClass: Number(templateForm.weeklyLessonsPerClass) || 5,
-        lessonDurationMinutes: Number(templateForm.lessonDurationMinutes) || 45,
-        periodsPerDay: Number(templateForm.periodsPerDay) || 6,
-        weekdays: templateForm.weekdays.map((item) => Number(item)) as Array<1 | 2 | 3 | 4 | 5 | 6 | 7>,
-        dayStartTime: templateForm.dayStartTime,
-        shortBreakMinutes: Number(templateForm.shortBreakMinutes) || 10,
-        lunchBreakAfterPeriod: templateForm.lunchBreakAfterPeriod ? Number(templateForm.lunchBreakAfterPeriod) : undefined,
-        lunchBreakMinutes: Number(templateForm.lunchBreakMinutes) || 60,
-        campus: templateForm.campus,
-        createdAt: "",
-        updatedAt: ""
-      })
-    );
-    setTemplateMessage("模板参数已同步到 AI 排课配置区。");
-  }, [templateForm]);
-
-  const handleDeleteTemplate = useCallback(async (id: string) => {
-    if (typeof window !== "undefined" && !window.confirm("确定删除这个课时模板吗？")) {
-      return;
-    }
-    setTemplateDeletingId(id);
-    setTemplateError(null);
-    setTemplateMessage(null);
-    try {
-      await requestJson(`/api/school/schedules/templates/${id}`, { method: "DELETE" });
-      await loadData("refresh");
-      if (templateForm.id === id) {
-        resetTemplateForm();
-      }
-      setTemplateMessage("课时模板已删除");
-    } catch (error) {
-      if (isSchoolAdminAuthRequiredError(error)) {
-        handleAuthRequired();
-      } else if (isMissingSchoolScheduleTemplateError(error)) {
-        if (templateForm.id === id) {
-          resetTemplateForm();
-        }
-        await loadData("refresh");
-        setTemplateError(getSchoolSchedulesRequestMessage(error, "删除模板失败"));
-      } else {
-        setTemplateError(getSchoolSchedulesRequestMessage(error, "删除模板失败"));
-      }
-    } finally {
-      setTemplateDeletingId(null);
-    }
-  }, [handleAuthRequired, loadData, resetTemplateForm, templateForm.id]);
-
-  const handleSaveTeacherRule = useCallback(async () => {
-    const weeklyMaxLessons = toOptionalNumber(teacherRuleForm.weeklyMaxLessons);
-    const maxConsecutiveLessons = toOptionalNumber(teacherRuleForm.maxConsecutiveLessons);
-    const minCampusGapMinutes = toOptionalNumber(teacherRuleForm.minCampusGapMinutes);
-    if (!teacherRuleForm.teacherId) {
-      setTeacherRuleError("请选择教师。");
-      return;
-    }
-    if (weeklyMaxLessons === undefined && maxConsecutiveLessons === undefined && minCampusGapMinutes === undefined) {
-      setTeacherRuleError("请至少填写一项教师排课规则。");
-      return;
-    }
-    setTeacherRuleSaving(true);
-    setTeacherRuleError(null);
-    setTeacherRuleMessage(null);
-    try {
-      await requestJson<TeacherRuleMutationResponse>("/api/school/schedules/teacher-rules", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: teacherRuleForm.id,
-          teacherId: teacherRuleForm.teacherId,
-          weeklyMaxLessons,
-          maxConsecutiveLessons,
-          minCampusGapMinutes
-        })
-      });
-      await loadData("refresh");
-      setTeacherRuleMessage(teacherRuleForm.id ? "教师排课规则已更新" : "教师排课规则已保存");
-      setTeacherRuleForm((prev) => ({ ...DEFAULT_TEACHER_RULE_FORM, teacherId: prev.teacherId }));
-    } catch (error) {
-      if (isSchoolAdminAuthRequiredError(error)) {
-        handleAuthRequired();
-      } else if (isMissingSchoolScheduleTeacherRuleError(error)) {
-        resetTeacherRuleForm();
-        await loadData("refresh");
-        setTeacherRuleError(getSchoolSchedulesRequestMessage(error, "保存教师排课规则失败"));
-      } else {
-        setTeacherRuleError(getSchoolSchedulesRequestMessage(error, "保存教师排课规则失败"));
-      }
-    } finally {
-      setTeacherRuleSaving(false);
-    }
-  }, [handleAuthRequired, loadData, resetTeacherRuleForm, teacherRuleForm]);
-
-  const handleDeleteTeacherRule = useCallback(async (id: string) => {
-    if (typeof window !== "undefined" && !window.confirm("确定删除这个教师排课规则吗？")) {
-      return;
-    }
-    setTeacherRuleDeletingId(id);
-    setTeacherRuleError(null);
-    setTeacherRuleMessage(null);
-    try {
-      await requestJson(`/api/school/schedules/teacher-rules/${id}`, { method: "DELETE" });
-      await loadData("refresh");
-      if (teacherRuleForm.id === id) {
-        resetTeacherRuleForm();
-      }
-      setTeacherRuleMessage("教师排课规则已删除");
-    } catch (error) {
-      if (isSchoolAdminAuthRequiredError(error)) {
-        handleAuthRequired();
-      } else if (isMissingSchoolScheduleTeacherRuleError(error)) {
-        if (teacherRuleForm.id === id) {
-          resetTeacherRuleForm();
-        }
-        await loadData("refresh");
-        setTeacherRuleError(getSchoolSchedulesRequestMessage(error, "删除教师排课规则失败"));
-      } else {
-        setTeacherRuleError(getSchoolSchedulesRequestMessage(error, "删除教师排课规则失败"));
-      }
-    } finally {
-      setTeacherRuleDeletingId(null);
-    }
-  }, [handleAuthRequired, loadData, resetTeacherRuleForm, teacherRuleForm.id]);
-
-  const handleSaveTeacherUnavailable = useCallback(async () => {
-    if (!teacherUnavailableForm.teacherId) {
-      setTeacherUnavailableError("请选择教师。");
-      return;
-    }
-    setTeacherUnavailableSaving(true);
-    setTeacherUnavailableError(null);
-    setTeacherUnavailableMessage(null);
-    try {
-      await requestJson<TeacherUnavailableResponse>("/api/school/schedules/teacher-unavailability", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          teacherId: teacherUnavailableForm.teacherId,
-          weekday: Number(teacherUnavailableForm.weekday),
-          startTime: teacherUnavailableForm.startTime,
-          endTime: teacherUnavailableForm.endTime,
-          reason: teacherUnavailableForm.reason
-        })
-      });
-      await loadData("refresh");
-      setTeacherUnavailableMessage("教师禁排时段已保存");
-      setTeacherUnavailableForm((prev) => ({ ...DEFAULT_TEACHER_UNAVAILABLE_FORM, teacherId: prev.teacherId }));
-    } catch (error) {
-      if (isSchoolAdminAuthRequiredError(error)) {
-        handleAuthRequired();
-      } else {
-        setTeacherUnavailableError(getSchoolSchedulesRequestMessage(error, "保存教师禁排失败"));
-      }
-    } finally {
-      setTeacherUnavailableSaving(false);
-    }
-  }, [handleAuthRequired, loadData, teacherUnavailableForm]);
-
-  const handleDeleteTeacherUnavailable = useCallback(async (id: string) => {
-    if (typeof window !== "undefined" && !window.confirm("确定删除这个教师禁排时段吗？")) {
-      return;
-    }
-    setTeacherUnavailableDeletingId(id);
-    setTeacherUnavailableError(null);
-    setTeacherUnavailableMessage(null);
-    try {
-      await requestJson(`/api/school/schedules/teacher-unavailability/${id}`, { method: "DELETE" });
-      await loadData("refresh");
-      setTeacherUnavailableMessage("教师禁排时段已删除");
-    } catch (error) {
-      if (isSchoolAdminAuthRequiredError(error)) {
-        handleAuthRequired();
-      } else if (isMissingSchoolScheduleTeacherUnavailableError(error)) {
-        await loadData("refresh");
-        setTeacherUnavailableError(getSchoolSchedulesRequestMessage(error, "删除教师禁排失败"));
-      } else {
-        setTeacherUnavailableError(getSchoolSchedulesRequestMessage(error, "删除教师禁排失败"));
-      }
-    } finally {
-      setTeacherUnavailableDeletingId(null);
-    }
-  }, [handleAuthRequired, loadData]);
+  const {
+    toggleTemplateWeekday,
+    resetTemplateForm,
+    resetTeacherRuleForm,
+    startEditTeacherRule,
+    startEditTemplate,
+    handleSaveTemplate,
+    applyDraftTemplateToAi,
+    handleDeleteTemplate,
+    handleSaveTeacherRule,
+    handleDeleteTeacherRule,
+    handleSaveTeacherUnavailable,
+    handleDeleteTeacherUnavailable
+  } = useSchoolSchedulesConstraintActions({
+    gradeOptions,
+    subjectOptions,
+    teacherOptions,
+    templateForm,
+    teacherRuleForm,
+    teacherUnavailableForm,
+    loadData,
+    handleAuthRequired,
+    setAiForm,
+    setTemplateForm,
+    setTemplateSaving,
+    setTemplateDeletingId,
+    setTemplateMessage,
+    setTemplateError,
+    setTeacherRuleForm,
+    setTeacherRuleSaving,
+    setTeacherRuleDeletingId,
+    setTeacherRuleMessage,
+    setTeacherRuleError,
+    setTeacherUnavailableForm,
+    setTeacherUnavailableSaving,
+    setTeacherUnavailableDeletingId,
+    setTeacherUnavailableMessage,
+    setTeacherUnavailableError
+  });
 
   return {
     manualEditorRef,

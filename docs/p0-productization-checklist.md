@@ -1,6 +1,6 @@
 # P0 Productization Checklist
 
-更新时间：2026-03-17
+更新时间：2026-03-21
 
 目标：把当前项目从“功能完整的试点原型”推进到“可交付、可回滚、可复盘”的试点产品。
 
@@ -14,18 +14,18 @@
 
 - 工程基线已通过：`npm run verify:strict`、`npm run test:smoke:remote`
 - 快照文档校验：提交前执行 `npm run check:project-snapshot`
-- 当前规模：`68` 个页面、`191` 个 API 路由、`90` 个单测文件
-- 当前浏览器回归：`1` 个 smoke 文件、`14` 条关键流程 smoke
-- 当前单测基线：`test:unit` 为 `235` 条用例
+- 当前规模：`68` 个页面、`191` 个 API 路由、`98` 个单测文件
+- 当前浏览器回归：`2` 个 smoke 文件、`22` 条关键流程 smoke；其中 `1` 个 production-like smoke 文件覆盖 `20` 条主链路，另有 `1` 个 local-dev 浏览器契约文件覆盖 `2` 条无 DB 入口回归
+- 当前单测基线：`test:unit` 为 `346` 条用例
 - 当前剩余文件态：当前工作树 `data/` 目录下还有 `23` 个 JSON 文件；`23` 个均已具备 DB canonical path，当前可见文件中已无 JSON-only 项
 - 运行时仍存在 `data/*.json` 种子与 fallback 状态文件，但 P0 高频执行态已经收口为 DB-only，生产基线从“能跑”提升到“有明确硬失败边界”
 - 关键前端工作台已成型：学生、家长、教师、学校、管理端均可单独进入
 
 ### 当前重点
 
-- 学校排课栈已完成 DB canonical 收口，并补上了查询、创建、AI 预演 / 应用 / 回滚的路由级回归；远端 / production-like smoke、主干 CI production-like regression 与 browser smoke 都已经覆盖管理员课表关键闭环、公开账号恢复入口、登录锁定、管理员异常登录安全告警、学生考试提交、学生作业附件上传并由教师批改页读取 / 下载、恢复工单后台处理、资料库文件上传 / 下载 / 分享与学校组织边界；`ai-eval-gate` 与 `student-personas` 也已补齐 DB canonical path，最新 production-like 浏览器回归已清空 runtime fallback 告警，下一步转向其余对象存储链路、稳态巡检与 hook 定向单测
+- 学校排课栈已完成 DB canonical 收口，并补上了查询、创建、AI 预演 / 应用 / 回滚的路由级回归；远端 / production-like smoke、主干 CI production-like regression 与 browser smoke 都已经覆盖管理员课表关键闭环、公开账号恢复入口、登录锁定、管理员异常登录安全告警、学生考试提交、学生作业附件上传并由教师批改页读取 / 下载、教师课程资料上传并由学生在课程文件中心访问 / 下载、教师发布公告并由学生查看、教师发布公告并由家长查看、教师发起站内会话并由学生回复、教师抄送家长的站内会话并由家长回复、教师上传模块资源并由学生在模块详情页访问 / 下载、恢复工单后台处理、资料库文件上传 / 下载 / 分享与学校组织边界；`ai-eval-gate` 与 `student-personas` 也已补齐 DB canonical path，最新 production-like 浏览器回归已清空 runtime fallback 告警；本轮也补上了 `admin questions`、`admin ai models`、`admin knowledge points`、`teacher assignment detail`、`teacher assignment review`、`teacher exam detail`、`teacher exam create`、`student dashboard`、`student portrait`、`report`、`student favorites`、`student profile`、`announcements`、`notifications`、`library`、`library detail`、`school schedules`、`teacher ai tools`、`teacher modules`、`teacher notifications`、`teacher analysis`、`teacher seating`、`discussions`、`student exam detail`、`student assignment detail`、`inbox`、`teacher dashboard`、`wrong-book`、`tutor`、`parent`、`files`、`course` 与 `account-recovery` 拆层后的定向纯函数单测，下一步转向其余对象存储链路与 `school schedules / practice / admin ai models / tutor / teacher notifications / wrong-book / teacher submissions / parent` 等剩余维护热点
 - 对当前工作树里 `23` 个已具备 DB canonical path 的文件，明确“生产态 DB canonical、JSON 仅作 seed / fallback”的使用边界
-- 在现有 `14` 条浏览器 smoke 基线上继续补其余对象存储读写链路，并保持 CI 中的强制 PostgreSQL + 对象存储浏览器回归稳定可用
+- 在现有 `20` 条浏览器 smoke 基线上继续补其余对象存储读写链路，并保持 CI 中的强制 PostgreSQL + 对象存储浏览器回归稳定可用
 - 继续缩小超大工作台文件和 page-level 直发请求入口，避免回归成本反弹
 
 ## 2. P0 必须完成
@@ -79,6 +79,8 @@
   - 用户连续登录失败后被临时锁定
   - 学生完成老师发布考试并提交
   - 学生上传作业附件并由教师在批改页读取 / 下载
+  - 教师上传课程资料并由学生在课程文件中心访问 / 下载
+  - 教师上传模块资源并由学生在模块详情页访问 / 下载
   - 管理员在工单台接单并解决恢复请求
   - 管理员完成资料库文件上传、下载与分享
   - 学校管理员排课 AI 预演 / 应用 / 回滚

@@ -84,6 +84,86 @@ export function resolveStudentFavoritesSelectedTag(favorites: FavoriteItem[], se
   return tags.has(selectedTag) ? selectedTag : "";
 }
 
+export function resolveStudentFavoritesActiveFilters(
+  favorites: FavoriteItem[],
+  subjectFilter: string,
+  selectedTag: string
+) {
+  return {
+    subjectFilter: resolveStudentFavoritesSubjectFilter(favorites, subjectFilter),
+    selectedTag: resolveStudentFavoritesSelectedTag(favorites, selectedTag)
+  };
+}
+
+export function getStudentFavoritesSubjectOptions(favorites: FavoriteItem[]) {
+  const subjects = Array.from(
+    new Set(favorites.map((item) => item.question?.subject).filter((value): value is string => Boolean(value)))
+  );
+  return subjects.sort((left, right) => (SUBJECT_LABELS[left] ?? left).localeCompare(SUBJECT_LABELS[right] ?? right, "zh-CN"));
+}
+
+export function getStudentFavoritesTopTags(favorites: FavoriteItem[]) {
+  const counter = new Map<string, number>();
+  favorites.forEach((item) => {
+    item.tags.forEach((tag) => counter.set(tag, (counter.get(tag) ?? 0) + 1));
+  });
+  return Array.from(counter.entries())
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "zh-CN"))
+    .slice(0, 10);
+}
+
+export function getFilteredStudentFavorites(
+  favorites: FavoriteItem[],
+  keyword: string,
+  selectedTag: string,
+  subjectFilter: string
+) {
+  const needle = keyword.trim().toLowerCase();
+  return favorites
+    .filter((item) => {
+      if (selectedTag && !item.tags.includes(selectedTag)) {
+        return false;
+      }
+      if (subjectFilter !== "all" && item.question?.subject !== subjectFilter) {
+        return false;
+      }
+      if (!needle) {
+        return true;
+      }
+      return buildFavoriteSearchText(item).includes(needle);
+    })
+    .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+}
+
+export function buildStudentFavoriteSavePayload(draftTags: string, draftNote: string) {
+  const tags = normalizeFavoriteTagInput(draftTags);
+  const note = draftNote.trim() || undefined;
+  return { tags, note };
+}
+
+export function applyStudentFavoriteSave(
+  favorites: FavoriteItem[],
+  questionId: string,
+  tags: string[],
+  note: string | undefined,
+  updatedAt: string
+) {
+  return favorites.map((favorite) =>
+    favorite.questionId === questionId
+      ? {
+          ...favorite,
+          tags,
+          note,
+          updatedAt
+        }
+      : favorite
+  );
+}
+
+export function removeStudentFavorite(favorites: FavoriteItem[], questionId: string) {
+  return favorites.filter((favorite) => favorite.questionId !== questionId);
+}
+
 export async function copyTextToClipboard(value: string) {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);

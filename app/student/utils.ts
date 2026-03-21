@@ -1,6 +1,18 @@
 import type { ScheduleResponse } from "@/lib/class-schedules";
 import { buildTutorLaunchHref } from "@/lib/tutor-launch";
-import type { EntryCategory, EntryCategoryMeta, EntryItem, TodayTask, TodayTaskStatus } from "./types";
+import type {
+  EntryCategory,
+  EntryCategoryMeta,
+  EntryItem,
+  JoinRequest,
+  MotivationPayload,
+  PlanItem,
+  StudentRadarSnapshot,
+  StudentWeakKnowledgePointSnapshot,
+  TodayTask,
+  TodayTaskPayload,
+  TodayTaskStatus
+} from "./types";
 
 export const STUDENT_DASHBOARD_GUIDE_KEY = "guide:student-dashboard:v1";
 
@@ -224,6 +236,75 @@ export const CATEGORY_META: Record<EntryCategory, EntryCategoryMeta> = {
 
 export const ENTRY_CATEGORIES: EntryCategory[] = ["priority", "practice", "growth"];
 
+type StudentDashboardDerivedStateInput = {
+  plan: PlanItem[];
+  motivation: MotivationPayload | null;
+  todayTasks: TodayTaskPayload | null;
+  schedule: ScheduleResponse["data"] | null;
+  joinRequests: JoinRequest[];
+  activeCategory: EntryCategory;
+  showAllEntries: boolean;
+};
+
+export type StudentDashboardTaskExposureProps = {
+  generatedAt: string;
+  taskId: string;
+  source: TodayTask["source"];
+  rank: number;
+  priority: number;
+  impactScore: number;
+  urgencyScore: number;
+  effortMinutes: number;
+};
+
+export function extractStudentDashboardPlanItems(payload: {
+  data?: {
+    items?: PlanItem[];
+    plan?: {
+      items?: PlanItem[];
+    };
+  } | null;
+  items?: PlanItem[];
+} | null | undefined): PlanItem[] {
+  if (Array.isArray(payload?.data?.items)) {
+    return payload.data.items;
+  }
+  if (Array.isArray(payload?.data?.plan?.items)) {
+    return payload.data.plan.items;
+  }
+  if (Array.isArray(payload?.items)) {
+    return payload.items;
+  }
+  return [];
+}
+
+export function extractStudentDashboardMotivation(
+  payload: MotivationPayload | { data?: MotivationPayload | null } | null | undefined
+): MotivationPayload | null {
+  if (!payload) {
+    return null;
+  }
+  if ("data" in payload) {
+    return payload.data ?? null;
+  }
+  if ("streak" in payload && "badges" in payload) {
+    return payload;
+  }
+  return null;
+}
+
+export function extractStudentDashboardRadarSnapshot(payload: {
+  data?: {
+    mastery?: {
+      weakKnowledgePoints?: StudentWeakKnowledgePointSnapshot[];
+    } | null;
+  };
+} | null | undefined): StudentRadarSnapshot | null {
+  return {
+    weakKnowledgePoint: payload?.data?.mastery?.weakKnowledgePoints?.[0] ?? null
+  };
+}
+
 export function getTodayTaskStatusLabel(status: TodayTaskStatus) {
   if (status === "overdue") return "逾期";
   if (status === "due_today") return "今日到期";
@@ -240,6 +321,180 @@ export function getTodayTaskSourceLabel(source: "assignment" | "exam" | "wrong_r
   if (source === "plan") return "计划";
   if (source === "lesson") return "课程提醒";
   return "挑战";
+}
+
+export function countStudentDashboardPendingJoinRequests(joinRequests: JoinRequest[]) {
+  return joinRequests.filter((item) => item.status === "pending").length;
+}
+
+export function getStudentDashboardTotalPlanCount(plan: PlanItem[]) {
+  return plan.reduce((sum, item) => sum + (Number(item.targetCount) || 0), 0);
+}
+
+export function getStudentDashboardWeakPlanCount(plan: PlanItem[]) {
+  return plan.filter((item) => item.masteryLevel === "weak").length;
+}
+
+export function buildStudentDashboardTopTodayTasks(todayTasks: TodayTaskPayload | null) {
+  if (!todayTasks) {
+    return [];
+  }
+  if (todayTasks.topTasks?.length) {
+    return todayTasks.topTasks.slice(0, 3);
+  }
+  return todayTasks.tasks.slice(0, 3);
+}
+
+export function buildStudentDashboardVisiblePriorityTasks(
+  todayTasks: TodayTaskPayload | null,
+  topTodayTasks: TodayTask[]
+) {
+  if (!todayTasks) {
+    return topTodayTasks;
+  }
+  if (todayTasks.groups?.mustDo?.length) {
+    return todayTasks.groups.mustDo.slice(0, 5);
+  }
+  return todayTasks.tasks.slice(0, 5);
+}
+
+export function getStudentDashboardHiddenTodayTaskCount(
+  todayTasks: TodayTaskPayload | null,
+  visiblePriorityTaskCount: number
+) {
+  return Math.max(0, (todayTasks?.tasks?.length ?? 0) - visiblePriorityTaskCount);
+}
+
+export function getStudentDashboardCategoryCounts(entryItems: EntryItem[] = ENTRY_ITEMS) {
+  return entryItems.reduce<Record<EntryCategory, number>>(
+    (acc, item) => {
+      acc[item.category] += 1;
+      return acc;
+    },
+    { priority: 0, practice: 0, growth: 0 }
+  );
+}
+
+export function getStudentDashboardEntriesByCategory(
+  activeCategory: EntryCategory,
+  entryItems: EntryItem[] = ENTRY_ITEMS
+) {
+  return entryItems
+    .filter((item) => item.category === activeCategory)
+    .sort((left, right) => left.order - right.order);
+}
+
+export function getStudentDashboardVisibleEntries(
+  entriesByCategory: EntryItem[],
+  activeCategory: EntryCategory,
+  showAllEntries: boolean
+) {
+  if (showAllEntries) {
+    return entriesByCategory;
+  }
+  return entriesByCategory.slice(0, CATEGORY_META[activeCategory].defaultCount);
+}
+
+export function getStudentDashboardRecommendedTask(
+  todayTasks: TodayTaskPayload | null,
+  visiblePriorityTasks: TodayTask[]
+) {
+  return todayTasks?.topTasks?.[0] ?? visiblePriorityTasks[0] ?? null;
+}
+
+export function buildStudentDashboardTaskExposureProps(
+  todayTasks: TodayTaskPayload | null,
+  topTodayTasks: TodayTask[]
+) {
+  if (!todayTasks?.generatedAt || topTodayTasks.length === 0) {
+    return [];
+  }
+
+  return topTodayTasks.map<StudentDashboardTaskExposureProps>((task, index) => ({
+    generatedAt: todayTasks.generatedAt,
+    taskId: task.id,
+    source: task.source,
+    rank: index + 1,
+    priority: task.priority,
+    impactScore: task.impactScore,
+    urgencyScore: task.urgencyScore,
+    effortMinutes: task.effortMinutes
+  }));
+}
+
+export function hasStudentDashboardData(options: {
+  plan: PlanItem[];
+  motivation: MotivationPayload | null;
+  todayTasks: TodayTaskPayload | null;
+  schedule: ScheduleResponse["data"] | null;
+  joinRequests: JoinRequest[];
+}) {
+  return (
+    options.plan.length > 0 ||
+    options.motivation !== null ||
+    options.todayTasks !== null ||
+    options.schedule !== null ||
+    options.joinRequests.length > 0
+  );
+}
+
+export function getStudentDashboardDerivedState({
+  plan,
+  motivation,
+  todayTasks,
+  schedule,
+  joinRequests,
+  activeCategory,
+  showAllEntries
+}: StudentDashboardDerivedStateInput) {
+  const pendingJoinCount = countStudentDashboardPendingJoinRequests(joinRequests);
+  const totalPlanCount = getStudentDashboardTotalPlanCount(plan);
+  const weakPlanCount = getStudentDashboardWeakPlanCount(plan);
+  const topTodayTasks = buildStudentDashboardTopTodayTasks(todayTasks);
+  const visiblePriorityTasks = buildStudentDashboardVisiblePriorityTasks(todayTasks, topTodayTasks);
+  const hiddenTodayTaskCount = getStudentDashboardHiddenTodayTaskCount(
+    todayTasks,
+    visiblePriorityTasks.length
+  );
+  const categoryCounts = getStudentDashboardCategoryCounts();
+  const entriesByCategory = getStudentDashboardEntriesByCategory(activeCategory);
+  const visibleEntries = getStudentDashboardVisibleEntries(
+    entriesByCategory,
+    activeCategory,
+    showAllEntries
+  );
+  const recommendedTask = getStudentDashboardRecommendedTask(
+    todayTasks,
+    visiblePriorityTasks
+  );
+
+  return {
+    pendingJoinCount,
+    totalPlanCount,
+    weakPlanCount,
+    topTodayTasks,
+    visiblePriorityTasks,
+    hiddenTodayTaskCount,
+    categoryCounts,
+    entriesByCategory,
+    visibleEntries,
+    recommendedTask,
+    hasDashboardData: hasStudentDashboardData({
+      plan,
+      motivation,
+      todayTasks,
+      schedule,
+      joinRequests
+    }),
+    taskExposureProps: buildStudentDashboardTaskExposureProps(todayTasks, topTodayTasks)
+  };
+}
+
+export function getStudentDashboardJoinSuccessMessage(
+  message: string | undefined,
+  nestedMessage: string | undefined
+) {
+  return message?.trim() || nestedMessage?.trim() || "已提交";
 }
 
 

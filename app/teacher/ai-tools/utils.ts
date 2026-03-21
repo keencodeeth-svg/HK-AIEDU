@@ -1,4 +1,15 @@
 import { getRequestErrorMessage, getRequestStatus } from "@/lib/client-request";
+import type {
+  ClassItem,
+  KnowledgePoint,
+  OutlineFormState,
+  PaperFormState,
+  PaperQuickFixAction,
+  QuestionCheckFormState,
+  ReviewPackDispatchSummary,
+  ReviewPackFailedItem,
+  WrongReviewFormState
+} from "./types";
 
 type TeacherAiToolsErrorScope =
   | "bootstrap"
@@ -20,6 +31,169 @@ export function resolveTeacherAiToolsClassId(currentClassId: string, classes: Ar
     return currentClassId;
   }
   return classes[0]?.id ?? "";
+}
+
+export function hasTeacherAiToolsClassChanged(previousClassId: string, nextClassId: string) {
+  return Boolean(previousClassId && previousClassId !== nextClassId);
+}
+
+export function filterTeacherAiToolsKnowledgePoints(
+  knowledgePoints: KnowledgePoint[],
+  klass: ClassItem | undefined
+) {
+  if (!klass) {
+    return [];
+  }
+  return knowledgePoints.filter(
+    (item) => item.subject === klass.subject && item.grade === klass.grade
+  );
+}
+
+export function pruneTeacherAiToolsKnowledgePointIds(
+  currentIds: string[],
+  availableIds: Set<string>
+) {
+  return currentIds.filter((id) => availableIds.has(id));
+}
+
+export function resetTeacherAiToolsPaperFormScope(
+  form: PaperFormState,
+  nextClassId = ""
+) {
+  return {
+    ...form,
+    classId: nextClassId,
+    knowledgePointIds: []
+  };
+}
+
+export function resetTeacherAiToolsOutlineFormScope(
+  form: OutlineFormState,
+  nextClassId = ""
+) {
+  return {
+    ...form,
+    classId: nextClassId,
+    knowledgePointIds: []
+  };
+}
+
+export function resetTeacherAiToolsWrongFormScope(
+  form: WrongReviewFormState,
+  nextClassId = ""
+) {
+  return {
+    ...form,
+    classId: nextClassId
+  };
+}
+
+type TeacherAiToolsDerivedStateInput = {
+  classes: ClassItem[];
+  knowledgePoints: KnowledgePoint[];
+  paperForm: PaperFormState;
+  outlineForm: OutlineFormState;
+  checkForm: QuestionCheckFormState;
+};
+
+export function getTeacherAiToolsDerivedState({
+  classes,
+  knowledgePoints,
+  paperForm,
+  outlineForm,
+  checkForm
+}: TeacherAiToolsDerivedStateInput) {
+  const paperClass = classes.find((item) => item.id === paperForm.classId);
+  const outlineClass = classes.find((item) => item.id === outlineForm.classId);
+  const paperPoints = filterTeacherAiToolsKnowledgePoints(knowledgePoints, paperClass);
+  const outlinePoints = filterTeacherAiToolsKnowledgePoints(knowledgePoints, outlineClass);
+  const paperPointIdSet = new Set(paperPoints.map((kp) => kp.id));
+  const outlinePointIdSet = new Set(outlinePoints.map((kp) => kp.id));
+  const checkPreviewOptions = buildTeacherAiToolsCheckPreviewOptions(checkForm.options);
+
+  return {
+    paperPoints,
+    outlinePoints,
+    paperPointIdSet,
+    outlinePointIdSet,
+    checkPreviewOptions,
+    hasCheckPreview: hasTeacherAiToolsCheckPreview(checkForm, checkPreviewOptions)
+  };
+}
+
+export function buildTeacherAiToolsCheckPreviewOptions(options: string[]) {
+  return options.map((item) => item.trim()).filter(Boolean);
+}
+
+export function hasTeacherAiToolsCheckPreview(
+  checkForm: QuestionCheckFormState,
+  checkPreviewOptions: string[]
+) {
+  return Boolean(
+    checkForm.stem.trim() ||
+      checkPreviewOptions.length ||
+      checkForm.answer.trim() ||
+      checkForm.explanation.trim()
+  );
+}
+
+export function applyTeacherPaperQuickFix(form: PaperFormState, action: PaperQuickFixAction) {
+  const nextForm: PaperFormState = { ...form };
+  let hint = "";
+
+  if (action === "clear_filters") {
+    nextForm.knowledgePointIds = [];
+    nextForm.difficulty = "all";
+    nextForm.questionType = "all";
+    hint = "已清空知识点/难度/题型筛选，正在重试。";
+  } else if (action === "switch_ai") {
+    nextForm.mode = "ai";
+    hint = "已切换为 AI 补题模式，正在重试。";
+  } else if (action === "reduce_count") {
+    if (nextForm.questionCount <= 0) {
+      nextForm.questionCount = Math.max(6, Math.floor(nextForm.durationMinutes / 3));
+    } else {
+      nextForm.questionCount = Math.max(5, nextForm.questionCount - 3);
+    }
+    hint = `已降低题量到 ${nextForm.questionCount} 题，正在重试。`;
+  } else if (action === "allow_isolated") {
+    nextForm.includeIsolated = true;
+    hint = "已允许使用隔离池高风险题，正在重试（请人工复核）。";
+  }
+
+  return {
+    nextForm,
+    hint
+  };
+}
+
+export function buildTeacherReviewPackDispatchMessage(
+  summary: ReviewPackDispatchSummary | null | undefined,
+  mode: "single" | "batch" | "retry" = "single"
+) {
+  if (!summary || summary.created <= 0) {
+    return null;
+  }
+  if (mode === "retry") {
+    return `失败项重试完成：新增下发 ${summary.created}/${summary.requested} 条，自动放宽 ${summary.relaxedCount ?? 0} 条。`;
+  }
+
+  const prefix = mode === "batch" ? "已批量下发" : "已下发";
+  const quality = summary.qualityGovernance;
+  return `${prefix} ${summary.created}/${summary.requested} 条，通知学生 ${summary.studentsNotified} 人，家长 ${summary.parentsNotified} 人。${
+    quality && !quality.includeIsolated ? ` 已排除隔离池候选 ${quality.isolatedExcludedCount} 次。` : ""
+  }${(summary.relaxedCount ?? 0) > 0 ? ` 已自动放宽 ${summary.relaxedCount} 条。` : ""}`;
+}
+
+export function summarizeTeacherReviewPackFailedItems(failedItems: ReviewPackFailedItem[], prefix: string) {
+  if (!failedItems.length) {
+    return null;
+  }
+  const brief = failedItems
+    .slice(0, 3)
+    .map((item) => `${item?.title ?? "未命名复练"}：${item?.reason ?? prefix}`)
+    .join("；");
+  return `${prefix} ${failedItems.length} 条：${brief}`;
 }
 
 export function isMissingTeacherAiToolsClassError(error: unknown) {

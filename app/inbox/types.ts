@@ -25,3 +25,14 @@ export type ThreadDetail = {
   participants: Array<{ id: string; name: string; role: string }>;
   messages: Array<{ id: string; senderId?: string; content: string; createdAt: string }>;
 };
+
+export type InboxDerivedState = {
+  activeThread: ThreadSummary | null;
+  currentClass: ClassItem | null;
+  unreadCount: number;
+  filteredThreads: ThreadSummary[];
+  hasInboxData: boolean;
+  requestedThreadMatched: boolean;
+};
+
+export type InboxLoadStatus = "loaded" | "auth" | "error" | "stale" | "empty";

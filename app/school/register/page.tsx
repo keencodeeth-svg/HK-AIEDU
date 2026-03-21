@@ -1,55 +1,39 @@
 "use client";
 
-import { useState } from "react";
 import Card from "@/components/Card";
 import PasswordPolicyHint from "@/components/auth/PasswordPolicyHint";
+import { useManagedRedirectRegisterForm } from "@/components/auth/useManagedRedirectRegisterForm";
 import { resolveRegisterFormError } from "@/lib/auth-form-errors";
-import { requestJson } from "@/lib/client-request";
 
 export default function SchoolRegisterPage() {
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
-  const [password, setPassword] = useState("");
-  const [schoolName, setSchoolName] = useState("");
-  const [schoolCode, setSchoolCode] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  async function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      const normalizedEmail = email.trim();
-      const normalizedName = name.trim();
-      await requestJson("/api/auth/school-register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: normalizedEmail,
-          name: normalizedName,
-          password,
-          schoolName: schoolName.trim() || undefined,
-          schoolCode: schoolCode.trim() || undefined,
-          inviteCode: inviteCode.trim() || undefined
-        })
-      });
-      window.location.assign("/school");
-    } catch (err) {
-      setError(
-        resolveRegisterFormError(err, {
-          fallback: "注册失败",
-          emailExistsMessage: "该学校管理员邮箱已注册，可直接登录。",
-          invalidInviteMessage: "邀请码无效，或当前不允许学校管理员自助注册。",
-          invalidSchoolCodeMessage: "学校编码无效；若要新建学校，请同时填写学校名称。",
-          schoolRequiredMessage: "请填写学校名称，或输入一个有效的学校编码。"
-        })
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
+  const registerForm = useManagedRedirectRegisterForm({
+    initialValues: {
+      email: "",
+      name: "",
+      password: "",
+      schoolName: "",
+      schoolCode: "",
+      inviteCode: ""
+    },
+    endpoint: "/api/auth/school-register",
+    redirectTo: "/school",
+    buildPayload: (values) => ({
+      email: values.email.trim(),
+      name: values.name.trim(),
+      password: values.password,
+      schoolName: values.schoolName.trim() || undefined,
+      schoolCode: values.schoolCode.trim() || undefined,
+      inviteCode: values.inviteCode.trim() || undefined
+    }),
+    resolveError: (error) =>
+      resolveRegisterFormError(error, {
+        fallback: "注册失败",
+        emailExistsMessage: "该学校管理员邮箱已注册，可直接登录。",
+        invalidInviteMessage: "邀请码无效，或当前不允许学校管理员自助注册。",
+        invalidSchoolCodeMessage: "学校编码无效；若要新建学校，请同时填写学校名称。",
+        schoolRequiredMessage: "请填写学校名称，或输入一个有效的学校编码。"
+      })
+  });
 
   return (
     <div className="grid auth-page" style={{ gap: 18 }}>
@@ -61,13 +45,13 @@ export default function SchoolRegisterPage() {
         <span className="chip">学校端</span>
       </div>
       <Card title="学校管理员注册" tag="组织">
-        <form onSubmit={handleSubmit} className="auth-form">
+        <form onSubmit={registerForm.handleSubmit} className="auth-form">
           <label className="form-field">
             <div className="section-title">姓名</div>
             <input
               className="form-control"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
+              value={registerForm.values.name}
+              onChange={(event) => registerForm.setValue("name", event.target.value)}
               placeholder="学校管理员"
             />
           </label>
@@ -75,8 +59,8 @@ export default function SchoolRegisterPage() {
             <div className="section-title">邮箱</div>
             <input
               className="form-control"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              value={registerForm.values.email}
+              onChange={(event) => registerForm.setValue("email", event.target.value)}
               placeholder="school-admin@demo.com"
             />
           </label>
@@ -85,8 +69,8 @@ export default function SchoolRegisterPage() {
             <input
               className="form-control"
               type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              value={registerForm.values.password}
+              onChange={(event) => registerForm.setValue("password", event.target.value)}
               placeholder="默认建议至少 8 位，含大小写和数字"
             />
             <PasswordPolicyHint />
@@ -95,8 +79,8 @@ export default function SchoolRegisterPage() {
             <div className="section-title">学校编码（可选）</div>
             <input
               className="form-control"
-              value={schoolCode}
-              onChange={(event) => setSchoolCode(event.target.value)}
+              value={registerForm.values.schoolCode}
+              onChange={(event) => registerForm.setValue("schoolCode", event.target.value)}
               placeholder="例如 HKHS01，已存在学校可直接绑定"
             />
           </label>
@@ -104,8 +88,8 @@ export default function SchoolRegisterPage() {
             <div className="section-title">学校名称（可选）</div>
             <input
               className="form-control"
-              value={schoolName}
-              onChange={(event) => setSchoolName(event.target.value)}
+              value={registerForm.values.schoolName}
+              onChange={(event) => registerForm.setValue("schoolName", event.target.value)}
               placeholder="如果学校编码不存在，可填写名称自动创建"
             />
           </label>
@@ -113,14 +97,14 @@ export default function SchoolRegisterPage() {
             <div className="section-title">邀请码</div>
             <input
               className="form-control"
-              value={inviteCode}
-              onChange={(event) => setInviteCode(event.target.value)}
+              value={registerForm.values.inviteCode}
+              onChange={(event) => registerForm.setValue("inviteCode", event.target.value)}
               placeholder="如已配置 SCHOOL_ADMIN_INVITE_CODE(S)，请填写"
             />
           </label>
-          {error ? <div className="status-note error">{error}</div> : null}
-          <button className="button primary" type="submit" disabled={loading}>
-            {loading ? "提交中..." : "注册并登录"}
+          {registerForm.error ? <div className="status-note error">{registerForm.error}</div> : null}
+          <button className="button primary" type="submit" disabled={registerForm.loading}>
+            {registerForm.loading ? "提交中..." : "注册并登录"}
           </button>
         </form>
         <div className="auth-footnote">

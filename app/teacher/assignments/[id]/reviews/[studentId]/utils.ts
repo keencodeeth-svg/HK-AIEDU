@@ -1,6 +1,8 @@
 import type {
+  TeacherAssignmentReviewData,
   TeacherAssignmentReviewItem,
   TeacherAssignmentReviewItemState,
+  TeacherAssignmentReviewQuestion,
   TeacherAssignmentReviewRubric,
   TeacherAssignmentReviewRubricState,
   TeacherAssignmentRubric
@@ -45,6 +47,50 @@ export function buildReviewRubricState(
   });
 
   return nextState;
+}
+
+export function getTeacherAssignmentReviewDerivedState(data: TeacherAssignmentReviewData | null) {
+  const wrongQuestions = (data?.questions ?? []).filter((item) => !item.correct);
+  const canAiReview =
+    (data?.uploads?.length ?? 0) > 0 || Boolean(data?.submission?.submissionText?.trim());
+  const isEssay = data?.assignment?.submissionType === "essay";
+  const isUpload = data?.assignment?.submissionType === "upload";
+
+  return {
+    wrongQuestions,
+    canAiReview,
+    isEssay,
+    isUpload,
+    isQuiz: !isEssay && !isUpload
+  };
+}
+
+export function buildTeacherAssignmentReviewSubmitPayload({
+  data,
+  overallComment,
+  wrongQuestions,
+  itemState,
+  rubricState
+}: {
+  data: TeacherAssignmentReviewData;
+  overallComment: string;
+  wrongQuestions: TeacherAssignmentReviewQuestion[];
+  itemState: TeacherAssignmentReviewItemState;
+  rubricState: TeacherAssignmentReviewRubricState;
+}) {
+  return {
+    overallComment,
+    items: wrongQuestions.map((question) => ({
+      questionId: question.id,
+      wrongTag: itemState[question.id]?.wrongTag || "",
+      comment: itemState[question.id]?.comment || ""
+    })),
+    rubrics: data.rubrics.map((rubric) => ({
+      rubricId: rubric.id,
+      score: rubricState[rubric.id]?.score ?? 0,
+      comment: rubricState[rubric.id]?.comment ?? ""
+    }))
+  };
 }
 
 export function getTeacherAssignmentReviewRequestMessage(error: unknown, fallback: string) {

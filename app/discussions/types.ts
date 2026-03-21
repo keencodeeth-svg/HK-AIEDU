@@ -54,3 +54,15 @@ export type DiscussionStageCopy = {
   title: string;
   description: string;
 };
+
+export type DiscussionsDerivedState = {
+  teacherMode: boolean;
+  currentClass: ClassItem | null;
+  pinnedTopicCount: number;
+  filteredTopics: Topic[];
+  hasTopicFilters: boolean;
+  stageCopy: DiscussionStageCopy;
+  hasDiscussionData: boolean;
+};
+
+export type DiscussionLoadStatus = "loaded" | "auth" | "error" | "stale" | "empty";

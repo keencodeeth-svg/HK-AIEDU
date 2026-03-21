@@ -39,3 +39,5 @@ export type AuthMeResponse = {
     role?: AppUserRole;
   } | null;
 };
+
+export type AnnouncementLoadStatus = "loaded" | "auth" | "error" | "stale";

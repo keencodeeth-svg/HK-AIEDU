@@ -31,12 +31,16 @@ export const studentProfileTextareaStyle = {
   resize: "vertical" as const
 };
 
+export function createInitialStudentProfileForm(): StudentProfileFormState {
+  return {
+    ...INITIAL_FORM,
+    subjects: [...INITIAL_FORM.subjects]
+  };
+}
+
 export function buildProfileFormState(profile?: StudentProfilePayload | null): StudentProfileFormState {
   if (!profile) {
-    return {
-      ...INITIAL_FORM,
-      subjects: [...INITIAL_FORM.subjects]
-    };
+    return createInitialStudentProfileForm();
   }
 
   return {
@@ -101,6 +105,28 @@ export function mergeSavedProfileForm(
 
 export function sanitizeHeightInput(value: string) {
   return value.replace(/[^\d]/g, "");
+}
+
+export function toggleStudentProfileSubject(subjects: string[], subject: string) {
+  return subjects.includes(subject)
+    ? subjects.filter((item) => item !== subject)
+    : [...subjects, subject];
+}
+
+export function getStudentProfileSaveMessage(
+  observerCode: string,
+  observerLoadResult?: "ok" | "failed" | "auth"
+) {
+  if (observerCode) {
+    return "已保存，老师端学期排座配置与个性化推荐会同步使用这些信息。";
+  }
+  if (observerLoadResult === "ok") {
+    return "已保存，老师端学期排座配置与个性化推荐会同步使用这些信息。";
+  }
+  if (observerLoadResult === "failed") {
+    return "已保存，但家长绑定码同步失败，请稍后重试。";
+  }
+  return null;
 }
 
 export function getStudentProfileRequestMessage(error: unknown, fallback: string) {

@@ -29,6 +29,11 @@ export type StageTrailItem = {
   isolatedExcludedCount: number;
 };
 
+export type ConfigNotice = {
+  title: string;
+  message: string;
+};
+
 export type PublishMode = "teacher_assigned" | "targeted";
 export type AntiCheatLevel = "off" | "basic";
 export type Difficulty = "easy" | "medium" | "hard";

@@ -84,3 +84,5 @@ export type RuleResponse = {
   classes?: ClassItem[];
   rules?: RuleItem[];
 };
+
+export type TeacherNotificationLoadStatus = "auth" | "error" | "loaded" | "stale";

@@ -145,3 +145,5 @@ export type AssignmentStageCopy = {
   title: string;
   description: string;
 };
+
+export type AssignmentRefreshStatus = "ok" | "failed" | "auth" | "missing" | "stale";
